@@ -1,0 +1,13 @@
+name: rapids-25.12
+channels:
+  - rapidsai
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - rapids=25.12
+  - cuda-version=12.9
+  - dask=2025.9.1
+  - distributed=2025.9.1
+  - numpy=2.2.6
+  - pip
