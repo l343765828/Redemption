@@ -1,0 +1,275 @@
+CREATE DEFINER=`ibs_calc_appl`@`%` PROCEDURE `CALC_PV`(IN IV_PERIOD_NUM INT,IN IV_CALC_MONTH TINYINT)
+BEGIN
+  -- 月业绩
+
+	/*--------------------------------------------定义变量--------------------------------------------*/
+	DECLARE VV_COUNT,-- 查询计数
+					VV_TOTAL,-- 循环累计值
+					VV_MAX_LAYER,-- 个人消费的用户在推荐网中层数最大（网体越往下越大）
+					VV_IS_ACTIVE-- 当月活跃业绩达标值
+	  INT;-- 类型
+	DECLARE VV_USER_ID,-- 用户编码
+	        VV_TIME_STR -- 当前时间的年月日时分秒数字
+    VARCHAR(32);-- 类型
+  DECLARE VV_PV_PCS,-- 个人消费
+					VV_ARRIVE_PV1-- 合格小组业绩阈值
+	  DECIMAL(16,2);-- 类型
+
+
+  /*--------------------------------------------初始化变量--------------------------------------------*/
+	-- 当月活跃业绩达标值
+	SELECT IFNULL(MIN(T.VALUE),0) INTO VV_IS_ACTIVE FROM AR_CONFIG T WHERE T.CONFIG_NAME = 'monthActivePV' AND T.TYPE = 'bonus';
+	-- 合格小组业绩阈值
+	SELECT IFNULL(MIN(T.VALUE),0) INTO VV_ARRIVE_PV1 FROM AR_CONFIG T WHERE T.CONFIG_NAME = 'qualifiedGroupPV' AND T.TYPE = 'bonus';
+
+
+  /*--------------------------------------------表说明--------------------------------------------*/
+	/*
+	  AR_CALC_PV_MID1：当月用户个人消费
+	  AR_CALC_PV_MID2：当月用户个人团队业绩来源
+	  AR_CALC_PV_MID3：当月用户个人团队业绩
+	  AR_CALC_PV_MID4：当月新增市场业绩来源
+		AR_CALC_PV_MID5：当月新增市场业绩
+		AR_CALC_PV_MID6：当月存货商业绩
+		AR_CALC_PV_MID7：当月存在个人消费业绩/个人团队业绩/市场业绩的用户/当月存货商业绩的用户
+		AR_CALC_PV_MID8：当月用户业绩明细
+	*/
+
+	/*--------------------------------------------计算月业绩--------------------------------------------*/
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'1',NOW());
+-- 	COMMIT;
+	/*当月用户个人消费*/-- explain index
+	INSERT INTO AR_CALC_PV_MID1-- 当月业绩单明细汇总
+	SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				 IV_CALC_MONTH AS CALC_MONTH,-- 月份
+	       T.USER_ID,-- 用户
+	       TRUNCATE(SUM(T.PV),2) AS PV_PCS,-- 个人消费
+	       TRUNCATE(IFNULL(SUM(CASE WHEN T.DEC_TYPE = 'ZC' THEN T.PV END),0),2) AS PV_PCS_ZC,-- 个人消费注册单
+	       TRUNCATE(IFNULL(SUM(CASE WHEN T.DEC_TYPE = 'FX' THEN T.PV END),0),2) AS PV_PCS_FX-- 个人消费复消单
+	  FROM AR_PERF_ORDER T
+	 -- WHERE T.PERIOD_NUM = IV_PERIOD_NUM
+	 GROUP BY T.USER_ID;
+  COMMIT;
+
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'2',NOW());
+-- 	COMMIT;
+	/*当月个人的团队业绩*/
+	-- 当月用户个人消费的用户数-1
+	SELECT COUNT(1) - 1 INTO VV_COUNT FROM AR_CALC_PV_MID1;
+	-- 当月个人团队业绩明细（推荐网）
+	WHILE VV_COUNT >= 0 DO
+	  -- 第VV_COUNT+1条数据中用户的业绩
+		SELECT T.USER_ID,
+					 T.PV_PCS
+		  INTO VV_USER_ID,
+			     VV_PV_PCS
+	    FROM AR_CALC_PV_MID1 T
+			LIMIT VV_COUNT,1;
+	  -- 第VV_COUNT+1条数据中用户的业绩向上贡献团队业绩
+		INSERT INTO AR_CALC_PV_MID2-- 当月用户个人团队业绩来源
+	  WITH RECURSIVE T_REC AS
+		(SELECT A.USER_ID,
+			      A.PARENT_UID
+		   FROM AR_USER_RELATION_NEW A
+		  WHERE A.USER_ID = VV_USER_ID
+		 UNION ALL
+		 SELECT A1.USER_ID,
+		        A1.PARENT_UID
+			 FROM AR_USER_RELATION_NEW A1
+		  INNER JOIN T_REC A2 ON A2.PARENT_UID = A1.USER_ID -- 从下向上递归
+	  )SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				    IV_CALC_MONTH AS CALC_MONTH,-- 月份
+						T.USER_ID,-- 用户
+					  VV_PV_PCS AS SOURCE_PV_PCS,-- 业绩
+					  VV_USER_ID AS SOURCE_USER_ID-- 业绩来源的用户
+	     FROM T_REC T;-- 安置人为0，当前用户已经是顶点了
+		COMMIT;
+		-- 循环计数减一
+	  SET VV_COUNT = VV_COUNT - 1;
+  END WHILE;
+	-- 当月用户个人团队业绩
+	INSERT INTO AR_CALC_PV_MID3
+	SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				 IV_CALC_MONTH AS CALC_MONTH,-- 月份
+				 T.USER_ID,
+				 SUM(T.SOURCE_PV_PCS) AS PV_PSS
+		FROM AR_CALC_PV_MID2 T
+	 GROUP BY T.USER_ID;
+	COMMIT;
+
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'3',NOW());
+-- 	COMMIT;
+	/*当月市场业绩*/
+	-- 查询共有多少人有个人消费
+	SELECT COUNT(1) - 1 INTO VV_COUNT FROM AR_CALC_PV_MID1;
+	-- 默认开始数据为第一个
+	-- 循环月业绩
+  WHILE VV_COUNT >= 0 DO
+	  -- 第VV_TOTAL+1条数据用户的业绩信息
+    SELECT T.USER_ID,T.PV_PCS INTO VV_USER_ID,VV_PV_PCS FROM AR_CALC_PV_MID1 T LIMIT VV_COUNT,1;
+    -- 将第VV_TOTAL+1条数据用户的业绩插入上级对应的市场
+		INSERT INTO AR_CALC_PV_MID4-- 当月新增市场业绩来源
+    WITH RECURSIVE T_REC AS
+		(SELECT A.USER_ID,
+			      A.PARENT_UID,
+			      A.RELATIVE_LOCATION
+		   FROM AR_USER_NETWORK_NEW A
+		  WHERE A.USER_ID = VV_USER_ID
+		  UNION ALL
+		 SELECT T1.USER_ID,
+		        T1.PARENT_UID,
+						T1.RELATIVE_LOCATION
+			 FROM AR_USER_NETWORK_NEW T1
+		  INNER JOIN T_REC T2 ON T2.PARENT_UID = T1.USER_ID -- 从下向上递归
+	  )SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				    IV_CALC_MONTH AS CALC_MONTH,-- 月份
+					  T.PARENT_UID AS USER_ID,-- 用户
+	          T.RELATIVE_LOCATION,-- 具体市场
+					  VV_PV_PCS AS SOURCE_PV_PCS,-- 市场业绩
+					  VV_USER_ID AS SOURCE_USER_ID-- 业绩来源的用户
+	     FROM T_REC T
+		  WHERE T.PARENT_UID <> '0';-- 推荐人为0，当前用户已经是顶点了
+		COMMIT;
+    SET VV_COUNT = VV_COUNT - 1;
+  END WHILE;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'4',NOW());
+-- 	COMMIT;
+	-- 当月新增市场业绩
+	INSERT INTO AR_CALC_PV_MID5-- 当月新增市场业绩
+	SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				 IV_CALC_MONTH AS CALC_MONTH,-- 月份
+				 T.USER_ID,
+	       IFNULL(SUM(CASE WHEN T.RELATIVE_LOCATION = 1 THEN T.SOURCE_PV_PCS END),0) AS PV_1L,-- 1市场当月新增业绩
+	       IFNULL(SUM(CASE WHEN T.RELATIVE_LOCATION = 2 THEN T.SOURCE_PV_PCS END),0) AS PV_2L -- 2市场当月新增业绩
+	  FROM AR_CALC_PV_MID4 T
+	 GROUP BY T.USER_ID;
+  COMMIT;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'5',NOW());
+-- 	COMMIT;
+	-- 当月存货商业绩
+	INSERT INTO AR_CALC_PV_MID6
+	SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				 IV_CALC_MONTH AS CALC_MONTH,-- 月份
+				 T.STOCKIST_ID AS USER_ID,
+	       SUM(T.PV) AS STOCKIST_PV
+	  FROM AR_PERF_ORDER_STOCKIST T
+	 WHERE IFNULL(T.STOCKIST_ID,'') <> ''
+	   -- AND T.PERIOD_NUM = IV_PERIOD_NUM
+	 GROUP BY T.STOCKIST_ID;
+	COMMIT;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'6',NOW());
+-- 	COMMIT;
+	-- 当月存在个人消费业绩/个人团队业绩/市场业绩的用户/当月存货商业绩的用户
+	INSERT INTO AR_CALC_PV_MID7-- 当月存在个人消费业绩或者市场业绩的用户
+	SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				 IV_CALC_MONTH AS CALC_MONTH,-- 月份
+				 T.USER_ID
+	  FROM AR_CALC_PV_MID1 T-- 当月会员自己的业绩
+  UNION
+	SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				 IV_CALC_MONTH AS CALC_MONTH,-- 月份
+				 T.USER_ID
+	  FROM AR_CALC_PV_MID3 T-- 当月会员自己的个人团队业绩
+  UNION
+	SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				 IV_CALC_MONTH AS CALC_MONTH,-- 月份
+				 T.USER_ID
+	  FROM AR_CALC_PV_MID5 T-- 当月会员的市场业绩
+  UNION
+	SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				 IV_CALC_MONTH AS CALC_MONTH,-- 月份
+				 T.USER_ID
+	  FROM AR_CALC_PV_MID6 T;-- 当月存货商业绩
+	COMMIT;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'7',NOW());
+-- 	COMMIT;
+	-- 当月用户业绩明细
+	INSERT INTO AR_CALC_PV_MID8-- 月业绩
+	SELECT T.PERIOD_NUM,-- 周期
+	       T.CALC_MONTH,-- 月份
+	       T.USER_ID,-- 用户
+				 IFNULL(T1.PV_PCS,0) AS PV_PCS,-- 个人消费
+				 IFNULL(T1.PV_PCS_ZC,0) AS PV_PCS_ZC,-- 个人消费注册单
+				 IFNULL(T1.PV_PCS_FX,0) AS PV_PCS_FX,-- 个人消费复消单
+				 IFNULL(T2.PV_PSS,0) AS PV_PSS,-- 个人消费复消单
+				 IFNULL(T3.PV_1L,0) AS PV_1L,-- 1市场新增业绩
+				 IFNULL(T3.PV_2L,0) AS PV_2L,-- 2市场新增业绩
+				 IFNULL(T5.SURPLUS_1L,0) AS PRE_SURPLUS_1L,-- 1市场上月剩余业绩
+				 IFNULL(T5.SURPLUS_2L,0) AS PRE_SURPLUS_2L,-- 2市场上月剩余业绩
+				 IFNULL(T3.PV_1L,0) + IFNULL(T5.SURPLUS_1L,0) TOTAL_1L,-- 1市场总业绩
+				 IFNULL(T3.PV_2L,0) + IFNULL(T5.SURPLUS_2L,0) TOTAL_2L,-- 2市场总业绩
+				 IFNULL(T4.STOCKIST_PV,0) AS STOCKIST_PV,-- 存货商业绩
+				 (CASE WHEN IFNULL(T1.PV_PCS,0) >= VV_IS_ACTIVE THEN 1 ELSE 0 END) IS_ACTIVE-- 当月是否活跃
+	  FROM AR_CALC_PV_MID7 T-- 当月存在个人消费业绩/个人团队业绩/市场业绩的用户/存货商业绩
+		LEFT JOIN AR_CALC_PV_MID1 T1 ON T1.USER_ID = T.USER_ID-- 当月会员自己的业绩
+		LEFT JOIN AR_CALC_PV_MID3 T2 ON T2.USER_ID = T.USER_ID-- 当月会员的个人团队业绩
+		LEFT JOIN AR_CALC_PV_MID5 T3 ON T3.USER_ID = T.USER_ID-- 当月会员的市场业绩
+		LEFT JOIN AR_CALC_PV_MID6 T4 ON T4.USER_ID = T.USER_ID-- 当月存货商业绩
+		LEFT JOIN AR_USER_PERF T5 ON T5.USER_ID = T.USER_ID;-- 全量用户截止上月的结余业绩
+	COMMIT;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'8',NOW());
+-- 	COMMIT;
+	-- 当前时间年月日时分秒
+	SET VV_TIME_STR = DATE_FORMAT(NOW(),'%Y%m%d%H%i%s');
+	/*记录月业绩*/
+	INSERT INTO AR_PERF_MONTH
+	(ID,
+	USER_ID,
+	PV_PCS,
+	PV_PCS_ZC,
+	PV_PCS_FX,
+	PV_PSS,
+	PV_1L,
+	PV_2L,
+	PRE_SURPLUS_1L,
+	PRE_SURPLUS_2L,
+	TOTAL_1L,
+	TOTAL_2L,
+	STOCKIST_PV,
+	IS_ACTIVE,
+	PERIOD_NUM,
+	CALC_MONTH,
+	CREATED_AT,
+	COUNTRY_ID)
+	SELECT CONCAT(VV_TIME_STR,LPAD(@ROWNUM:=@ROWNUM+1,8,'0')) AS ID,-- 年月日时分秒14+排序8
+	       T.USER_ID,
+				 T.PV_PCS,
+				 T.PV_PCS_ZC,
+				 T.PV_PCS_FX,
+				 T.PV_PSS,
+				 T.PV_1L,
+				 T.PV_2L,
+				 T.PRE_SURPLUS_1L,
+				 T.PRE_SURPLUS_2L,
+				 T.TOTAL_1L,
+				 T.TOTAL_2L,
+				 T.STOCKIST_PV,
+				 CASE WHEN T2.USER_ID IS NOT NULL THEN 1 ELSE T.IS_ACTIVE END AS IS_ACTIVE,
+				 IV_PERIOD_NUM AS PERIOD_NUM,
+				 IV_CALC_MONTH AS CALC_MONTH,
+				 UNIX_TIMESTAMP() AS CREATED_AT,
+				 IFNULL(T1.COUNTRY_ID,'-1') AS COUNTRY_ID
+	  FROM (SELECT @ROWNUM := 0 FROM DUAL) R,AR_CALC_PV_MID8 T
+		LEFT JOIN AR_USER T1 ON T1.ID = T.USER_ID
+		LEFT JOIN (SELECT USER_ID FROM AR_PERF_ACTIVE GROUP BY USER_ID) T2 ON T.USER_ID = T2.USER_ID;
+	COMMIT;
+
+	-- 修改结余表的活跃状态
+	UPDATE AR_USER_PERF T
+	 INNER JOIN AR_PERF_MONTH T1 ON T.USER_ID = T1.USER_ID
+	   SET T.IS_ACTIVE = T1.IS_ACTIVE;
+	COMMIT;
+	UPDATE AR_USER_PERF T
+	 INNER JOIN AR_PERF_ACTIVE T1 ON T.USER_ID = T1.USER_ID
+	   SET T.IS_ACTIVE = 1;
+	COMMIT;
+	/*--------------------------------------------结束--------------------------------------------*/
+END

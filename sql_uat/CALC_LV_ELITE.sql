@@ -1,0 +1,356 @@
+CREATE DEFINER=`ibs_calc_appl`@`%` PROCEDURE `CALC_LV_ELITE`(IN IV_PERIOD_NUM INT,IN IV_CALC_MONTH TINYINT)
+BEGIN
+  DECLARE VV_ARRIVE_PV1 INT DEFAULT(1000);-- 合格小组业绩阈值
+	DECLARE VV_ARRIVE_PV2 INT DEFAULT(2000);-- 合格小组业绩符合虚拟直属的阈值
+
+	DECLARE VV_COUNT,-- 查询计数
+					VV_TOTAL,-- 循环累计值
+					VV_TOP_DEEP,
+					VV_MAX_LAYER-- 个人消费的用户在推荐网中层数最大（网体越往下越大）
+	INT;-- 类型
+
+	DECLARE VV_TIME_STR -- 当前时间的年月日时分秒数字
+  VARCHAR(32);
+	/*--------------------------------------------表说明--------------------------------------------*/
+	/*
+	  AR_CALC_LV_ELITE_MID1：当月个人消费业绩及推荐网所在层数
+	  AR_CALC_LV_ELITE_MID2：从个人消费的用户在推荐网中层数最大层数开始往上的所有用户对应的小组业绩
+	  AR_CALC_LV_ELITE_MID3：重新计算紧缩后的推荐关系虚拟宽度/虚拟业绩
+	  AR_CALC_LV_ELITE_MID4：紧缩后的网体及业绩信息。去除重复根据用户取层数最上面的（即层数值小）
+		AR_CALC_LV_ELITE_MID5：重新计算紧缩后的层数
+		AR_CALC_LV_ELITE_MID6：记录小组业绩贡献情况
+		AR_CALC_LV_ELITE_MID7：小组业绩变动记录（不包含虚拟业绩贡献）
+	*/
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'1',NOW());
+-- 	COMMIT;
+	-- 当月个人消费业绩及推荐网所在层数
+	INSERT INTO AR_CALC_LV_ELITE_MID1-- 当月个人消费业绩及推荐网所在层数
+	SELECT T.PERIOD_NUM,-- 周期
+				 T.CALC_MONTH,-- 月份
+				 T.USER_ID,
+	       T.PV_PCS,
+				 T1.PARENT_UID,
+				 T1.TOP_DEEP
+	  FROM AR_PERF_MONTH T
+		LEFT JOIN AR_USER_RELATION_NEW T1 ON T1.USER_ID = T.USER_ID
+	 WHERE T.PERIOD_NUM = IV_PERIOD_NUM
+	   AND T.PV_PCS > 0;
+
+	-- 个人消费的用户在推荐网中层数最大（网体越往下越大）
+	SELECT IFNULL(MAX(T.TOP_DEEP),-1)
+	  INTO VV_MAX_LAYER
+	  FROM AR_CALC_LV_ELITE_MID1 T;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'2',NOW());
+-- 	COMMIT;
+	-- 将个人消费向上贡献
+	SET VV_TOTAL = VV_MAX_LAYER;
+	WHILE VV_TOTAL >= 0 DO
+	  INSERT INTO AR_CALC_LV_ELITE_MID2-- 从个人消费的用户在推荐网中层数最大层数开始往上的所有用户对应的小组业绩。
+	  SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				   IV_CALC_MONTH AS CALC_MONTH,-- 月份
+					 T.USER_ID,
+					 T.PARENT_UID,
+					 T.TOP_DEEP,
+					 IFNULL(T1.GPV,0)+IFNULL(T2.PV_PCS,0) AS GPV,-- 小组业绩
+					 (CASE WHEN IFNULL(T1.GPV,0)+IFNULL(T2.PV_PCS,0) >= VV_ARRIVE_PV1 THEN IFNULL(T1.GPV,0)+IFNULL(T2.PV_PCS,0) ELSE 0 END) AS GPV_REAL,-- 真实的小组业绩。如果没有合格，自身的小组业绩为0，并向上贡献
+					 IFNULL(T2.PV_PCS,0) AS PV_PCS,-- 个人业绩
+					 (CASE WHEN IFNULL(T1.GPV,0)+IFNULL(T2.PV_PCS,0) >= VV_ARRIVE_PV1 THEN 10 ELSE 0 END) AS ELITE_CALC_ID-- Elite级别
+		  FROM AR_USER_RELATION_NEW T
+			LEFT JOIN (SELECT PARENT_UID AS USER_ID,
+			                  SUM(GPV) AS GPV
+			             FROM AR_CALC_LV_ELITE_MID2
+									WHERE TOP_DEEP = VV_TOTAL + 1
+									  AND GPV > 0 -- 小组业绩
+										AND GPV_REAL = 0 -- 真实的小组业绩。如果没有合格，自身的小组业绩为0，并向上贡献
+									GROUP BY PARENT_UID) T1 ON T1.USER_ID = T.USER_ID-- 下一层向上贡献的小组业绩
+			LEFT JOIN AR_CALC_LV_ELITE_MID1 T2 ON T2.USER_ID = T.USER_ID-- 个人消费业绩
+		  LEFT JOIN (SELECT T.PARENT_UID AS USER_ID
+			             FROM AR_CALC_LV_ELITE_MID2 T
+									WHERE T.TOP_DEEP = VV_TOTAL + 1
+								  UNION
+								 SELECT T.USER_ID
+								   FROM AR_CALC_LV_ELITE_MID1 T
+									WHERE T.TOP_DEEP = VV_TOTAL) T3 ON T3.USER_ID = T.USER_ID-- 当前层需要记录的会员
+		 WHERE T.TOP_DEEP = VV_TOTAL
+		   AND T3.USER_ID IS NOT NULL;
+		COMMIT;
+	  SET VV_TOTAL = VV_TOTAL - 1;
+  END WHILE;
+
+
+	/*--------------------------------------------虚拟业绩，紧缩网体--------------------------------------------*/
+	-- 合格小组业绩的用户在推荐网中层数最大（网体越往下越大）
+	SELECT IFNULL(MAX(T.TOP_DEEP),-1)
+	  INTO VV_MAX_LAYER
+	  FROM AR_CALC_LV_ELITE_MID2 T
+	 WHERE T.ELITE_CALC_ID = 10;
+  --
+	SET VV_TOTAL = VV_MAX_LAYER;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'3',NOW());
+-- 	COMMIT;
+	-- 循环记录推荐关系对应的小组业绩/虚拟宽度/虚拟业绩
+	WHILE VV_TOTAL >= 0 DO
+	  -- 重新计算紧缩后的推荐关系虚拟宽度/虚拟业绩
+		INSERT INTO AR_CALC_LV_ELITE_MID3-- 重新计算紧缩后的推荐关系虚拟宽度/虚拟业绩
+		SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				   IV_CALC_MONTH AS CALC_MONTH,-- 月份
+					 T.USER_ID,
+					 T.PARENT_UID,
+					 T.TOP_DEEP,
+					 T.GPV_REAL AS GPV,
+					 CASE WHEN T.GPV_REAL >= VV_ARRIVE_PV2 THEN VV_ARRIVE_PV1-- 如果小组业绩达到2000，本人小组业绩为1000。
+					      -- WHEN
+								ELSE GPV_REAL END AS GPV_REAL,-- 实际小组业绩
+					 CASE WHEN T.GPV_REAL >= VV_ARRIVE_PV2 THEN T.GPV_REAL - VV_ARRIVE_PV1 ELSE 0 END AS GPV_UNREAL,-- 虚拟业绩
+					 (IFNULL(T1.SONS_NUM,0) + FLOOR(CASE WHEN T.GPV_REAL >= VV_ARRIVE_PV2 THEN T.GPV_REAL ELSE 0 END/VV_ARRIVE_PV1)) AS SONS_NUM-- 直属Elite个数
+		  FROM AR_CALC_LV_ELITE_MID2 T
+			LEFT JOIN (SELECT A1.PARENT_UID AS USER_ID,
+			                  COUNT(1) AS SONS_NUM
+									 FROM (SELECT USER_ID,
+			                          PARENT_UID
+			                     FROM AR_CALC_LV_ELITE_MID2
+								          WHERE TOP_DEEP = VV_TOTAL + 1
+									          AND ELITE_CALC_ID = 10
+								        UNION
+								        SELECT USER_ID,
+			                         PARENT_UID
+			                    FROM AR_CALC_LV_ELITE_MID3
+								         WHERE TOP_DEEP = VV_TOTAL + 1) A1
+									GROUP BY PARENT_UID) T1 ON T1.USER_ID = T.USER_ID
+		 WHERE T.TOP_DEEP = VV_TOTAL
+		   AND (T.GPV_REAL > 0 OR IFNULL(T1.SONS_NUM,0) >=2);
+	  COMMIT;
+		-- 由于本层用户无小组业绩，将VV_TOTAL + 1层中有小组业绩的下线紧缩到本层。
+		INSERT INTO AR_CALC_LV_ELITE_MID3-- 重新计算紧缩后的推荐关系虚拟宽度/虚拟业绩
+		SELECT IV_PERIOD_NUM AS PERIOD_NUM,-- 周期
+				   IV_CALC_MONTH AS CALC_MONTH,-- 月份
+					 T.USER_ID,
+					 T3.PARENT_UID AS PARENT_UID,
+					 VV_TOTAL AS TOP_DEEP,
+					 T.GPV,
+					 T.GPV_REAL,
+					 T.GPV_UNREAL,
+					 T.SONS_NUM
+		  FROM AR_CALC_LV_ELITE_MID3 T
+			LEFT JOIN (SELECT A1.PARENT_UID AS USER_ID
+			        FROM AR_CALC_LV_ELITE_MID3 A1
+						 WHERE A1.TOP_DEEP = VV_TOTAL + 1
+						 GROUP BY A1.PARENT_UID) T1 ON T1.USER_ID = T.PARENT_UID
+		  LEFT JOIN AR_CALC_LV_ELITE_MID3 T2 ON T2.USER_ID = T1.USER_ID AND (T2.GPV_REAL > 0 OR T2.SONS_NUM >= 2)
+			LEFT JOIN AR_USER_RELATION_NEW T3 ON T3.USER_ID = T.PARENT_UID
+		 WHERE T.TOP_DEEP = VV_TOTAL + 1
+		   AND T2.USER_ID IS NULL;
+	  COMMIT;
+		-- 循环
+	  SET VV_TOTAL = VV_TOTAL - 1;
+  END WHILE;
+
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'4',NOW());
+-- 	COMMIT;
+  -- 紧缩后的网体及业绩信息。去除重复根据用户取层数最上面的（即层数值小）
+	INSERT INTO AR_CALC_LV_ELITE_MID4-- 紧缩后的网体及业绩信息。去除重复根据用户取层数最上面的（即层数值小）
+	SELECT PERIOD_NUM,-- 周期
+				 CALC_MONTH,-- 月份
+				 USER_ID,
+				 PARENT_UID,
+				 -2 AS TOP_DEEP,
+				 GPV,
+				 GPV_REAL,
+				 GPV_UNREAL,
+				 SONS_NUM
+	  FROM (SELECT A.*,
+	               ROW_NUMBER() OVER(PARTITION BY USER_ID ORDER BY TOP_DEEP) RN
+	          FROM AR_CALC_LV_ELITE_MID3 A) T
+	 WHERE RN = 1;
+  COMMIT;
+
+	-- 重新计算紧缩后的层数
+-- 	INSERT INTO AR_CALC_LV_ELITE_MID5
+-- 	WITH RECURSIVE T_REC AS
+-- 	(SELECT A.USER_ID,
+-- 			    A.PARENT_UID,
+-- 			    -1 AS TOP_DEEP
+-- 		 FROM AR_CALC_BE_MOD_NET_MID1 A
+-- 	  WHERE A.USER_ID = '0'
+-- 		UNION ALL
+-- 	 SELECT A1.USER_ID,
+-- 		      A1.PARENT_UID,
+-- 					A2.TOP_DEEP + 1 AS TOP_DEEP -- 结点层级
+-- 		 FROM AR_CALC_BE_MOD_NET_MID1 A1
+-- 		INNER JOIN T_REC A2 ON  A2.USER_ID = A1.PARENT_UID -- 从上向下递归
+-- 	)SELECT T.PERIOD_NUM,-- 周期
+-- 				  T.CALC_MONTH,-- 月份
+-- 					T.USER_ID,
+-- 					T.PARENT_UID,
+-- 					T1.TOP_DEEP,
+-- 					T.GPV,
+-- 					T.GPV_REAL,
+-- 					T.GPV_UNREAL,
+-- 					T.SONS_NUM
+-- 		 FROM AR_CALC_LV_ELITE_MID4 T
+-- 		 LEFT JOIN T_REC T1 ON T1.USER_ID = T.USER_ID
+-- 		WHERE T.USER_ID <> '0';
+-- 	COMMIT;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'5',NOW());
+-- 	COMMIT;
+	INSERT INTO AR_CALC_LV_ELITE_MID5
+	SELECT T.PERIOD_NUM,-- 周期
+				 T.CALC_MONTH,-- 月份
+				 T.USER_ID,
+				 T.PARENT_UID,
+				 0 AS TOP_DEEP,
+				 T.GPV,
+				 T.GPV_REAL,
+				 T.GPV_UNREAL,
+				 T.SONS_NUM
+    FROM AR_CALC_LV_ELITE_MID4 T
+	 WHERE T.PARENT_UID = '0';
+	COMMIT;
+	SET VV_COUNT = 1;
+	SET VV_TOP_DEEP = 0;
+	WHILE VV_COUNT > 0 DO
+	  INSERT INTO AR_CALC_LV_ELITE_MID5
+    SELECT T.PERIOD_NUM,-- 周期
+				   T.CALC_MONTH,-- 月份
+					 T.USER_ID,
+					 T.PARENT_UID,
+					 VV_TOP_DEEP +1 AS TOP_DEEP,
+					 T.GPV,
+					 T.GPV_REAL,
+					 T.GPV_UNREAL,
+					 T.SONS_NUM
+		  FROM AR_CALC_LV_ELITE_MID4 T
+			INNER JOIN AR_CALC_LV_ELITE_MID5 T1 ON T1.USER_ID = T.PARENT_UID
+		 WHERE T1.TOP_DEEP = VV_TOP_DEEP;
+	  SELECT ROW_COUNT() INTO VV_COUNT FROM DUAL;
+		COMMIT;
+		SET VV_TOP_DEEP = VV_TOP_DEEP +1;
+  END WHILE;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'6',NOW());
+-- 	COMMIT;
+	-- 自己没有达标但直属存在2个达标及以上的最大层数。
+	SELECT IFNULL(MAX(TOP_DEEP),-1)
+		INTO VV_TOTAL
+	  FROM AR_CALC_LV_ELITE_MID5 T
+	 WHERE GPV_REAL = 0
+	   AND SONS_NUM >= 2;
+  COMMIT;
+	WHILE VV_TOTAL >= 0 DO
+	  -- 获取当前层数是否存在业绩向上贡献
+		SELECT COUNT(1)
+		  INTO VV_COUNT
+	    FROM AR_CALC_LV_ELITE_MID5 T
+	   WHERE GPV_REAL = 0
+	     AND SONS_NUM >= 2
+			 AND TOP_DEEP = VV_TOTAL;
+	  IF(VV_COUNT >= 0) THEN
+		  -- 直属最小业绩贡献。
+			INSERT INTO AR_CALC_LV_ELITE_MID6-- 记录小组业绩贡献情况
+			SELECT T.PERIOD_NUM,-- 周期
+				     T.CALC_MONTH,-- 月份
+				     T.USER_ID,
+			       T.SON_ID,
+						 T.GPV_REAL,
+						 T.TOP_DEEP
+				FROM (SELECT T1.PERIOD_NUM,
+				             T1.CALC_MONTH,
+										 T2.PARENT_UID AS USER_ID,
+			               T2.USER_ID AS SON_ID,
+						         (T2.GPV_REAL+IFNULL(T3.GPV_REAL,0)) AS GPV_REAL,
+						         T2.TOP_DEEP - 1 AS TOP_DEEP,
+						         ROW_NUMBER()OVER(PARTITION BY T2.PARENT_UID ORDER BY (T2.GPV_REAL+IFNULL(T3.GPV_REAL,0)) ASC,T2.USER_ID DESC) RN
+			          FROM AR_CALC_LV_ELITE_MID5 T1
+				        LEFT JOIN AR_CALC_LV_ELITE_MID5 T2 ON T2.PARENT_UID = T1.USER_ID AND T2.TOP_DEEP = VV_TOTAL + 1 AND T2.GPV_REAL >= 0
+								LEFT JOIN (SELECT A1.USER_ID,
+								                  IFNULL(SUM(A1.GPV_REAL),0) AS GPV_REAL
+								             FROM AR_CALC_LV_ELITE_MID7 A1
+														GROUP BY A1.USER_ID) T3 ON T3.USER_ID = T2.USER_ID
+			         WHERE T1.GPV_REAL = 0
+	               AND T1.SONS_NUM >= 2
+			           AND T1.TOP_DEEP = VV_TOTAL) T
+			 WHERE T.RN = 1;
+		  COMMIT;
+			-- 小组业绩变动记录（不包含虚拟业绩贡献）
+			INSERT INTO AR_CALC_LV_ELITE_MID7
+			SELECT T.PERIOD_NUM,-- 周期
+				     T.CALC_MONTH,-- 月份
+				     T.USER_ID,
+						 T.GPV_REAL
+			  FROM AR_CALC_LV_ELITE_MID6 T
+			 WHERE T.TOP_DEEP = VV_TOTAL
+			 UNION
+			SELECT T.PERIOD_NUM,-- 周期
+				     T.CALC_MONTH,-- 月份
+				     T.SON_ID AS USER_ID,
+						 -1 * T.GPV_REAL AS GPV_REAL
+			  FROM AR_CALC_LV_ELITE_MID6 T
+			 WHERE T.TOP_DEEP = VV_TOTAL;
+		  COMMIT;
+		END IF;
+	  SET VV_TOTAL =  VV_TOTAL -1 ;
+  END WHILE;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'7',NOW());
+-- 	COMMIT;
+	-- 记录虚拟业绩的贡献
+	INSERT INTO AR_CALC_LV_ELITE_MID6-- 记录小组业绩贡献情况
+	SELECT T.PERIOD_NUM,-- 周期
+				 T.CALC_MONTH,-- 月份
+				 T.USER_ID,
+				 NULL SON_ID,
+				 VV_ARRIVE_PV1 AS GPV_REAL,
+				 T.TOP_DEEP
+		FROM AR_CALC_LV_ELITE_MID5 T
+	 WHERE GPV_UNREAL > 0;
+  COMMIT;
+
+-- 	INSERT INTO AR_CALC_BE_LOG(CALC_ID,TEXT,CREATE_TIME) VALUES (0,'8',NOW());
+-- 	COMMIT;
+	-- 紧缩网络图
+	SET VV_TIME_STR = DATE_FORMAT(NOW(),'%Y%m%d%H%i%s');
+	INSERT INTO AR_CALC_LV_ELITE
+	SELECT CONCAT(VV_TIME_STR,LPAD(@ROWNUM:=@ROWNUM+1,8,'0')) AS ID,-- 年月日时分秒14+排序8
+	       T.PERIOD_NUM,-- 周期
+				 T.CALC_MONTH,-- 月份
+				 T.USER_ID,
+				 T.PARENT_UID,
+				 T.TOP_DEEP,
+				 T.GPV,
+				 CASE WHEN T1.GPV_REAL IS NOT NULL THEN T.GPV_REAL + T1.GPV_REAL ELSE T.GPV_REAL END AS GPV_REAL,
+				 T.GPV_UNREAL,
+				 T.SONS_NUM,
+				 CASE WHEN T.SONS_NUM > 2 THEN 30
+				      WHEN T.SONS_NUM = 0 THEN 10
+							ELSE 20 END LAST_ELITE_CALC_ID,
+				 T2.ID AS LAST_ELITE_LV-- Elite级别
+	  FROM (SELECT @ROWNUM := 0 FROM DUAL) R,AR_CALC_LV_ELITE_MID5 T
+		LEFT JOIN (SELECT A.USER_ID,
+		                  SUM(A.GPV_REAL) AS GPV_REAL
+								 FROM AR_CALC_LV_ELITE_MID7 A
+								GROUP BY A.USER_ID) T1 ON T.USER_ID = T1.USER_ID
+		LEFT JOIN AR_ELITE_LEVEL T2 ON T2.CALC_ID = (CASE WHEN T.SONS_NUM > 2 THEN 30
+				                                               WHEN T.SONS_NUM = 0 THEN 10
+							                                         ELSE 20 END);
+	COMMIT;
+	SET VV_TIME_STR = DATE_FORMAT(NOW(),'%Y%m%d%H%i%s');
+	INSERT INTO AR_CALC_LV_ELITE_REAL
+	SELECT CONCAT(VV_TIME_STR,LPAD(@ROWNUM:=@ROWNUM+1,8,'0')) AS ID,-- 年月日时分秒14+排序8
+	       T.PERIOD_NUM,
+				 T.CALC_MONTH,
+				 T.USER_ID,
+				 T.PARENT_UID,
+				 T.TOP_DEEP,
+				 T.GPV,
+				 T.GPV_REAL,
+				 T.PV_PCS,
+				 T.ELITE_CALC_ID
+    FROM (SELECT @ROWNUM := 0 FROM DUAL) R,AR_CALC_LV_ELITE_MID2 T
+   WHERE GPV_REAL > 0;
+  COMMIT;
+END
