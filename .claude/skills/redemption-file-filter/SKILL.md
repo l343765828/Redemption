@@ -1,14 +1,16 @@
 ---
 name: redemption-file-filter
 description: >-
-  Redemption 奖金结算项目的"文件跳过"规则：明确列出不用读取的过时备份 / 副本 / 旧版本文件。
-  每当你准备 Read / Glob / Grep / Explore，或以任何方式阅读、检索、分析 D:\Redemption 下的代码
-  （尤其是 sql_uat/、User/）时，先用本 skill 把这些文件排除掉——不用读进上下文，也不要当成事实来源。
+  Redemption 奖金结算项目的"文件跳过 + 业务查证"规则集：① 明确列出不用读取的过时备份 / 副本 /
+  旧版本 / 废弃文件；② `run_bfs` 不纳入默认阅读与评审；③ 不确定的业务口径先从有效 sql_uat/ 脚本查证。
+  每当你准备 Read / Glob / Grep / Explore、做代码审查 / 迁移检查，或需要确认某段奖金业务逻辑 /
+  计算口径 / 字段含义时，先用本 skill：把已排除文件挡在上下文外，并遵循"先 sql_uat 查证、
+  查不到就交业务方确认"的裁决顺序，分析 D:\Redemption 下的代码（尤其 sql_uat/、User/）时始终适用。
 ---
 
-# Redemption 代码库：不用读取的文件
+# Redemption 代码库：文件跳过与业务查证规则
 
-阅读、检索、分析 Redemption 项目代码时，以下文件是过时的备份 / 副本 / 旧版本，**不用读取，直接跳过**。
+阅读、检索、分析 Redemption 项目代码时，以下文件是过时的备份 / 副本 / 旧版本 / 废弃脚本，**不用读取，直接跳过**。
 
 ## 规则一：文件名含 `_bak` 或 `_final` 的，不用读取
 
@@ -20,6 +22,7 @@ description: >-
 - `sql_uat/CALC_BE_EAB_copy1.sql`
 - `sql_uat/CALC_BE_LB.sql`
 - `sql_uat/CALC_BE_REM_DATA_copy.sql`
+- `sql_uat/CALC_BE_SE.sql`
 - `sql_uat/CALC_BONUS_copy.sql`
 - `sql_uat/CALC_LV_HONOR_HIGH_copy.sql`
 - `sql_uat/CALC_LV_HONOR_HIGH_V1.sql`
@@ -35,7 +38,7 @@ description: >-
 遇到无法仅凭已确认规则判断的业务逻辑、计算口径、边界条件或字段含义时，按以下顺序处理：
 
 1. 先在 `sql_uat/` 中搜索和核对相关逻辑；搜索时仍须遵守规则一、规则二，不能把已排除的备份、
-   副本或旧版本 SQL 当作依据。
+   副本、旧版本或废弃 SQL 当作依据。
 2. 如果有效 SQL 中存在能够直接确认该业务规则的证据：
    - 给出确认后的结论；
    - 明确告诉用户依据来自哪个 `sql_uat/*.sql` 文件；
