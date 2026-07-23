@@ -1,0 +1,128 @@
+/*
+ Navicat Premium Dump SQL
+
+ Source Server         : unity奖金计算
+ Source Server Type    : MySQL
+ Source Server Version : 100624 (10.6.24-MariaDB-log)
+ Source Host           : playground-mariadb.ccm447jlfajk.ap-southeast-1.rds.amazonaws.com:3306
+ Source Schema         : ibs_calc_serve
+
+ Target Server Type    : MySQL
+ Target Server Version : 100624 (10.6.24-MariaDB-log)
+ File Encoding         : 65001
+
+ Date: 22/07/2026 09:50:43
+*/
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- ----------------------------
+-- Table structure for AR_CONFIG
+-- ----------------------------
+DROP TABLE IF EXISTS `AR_CONFIG`;
+CREATE TABLE `AR_CONFIG` (
+  `CONFIG_NAME` varchar(32) NOT NULL COMMENT '配置参数名',
+  `TITLE` varchar(48) NOT NULL COMMENT '标题',
+  `UNIT` varchar(32) DEFAULT NULL COMMENT '单位',
+  `INPUT_TYPE` int(11) NOT NULL DEFAULT 1 COMMENT '表单类型',
+  `OPTIONS` text DEFAULT NULL COMMENT '参数配置的选项',
+  `VALUE` text NOT NULL COMMENT '配置值',
+  `TYPE` varchar(32) NOT NULL COMMENT '类型',
+  `SORT` int(11) NOT NULL DEFAULT 1 COMMENT '排序',
+  `CREATED_AT` int(11) NOT NULL COMMENT '创建时间',
+  `UPDATED_AT` int(11) NOT NULL DEFAULT 0 COMMENT '更新时间',
+  UNIQUE KEY `CONFIG_NAME` (`CONFIG_NAME`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='系统配置表';
+
+-- ----------------------------
+-- Records of AR_CONFIG
+-- ----------------------------
+BEGIN;
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('Country1', 'leadership奖马来西亚区域国家配置', NULL, 1, NULL, '1', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('Country3', 'leadership奖马来西亚区域国家配置', NULL, 1, NULL, '1', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('Country4', 'leadership奖马来西亚区域国家配置', NULL, 1, NULL, '1', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('Country5', 'leadership奖台湾香港区域国家配置', NULL, 1, NULL, '5', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('Country6', 'leadership奖台湾香港区域国家配置', NULL, 1, NULL, '5', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('carRate1', '车奖本人的计算的比例', NULL, 1, NULL, '0.8571', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('carRate2', '车奖第一代计算的比例', NULL, 1, NULL, '0.7143', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('carRate3', '车奖第二代计算的比例', NULL, 1, NULL, '0.5714', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('carRate4', '车奖第三代计算的比例', NULL, 1, NULL, '0.4286', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('carRate5', '车奖第四代计算的比例', NULL, 1, NULL, '0.2857', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('carRate6', '车奖第五代计算的比例', NULL, 1, NULL, '0.1429', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('doubleQualifiedGroupPV\n', '2倍合格小组业绩阈值，产生虚拟宽度', NULL, 1, NULL, '2000', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('eabRate', 'EAB奖金比例', NULL, 1, NULL, '10', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('effectivePV', '续约业绩阈值', NULL, 1, NULL, '30', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('eliteRate', 'Elite奖的比例', NULL, 1, NULL, '15', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('globalPoolBonus70', '季度分红Crown计奖比例', NULL, 1, NULL, '1', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('globalPoolBonus80', '季度分红2 star Crown计奖比例', NULL, 1, NULL, '1', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('globalPoolBonus90', '季度分红3 star Crown计奖比例', NULL, 1, NULL, '1', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipLimit0', '领导奖会员第0个级别可以拿到什么级别奖衔的奖金', NULL, 1, NULL, '0', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipLimit10', '领导奖会员第1个级别可以拿到什么级别奖衔的奖金', NULL, 1, NULL, '0', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipLimit20', '领导奖会员第2个级别可以拿到什么级别奖衔的奖金', NULL, 1, NULL, '30', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipLimit30', '领导奖会员第3个级别可以拿到什么级别奖衔的奖金', NULL, 1, NULL, '60', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipLimit40', '领导奖会员第4个级别可以拿到什么级别奖衔的奖金', NULL, 1, NULL, '90', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipRate10', 'Leadership奖第1层奖金的比例', NULL, 1, NULL, '4.5', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipRate20', 'Leadership奖第2层奖金的比例', NULL, 1, NULL, '4.5', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipRate30', 'Leadership奖第3层奖金的比例', NULL, 1, NULL, '4.5', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipRate40', 'Leadership奖第4层奖金的比例', NULL, 1, NULL, '3.6', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipRate50', 'Leadership奖第5层奖金的比例', NULL, 1, NULL, '3.6', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipRate60', 'Leadership奖第6层奖金的比例', NULL, 1, NULL, '3.6', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipRate70', 'Leadership奖第7层奖金的比例', NULL, 1, NULL, '1.8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipRate80', 'Leadership奖第8层奖金的比例', NULL, 1, NULL, '1.8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('leadershipRate90', 'Leadership奖第9层奖金的比例', NULL, 1, NULL, '1.8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('monthActivePV', '每月活跃业绩阈值', NULL, 1, NULL, '30', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('proEliteRate', 'pro Elite奖金比例', NULL, 1, NULL, '15', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('qualifiedGroupPV\n\n', '合格小组业绩', NULL, 1, NULL, '1000', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('roomRate1', '房奖本人计算的比例', NULL, 1, NULL, '0.5714', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('roomRate2', '房奖第一代计算的比例', NULL, 1, NULL, '0.4762', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('roomRate3', '房奖第二代计算的比例', NULL, 1, NULL, '0.3810', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('roomRate4', '房奖第三代计算的比例', NULL, 1, NULL, '0.2857', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('roomRate5', '房奖第四代计算的比例', NULL, 1, NULL, '0.1905', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('roomRate6', '房奖第五代计算的比例', NULL, 1, NULL, '0.0952', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp1', 'Malaysia存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp10', 'United States of America存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp2', 'Thailand存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp233', 'United Arab Emirates存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp3', 'Brunei存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp4', 'Singapore存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp5', 'Taiwan存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp6', 'Hong Kong存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp7', 'Cambodia存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp8', 'Philippines存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateApp9', 'Indonesia存货商比例_App', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc1', 'Malaysia存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc10', 'United States of America存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc2', 'Thailand存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc233', 'United Arab Emirates存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc3', 'Brunei存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc4', 'Singapore存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc5', 'Taiwan存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc6', 'Hong Kong存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc7', 'Cambodia存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc8', 'Philippines存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateOtc9', 'Indonesia存货商比例_Otc', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity1', 'Malaysia存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity10', 'United States of America存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity2', 'Thailand存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity233', 'United Arab Emirates存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity3', 'Brunei存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity4', 'Singapore存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity5', 'Taiwan存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity6', 'Hong Kong存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity7', 'Cambodia存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity8', 'Philippines存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('stockistFeeRateUnity9', 'Indonesia存货商比例_Unity', NULL, 1, NULL, '8', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('superEliteRate', 'super Elite奖金比例', NULL, 1, NULL, '10', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('teamBisectRate', 'team奖金平分比例', NULL, 1, NULL, '24', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('teamTouchCapping10', 'Member级别第1个级别对碰封顶阈值', NULL, 1, NULL, '0', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('teamTouchCapping20', 'Member级别第2个级别对碰封顶阈值', NULL, 1, NULL, '0', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('teamTouchCapping30', 'Member级别第3个级别对碰封顶阈值', NULL, 1, NULL, '0', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('teamTouchCapping40', 'Member级别第4个级别对碰封顶阈值', NULL, 1, NULL, '0', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('teamTouchRate10', 'Member级别第1个级别对碰后业绩计算的比例', NULL, 1, NULL, '10', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('teamTouchRate20', 'Member级别第2个级别对碰后业绩计算的比例', NULL, 1, NULL, '15', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('teamTouchRate30', 'Member级别第3个级别对碰后业绩计算的比例', NULL, 1, NULL, '20', 'bonus', 1, 1663921117, 123);
+INSERT INTO `AR_CONFIG` (`CONFIG_NAME`, `TITLE`, `UNIT`, `INPUT_TYPE`, `OPTIONS`, `VALUE`, `TYPE`, `SORT`, `CREATED_AT`, `UPDATED_AT`) VALUES ('teamTouchRate40', 'Member级别第4个级别对碰后业绩计算的比例', NULL, 1, NULL, '20', 'bonus', 1, 1663921117, 123);
+COMMIT;
+
+SET FOREIGN_KEY_CHECKS = 1;

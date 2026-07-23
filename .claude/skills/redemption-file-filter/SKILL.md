@@ -16,6 +16,11 @@ description: >-
 
 只要文件名里带有 `_bak`、`_bakN`（如 `_bak2`、`_bak3`）或 `_final`，一律跳过。
 
+注意：`_final` 指文件名中的英文字面子串（如 `User/HonorLevelGPUService_final.py`、
+`User/HonorLevelHighGPUService_final.py`）。`Doc/` 下文件名含「_最终版」「_定稿」等中文字样的文件
+（如 `奖金制度与结算引擎需求_最终版_代码严格对齐 (1).md`、`PE奖金_需求与技术实现文档_定稿.md`）
+是有效需求文档，**不适用**本排除规则。
+
 ## 规则二：`sql_uat/` 下这几个脚本，不用读取
 
 - `sql_uat/CALC_BE_1.sql`
@@ -23,6 +28,7 @@ description: >-
 - `sql_uat/CALC_BE_LB.sql`
 - `sql_uat/CALC_BE_REM_DATA_copy.sql`
 - `sql_uat/CALC_BE_SE.sql`
+- `sql_uat/CALC_BE_SFB_1.sql`
 - `sql_uat/CALC_BONUS_copy.sql`
 - `sql_uat/CALC_LV_HONOR_HIGH_copy.sql`
 - `sql_uat/CALC_LV_HONOR_HIGH_V1.sql`

@@ -5,7 +5,7 @@ description: >-
   当你需要知道"某个 CALC_* 存储过程对应哪份需求文档""某个奖项（Elite / EAB / PE / SE / TB /
   Honor / Leadership 等）的规则文档在哪""哪些 SQL 还没写文档"，或在阅读、分析、对齐、补写
   Redemption 奖金 SQL 与文档时，先查本 skill 直接拿到映射，不必重新通读全部 SQL 和文档。
-  与 redemption-file-filter 配合使用（那 8 个副本/旧版/废弃脚本不纳入本对应关系）。
+  与 redemption-file-filter 配合使用（那 9 个副本/旧版/废弃脚本不纳入本对应关系）。
 ---
 
 # Redemption：`sql_uat/` 存储过程 ↔ `Doc/` 需求文档 对应速查
@@ -51,13 +51,15 @@ description: >-
 
 ## 四、不纳入对应关系的文件（副本 / 旧版 / 废弃，直接排除）
 
-以下 8 个由 `redemption-file-filter` 规则跳过，**不用考虑其对应文档**：
+以下 9 个由 `redemption-file-filter` 规则跳过，**不用考虑其对应文档**：
 
-`CALC_BE_1.sql`、`CALC_BE_EAB_copy1.sql`、`CALC_BE_LB.sql`、`CALC_BE_REM_DATA_copy.sql`、`CALC_BONUS_copy.sql`、`CALC_BE_SE.sql`、`CALC_LV_HONOR_HIGH_copy.sql`、`CALC_LV_HONOR_HIGH_V1.sql`
+`CALC_BE_1.sql`、`CALC_BE_EAB_copy1.sql`、`CALC_BE_LB.sql`、`CALC_BE_REM_DATA_copy.sql`、`CALC_BONUS_copy.sql`、`CALC_BE_SE.sql`、`CALC_BE_SFB_1.sql`、`CALC_LV_HONOR_HIGH_copy.sql`、`CALC_LV_HONOR_HIGH_V1.sql`
+
+> 其中 `CALC_BE_SFB_1.sql` 是 `CALC_BE_SFB.sql` 的旧版单费率实现：主编排 `CALC_BONUS.sql` 实际调用的是 `CALC_BE_SFB`，且全部有效 SQL 中无任何对 `CALC_BE_SFB_1` 的引用。
 
 ## 用法
 
 - 被问"这个存储过程/这个奖项的文档在哪"→ 查第一、二节。
 - 被问"哪些 SQL 还没文档 / 该补哪些"→ 查第三节。
-- 遇到第四节那 7 个文件 → 跳过，不读也不对应文档。
+- 遇到第四节那 9 个文件 → 跳过，不读也不对应文档。
 - 若映射与实际不符（例如新增/重命名了 SQL 或文档），以仓库现状为准并提示更新本表。
