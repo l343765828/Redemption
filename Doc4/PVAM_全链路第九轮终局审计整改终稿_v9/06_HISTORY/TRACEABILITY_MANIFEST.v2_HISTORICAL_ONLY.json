@@ -1,0 +1,1386 @@
+{
+  "schema_version": 3,
+  "manifest_id": "TRACEABILITY-PVAM-v3",
+  "baseline_commit": "2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb",
+  "document_set": {
+    "plan": "PLAN-PVAM-v1.15",
+    "report": "REPORT-PVAM-v1.5",
+    "modplan": "MODPLAN-PVAM_v1.2",
+    "workplan": "WORK-PLAN-PVAM_v1.3"
+  },
+  "status_domains": {
+    "document_status": "DRAFT",
+    "authorization_status": "PENDING_ORGANIZATIONAL_APPROVAL",
+    "implementation_status": "BLOCKED",
+    "validation_status": "PENDING_TEST_ENV",
+    "code_audit_conclusion": "REJECTED",
+    "gate_c": "OPEN"
+  },
+  "core_issues": [
+    "R-001",
+    "R-002",
+    "R-003",
+    "R-004",
+    "R-005",
+    "R-006",
+    "R-007",
+    "R-008",
+    "R-009",
+    "R-010",
+    "R-011",
+    "R-012",
+    "R-013"
+  ],
+  "subissues": {
+    "R-012": [
+      "R-012A",
+      "R-012B"
+    ]
+  },
+  "core_edges": [
+    {
+      "issue_id": "R-001",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-DATA-001",
+        "CHK-DATA-003",
+        "CHK-EVT-002"
+      ],
+      "decisions": [
+        "DEC-002",
+        "DEC-008",
+        "DEC-014"
+      ],
+      "task_id": "TASK-PVAM-01",
+      "work_id": "WORK-PVAM-01",
+      "rem_id": "REM-001",
+      "implementation_id": "W-001",
+      "verification_id": "V-001",
+      "steps": [
+        "STEP-PVAM-01-01",
+        "STEP-PVAM-01-02",
+        "STEP-PVAM-01-03",
+        "STEP-PVAM-01-04",
+        "STEP-PVAM-01-05"
+      ],
+      "local_tests": [
+        "TC-PVAM-01-01",
+        "TC-PVAM-01-02",
+        "TC-PVAM-01-03",
+        "TC-PVAM-01-04",
+        "TC-PVAM-01-05",
+        "TC-PVAM-01-06"
+      ],
+      "evidences": [
+        "EV-PVAM-01-01",
+        "EV-PVAM-01-02",
+        "EV-PVAM-01-03",
+        "EV-PVAM-01-04",
+        "EV-PVAM-01-05",
+        "EV-PVAM-01-06",
+        "EV-PVAM-01-07",
+        "EV-PVAM-01-08",
+        "EV-PVAM-01-09",
+        "EV-PVAM-01-10",
+        "EV-PVAM-01-P01",
+        "EV-PVAM-01-P02",
+        "EV-PVAM-01-P03",
+        "EV-PVAM-01-P04",
+        "EV-PVAM-01-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-002",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-ARCH-003"
+      ],
+      "decisions": [
+        "DEC-002",
+        "DEC-008",
+        "DEC-014"
+      ],
+      "task_id": "TASK-PVAM-01",
+      "work_id": "WORK-PVAM-01",
+      "rem_id": "REM-002",
+      "implementation_id": "W-002",
+      "verification_id": "V-002",
+      "steps": [
+        "STEP-PVAM-01-01",
+        "STEP-PVAM-01-02",
+        "STEP-PVAM-01-03",
+        "STEP-PVAM-01-04",
+        "STEP-PVAM-01-05"
+      ],
+      "local_tests": [
+        "TC-PVAM-01-01",
+        "TC-PVAM-01-02",
+        "TC-PVAM-01-03",
+        "TC-PVAM-01-04",
+        "TC-PVAM-01-05",
+        "TC-PVAM-01-06"
+      ],
+      "evidences": [
+        "EV-PVAM-01-01",
+        "EV-PVAM-01-02",
+        "EV-PVAM-01-03",
+        "EV-PVAM-01-04",
+        "EV-PVAM-01-05",
+        "EV-PVAM-01-06",
+        "EV-PVAM-01-07",
+        "EV-PVAM-01-08",
+        "EV-PVAM-01-09",
+        "EV-PVAM-01-10",
+        "EV-PVAM-01-P01",
+        "EV-PVAM-01-P02",
+        "EV-PVAM-01-P03",
+        "EV-PVAM-01-P04",
+        "EV-PVAM-01-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-003",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-DATA-001",
+        "CHK-DATA-002",
+        "CHK-ARCH-003",
+        "CHK-BIZ-011"
+      ],
+      "decisions": [
+        "DEC-002",
+        "DEC-005",
+        "DEC-006",
+        "DEC-007",
+        "DEC-010"
+      ],
+      "task_id": "TASK-PVAM-02",
+      "work_id": "WORK-PVAM-02",
+      "rem_id": "REM-003",
+      "implementation_id": "W-003",
+      "verification_id": "V-003",
+      "steps": [
+        "STEP-PVAM-02-01",
+        "STEP-PVAM-02-02",
+        "STEP-PVAM-02-03",
+        "STEP-PVAM-02-04",
+        "STEP-PVAM-02-05",
+        "STEP-PVAM-02-06",
+        "STEP-PVAM-02-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-02-01",
+        "TC-PVAM-02-02",
+        "TC-PVAM-02-03",
+        "TC-PVAM-02-04",
+        "TC-PVAM-02-05",
+        "TC-PVAM-02-06",
+        "TC-PVAM-02-07",
+        "TC-PVAM-02-08"
+      ],
+      "evidences": [
+        "EV-PVAM-02-01",
+        "EV-PVAM-02-02",
+        "EV-PVAM-02-03",
+        "EV-PVAM-02-04",
+        "EV-PVAM-02-05",
+        "EV-PVAM-02-06",
+        "EV-PVAM-02-07",
+        "EV-PVAM-02-08",
+        "EV-PVAM-02-09",
+        "EV-PVAM-02-10",
+        "EV-PVAM-02-11",
+        "EV-PVAM-02-12",
+        "EV-PVAM-02-P01",
+        "EV-PVAM-02-P02",
+        "EV-PVAM-02-P03",
+        "EV-PVAM-02-P04",
+        "EV-PVAM-02-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-004",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-DATA-004",
+        "CHK-BIZ-007",
+        "CHK-BIZ-008"
+      ],
+      "decisions": [
+        "DEC-001",
+        "DEC-002",
+        "DEC-003",
+        "DEC-009",
+        "DEC-014"
+      ],
+      "task_id": "TASK-PVAM-03",
+      "work_id": "WORK-PVAM-03",
+      "rem_id": "REM-004",
+      "implementation_id": "W-004",
+      "verification_id": "V-004",
+      "steps": [
+        "STEP-PVAM-03-01",
+        "STEP-PVAM-03-02",
+        "STEP-PVAM-03-03",
+        "STEP-PVAM-03-04",
+        "STEP-PVAM-03-05",
+        "STEP-PVAM-03-06"
+      ],
+      "local_tests": [
+        "TC-PVAM-03-01",
+        "TC-PVAM-03-02",
+        "TC-PVAM-03-03",
+        "TC-PVAM-03-04",
+        "TC-PVAM-03-05",
+        "TC-PVAM-03-06",
+        "TC-PVAM-03-07"
+      ],
+      "evidences": [
+        "EV-PVAM-03-01",
+        "EV-PVAM-03-02",
+        "EV-PVAM-03-03",
+        "EV-PVAM-03-04",
+        "EV-PVAM-03-05",
+        "EV-PVAM-03-06",
+        "EV-PVAM-03-07",
+        "EV-PVAM-03-08",
+        "EV-PVAM-03-09",
+        "EV-PVAM-03-10",
+        "EV-PVAM-03-P01",
+        "EV-PVAM-03-P02",
+        "EV-PVAM-03-P03",
+        "EV-PVAM-03-P04",
+        "EV-PVAM-03-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-005",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-DATA-006",
+        "CHK-BIZ-007"
+      ],
+      "decisions": [
+        "DEC-004",
+        "DEC-016",
+        "DEC-018"
+      ],
+      "task_id": "TASK-PVAM-04",
+      "work_id": "WORK-PVAM-04",
+      "rem_id": "REM-005",
+      "implementation_id": "W-005",
+      "verification_id": "V-005",
+      "steps": [
+        "STEP-PVAM-04-01",
+        "STEP-PVAM-04-02",
+        "STEP-PVAM-04-03",
+        "STEP-PVAM-04-04",
+        "STEP-PVAM-04-05"
+      ],
+      "local_tests": [
+        "TC-PVAM-04-01",
+        "TC-PVAM-04-02",
+        "TC-PVAM-04-03",
+        "TC-PVAM-04-04",
+        "TC-PVAM-04-05",
+        "TC-PVAM-04-06",
+        "TC-PVAM-04-07",
+        "TC-PVAM-04-08"
+      ],
+      "evidences": [
+        "EV-PVAM-04-01",
+        "EV-PVAM-04-02",
+        "EV-PVAM-04-03",
+        "EV-PVAM-04-04",
+        "EV-PVAM-04-05",
+        "EV-PVAM-04-06",
+        "EV-PVAM-04-07",
+        "EV-PVAM-04-08",
+        "EV-PVAM-04-09",
+        "EV-PVAM-04-10",
+        "EV-PVAM-04-11",
+        "EV-PVAM-04-P01",
+        "EV-PVAM-04-P02",
+        "EV-PVAM-04-P03",
+        "EV-PVAM-04-P04",
+        "EV-PVAM-04-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-006",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-DATA-006",
+        "CHK-BIZ-007",
+        "CHK-BIZ-008",
+        "CHK-BIZ-009",
+        "CHK-BIZ-011"
+      ],
+      "decisions": [
+        "DEC-004",
+        "DEC-016",
+        "DEC-018"
+      ],
+      "task_id": "TASK-PVAM-04",
+      "work_id": "WORK-PVAM-04",
+      "rem_id": "REM-006",
+      "implementation_id": "W-006",
+      "verification_id": "V-006",
+      "steps": [
+        "STEP-PVAM-04-01",
+        "STEP-PVAM-04-02",
+        "STEP-PVAM-04-03",
+        "STEP-PVAM-04-04",
+        "STEP-PVAM-04-05"
+      ],
+      "local_tests": [
+        "TC-PVAM-04-01",
+        "TC-PVAM-04-02",
+        "TC-PVAM-04-03",
+        "TC-PVAM-04-04",
+        "TC-PVAM-04-05",
+        "TC-PVAM-04-06",
+        "TC-PVAM-04-07",
+        "TC-PVAM-04-08"
+      ],
+      "evidences": [
+        "EV-PVAM-04-01",
+        "EV-PVAM-04-02",
+        "EV-PVAM-04-03",
+        "EV-PVAM-04-04",
+        "EV-PVAM-04-05",
+        "EV-PVAM-04-06",
+        "EV-PVAM-04-07",
+        "EV-PVAM-04-08",
+        "EV-PVAM-04-09",
+        "EV-PVAM-04-10",
+        "EV-PVAM-04-11",
+        "EV-PVAM-04-P01",
+        "EV-PVAM-04-P02",
+        "EV-PVAM-04-P03",
+        "EV-PVAM-04-P04",
+        "EV-PVAM-04-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-007",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-DATA-005"
+      ],
+      "decisions": [
+        "DEC-002",
+        "DEC-005",
+        "DEC-006",
+        "DEC-007",
+        "DEC-010"
+      ],
+      "task_id": "TASK-PVAM-02",
+      "work_id": "WORK-PVAM-02",
+      "rem_id": "REM-007",
+      "implementation_id": "W-007",
+      "verification_id": "V-007",
+      "steps": [
+        "STEP-PVAM-02-01",
+        "STEP-PVAM-02-02",
+        "STEP-PVAM-02-03",
+        "STEP-PVAM-02-04",
+        "STEP-PVAM-02-05",
+        "STEP-PVAM-02-06",
+        "STEP-PVAM-02-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-02-01",
+        "TC-PVAM-02-02",
+        "TC-PVAM-02-03",
+        "TC-PVAM-02-04",
+        "TC-PVAM-02-05",
+        "TC-PVAM-02-06",
+        "TC-PVAM-02-07",
+        "TC-PVAM-02-08"
+      ],
+      "evidences": [
+        "EV-PVAM-02-01",
+        "EV-PVAM-02-02",
+        "EV-PVAM-02-03",
+        "EV-PVAM-02-04",
+        "EV-PVAM-02-05",
+        "EV-PVAM-02-06",
+        "EV-PVAM-02-07",
+        "EV-PVAM-02-08",
+        "EV-PVAM-02-09",
+        "EV-PVAM-02-10",
+        "EV-PVAM-02-11",
+        "EV-PVAM-02-12",
+        "EV-PVAM-02-P01",
+        "EV-PVAM-02-P02",
+        "EV-PVAM-02-P03",
+        "EV-PVAM-02-P04",
+        "EV-PVAM-02-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-008",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-BIZ-006",
+        "CHK-EVT-005"
+      ],
+      "decisions": [
+        "DEC-007",
+        "DEC-008",
+        "DEC-011",
+        "DEC-017"
+      ],
+      "task_id": "TASK-PVAM-05",
+      "work_id": "WORK-PVAM-05",
+      "rem_id": "REM-008",
+      "implementation_id": "W-008",
+      "verification_id": "V-008",
+      "steps": [
+        "STEP-PVAM-05-01",
+        "STEP-PVAM-05-02",
+        "STEP-PVAM-05-03",
+        "STEP-PVAM-05-04",
+        "STEP-PVAM-05-05",
+        "STEP-PVAM-05-06"
+      ],
+      "local_tests": [
+        "TC-PVAM-05-01",
+        "TC-PVAM-05-02",
+        "TC-PVAM-05-03",
+        "TC-PVAM-05-04",
+        "TC-PVAM-05-05",
+        "TC-PVAM-05-06",
+        "TC-PVAM-05-07",
+        "TC-PVAM-05-08"
+      ],
+      "evidences": [
+        "EV-PVAM-05-01",
+        "EV-PVAM-05-02",
+        "EV-PVAM-05-03",
+        "EV-PVAM-05-04",
+        "EV-PVAM-05-05",
+        "EV-PVAM-05-06",
+        "EV-PVAM-05-07",
+        "EV-PVAM-05-08",
+        "EV-PVAM-05-09",
+        "EV-PVAM-05-10",
+        "EV-PVAM-05-11",
+        "EV-PVAM-05-P01",
+        "EV-PVAM-05-P02",
+        "EV-PVAM-05-P03",
+        "EV-PVAM-05-P04",
+        "EV-PVAM-05-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-009",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-BIZ-006",
+        "CHK-EVT-003",
+        "CHK-PUB-001"
+      ],
+      "decisions": [
+        "DEC-007",
+        "DEC-008",
+        "DEC-010",
+        "DEC-012"
+      ],
+      "task_id": "TASK-PVAM-06",
+      "work_id": "WORK-PVAM-06",
+      "rem_id": "REM-009",
+      "implementation_id": "W-009",
+      "verification_id": "V-009",
+      "steps": [
+        "STEP-PVAM-06-01",
+        "STEP-PVAM-06-02",
+        "STEP-PVAM-06-03",
+        "STEP-PVAM-06-04",
+        "STEP-PVAM-06-05",
+        "STEP-PVAM-06-06"
+      ],
+      "local_tests": [
+        "TC-PVAM-06-01",
+        "TC-PVAM-06-02",
+        "TC-PVAM-06-03",
+        "TC-PVAM-06-04",
+        "TC-PVAM-06-05",
+        "TC-PVAM-06-06",
+        "TC-PVAM-06-07",
+        "TC-PVAM-06-08",
+        "TC-PVAM-06-09"
+      ],
+      "evidences": [
+        "EV-PVAM-06-01",
+        "EV-PVAM-06-02",
+        "EV-PVAM-06-03",
+        "EV-PVAM-06-04",
+        "EV-PVAM-06-05",
+        "EV-PVAM-06-06",
+        "EV-PVAM-06-07",
+        "EV-PVAM-06-08",
+        "EV-PVAM-06-09",
+        "EV-PVAM-06-10",
+        "EV-PVAM-06-11",
+        "EV-PVAM-06-12",
+        "EV-PVAM-06-13",
+        "EV-PVAM-06-P01",
+        "EV-PVAM-06-P02",
+        "EV-PVAM-06-P03",
+        "EV-PVAM-06-P04",
+        "EV-PVAM-06-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-010",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-ARCH-002",
+        "CHK-EVT-003"
+      ],
+      "decisions": [
+        "DEC-007",
+        "DEC-008",
+        "DEC-010",
+        "DEC-012"
+      ],
+      "task_id": "TASK-PVAM-06",
+      "work_id": "WORK-PVAM-06",
+      "rem_id": "REM-010",
+      "implementation_id": "W-010",
+      "verification_id": "V-010",
+      "steps": [
+        "STEP-PVAM-06-01",
+        "STEP-PVAM-06-02",
+        "STEP-PVAM-06-03",
+        "STEP-PVAM-06-04",
+        "STEP-PVAM-06-05",
+        "STEP-PVAM-06-06"
+      ],
+      "local_tests": [
+        "TC-PVAM-06-01",
+        "TC-PVAM-06-02",
+        "TC-PVAM-06-03",
+        "TC-PVAM-06-04",
+        "TC-PVAM-06-05",
+        "TC-PVAM-06-06",
+        "TC-PVAM-06-07",
+        "TC-PVAM-06-08",
+        "TC-PVAM-06-09"
+      ],
+      "evidences": [
+        "EV-PVAM-06-01",
+        "EV-PVAM-06-02",
+        "EV-PVAM-06-03",
+        "EV-PVAM-06-04",
+        "EV-PVAM-06-05",
+        "EV-PVAM-06-06",
+        "EV-PVAM-06-07",
+        "EV-PVAM-06-08",
+        "EV-PVAM-06-09",
+        "EV-PVAM-06-10",
+        "EV-PVAM-06-11",
+        "EV-PVAM-06-12",
+        "EV-PVAM-06-13",
+        "EV-PVAM-06-P01",
+        "EV-PVAM-06-P02",
+        "EV-PVAM-06-P03",
+        "EV-PVAM-06-P04",
+        "EV-PVAM-06-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-011",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-BIZ-005",
+        "CHK-BIZ-006",
+        "CHK-PUB-001"
+      ],
+      "decisions": [
+        "DEC-007",
+        "DEC-008",
+        "DEC-011",
+        "DEC-017"
+      ],
+      "task_id": "TASK-PVAM-05",
+      "work_id": "WORK-PVAM-05",
+      "rem_id": "REM-011",
+      "implementation_id": "W-011",
+      "verification_id": "V-011",
+      "steps": [
+        "STEP-PVAM-05-01",
+        "STEP-PVAM-05-02",
+        "STEP-PVAM-05-03",
+        "STEP-PVAM-05-04",
+        "STEP-PVAM-05-05",
+        "STEP-PVAM-05-06"
+      ],
+      "local_tests": [
+        "TC-PVAM-05-01",
+        "TC-PVAM-05-02",
+        "TC-PVAM-05-03",
+        "TC-PVAM-05-04",
+        "TC-PVAM-05-05",
+        "TC-PVAM-05-06",
+        "TC-PVAM-05-07",
+        "TC-PVAM-05-08"
+      ],
+      "evidences": [
+        "EV-PVAM-05-01",
+        "EV-PVAM-05-02",
+        "EV-PVAM-05-03",
+        "EV-PVAM-05-04",
+        "EV-PVAM-05-05",
+        "EV-PVAM-05-06",
+        "EV-PVAM-05-07",
+        "EV-PVAM-05-08",
+        "EV-PVAM-05-09",
+        "EV-PVAM-05-10",
+        "EV-PVAM-05-11",
+        "EV-PVAM-05-P01",
+        "EV-PVAM-05-P02",
+        "EV-PVAM-05-P03",
+        "EV-PVAM-05-P04",
+        "EV-PVAM-05-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-012A",
+      "parent_issue_id": "R-012",
+      "issue_kind": "core_subissue",
+      "checks": [
+        "CHK-ARCH-002",
+        "CHK-EVT-006",
+        "CHK-EVT-007",
+        "CHK-TEST-001",
+        "CHK-TEST-003"
+      ],
+      "decisions": [
+        "DEC-010"
+      ],
+      "task_id": "TASK-PVAM-07A",
+      "work_id": "WORK-PVAM-07A",
+      "rem_id": "REM-012A",
+      "implementation_id": "W-012A",
+      "verification_id": "V-012A",
+      "steps": [
+        "STEP-PVAM-07A-01",
+        "STEP-PVAM-07A-02",
+        "STEP-PVAM-07A-03",
+        "STEP-PVAM-07A-04"
+      ],
+      "local_tests": [
+        "TC-PVAM-07A-01",
+        "TC-PVAM-07A-02",
+        "TC-PVAM-07A-03",
+        "TC-PVAM-07A-04",
+        "TC-PVAM-07A-05",
+        "TC-PVAM-07A-06",
+        "TC-PVAM-07A-07"
+      ],
+      "evidences": [
+        "EV-PVAM-07A-01",
+        "EV-PVAM-07A-02",
+        "EV-PVAM-07A-03",
+        "EV-PVAM-07A-04",
+        "EV-PVAM-07A-05",
+        "EV-PVAM-07A-06",
+        "EV-PVAM-07A-07",
+        "EV-PVAM-07A-08",
+        "EV-PVAM-07A-09",
+        "EV-PVAM-07A-P01",
+        "EV-PVAM-07A-P02",
+        "EV-PVAM-07A-P03",
+        "EV-PVAM-07A-P04"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-012B",
+      "parent_issue_id": "R-012",
+      "issue_kind": "core_subissue",
+      "checks": [
+        "CHK-ARCH-002",
+        "CHK-EVT-006",
+        "CHK-EVT-007",
+        "CHK-TEST-003"
+      ],
+      "decisions": [
+        "DEC-007",
+        "DEC-010"
+      ],
+      "task_id": "TASK-PVAM-07B",
+      "work_id": "WORK-PVAM-07B",
+      "rem_id": "REM-012B",
+      "implementation_id": "W-012B",
+      "verification_id": "V-012B",
+      "steps": [
+        "STEP-PVAM-07B-01",
+        "STEP-PVAM-07B-02",
+        "STEP-PVAM-07B-03",
+        "STEP-PVAM-07B-04",
+        "STEP-PVAM-07B-05",
+        "STEP-PVAM-07B-06"
+      ],
+      "local_tests": [
+        "TC-PVAM-07B-01",
+        "TC-PVAM-07B-02",
+        "TC-PVAM-07B-03",
+        "TC-PVAM-07B-04",
+        "TC-PVAM-07B-05",
+        "TC-PVAM-07B-06",
+        "TC-PVAM-07B-07",
+        "TC-PVAM-07B-08",
+        "TC-PVAM-07B-09"
+      ],
+      "evidences": [
+        "EV-PVAM-07B-01",
+        "EV-PVAM-07B-02",
+        "EV-PVAM-07B-03",
+        "EV-PVAM-07B-04",
+        "EV-PVAM-07B-05",
+        "EV-PVAM-07B-06",
+        "EV-PVAM-07B-07",
+        "EV-PVAM-07B-08",
+        "EV-PVAM-07B-09",
+        "EV-PVAM-07B-10",
+        "EV-PVAM-07B-P01",
+        "EV-PVAM-07B-P02",
+        "EV-PVAM-07B-P03",
+        "EV-PVAM-07B-P04",
+        "EV-PVAM-07B-P05"
+      ],
+      "status": "ACCEPTED"
+    },
+    {
+      "issue_id": "R-013",
+      "parent_issue_id": null,
+      "issue_kind": "core_issue",
+      "checks": [
+        "CHK-EVT-007"
+      ],
+      "decisions": [
+        "DEC-007",
+        "DEC-010"
+      ],
+      "task_id": "TASK-PVAM-07B",
+      "work_id": "WORK-PVAM-07B",
+      "rem_id": "REM-013",
+      "implementation_id": "W-013",
+      "verification_id": "V-013",
+      "steps": [
+        "STEP-PVAM-07B-01",
+        "STEP-PVAM-07B-02",
+        "STEP-PVAM-07B-03",
+        "STEP-PVAM-07B-04",
+        "STEP-PVAM-07B-05",
+        "STEP-PVAM-07B-06"
+      ],
+      "local_tests": [
+        "TC-PVAM-07B-01",
+        "TC-PVAM-07B-02",
+        "TC-PVAM-07B-03",
+        "TC-PVAM-07B-04",
+        "TC-PVAM-07B-05",
+        "TC-PVAM-07B-06",
+        "TC-PVAM-07B-07",
+        "TC-PVAM-07B-08",
+        "TC-PVAM-07B-09"
+      ],
+      "evidences": [
+        "EV-PVAM-07B-01",
+        "EV-PVAM-07B-02",
+        "EV-PVAM-07B-03",
+        "EV-PVAM-07B-04",
+        "EV-PVAM-07B-05",
+        "EV-PVAM-07B-06",
+        "EV-PVAM-07B-07",
+        "EV-PVAM-07B-08",
+        "EV-PVAM-07B-09",
+        "EV-PVAM-07B-10",
+        "EV-PVAM-07B-P01",
+        "EV-PVAM-07B-P02",
+        "EV-PVAM-07B-P03",
+        "EV-PVAM-07B-P04",
+        "EV-PVAM-07B-P05"
+      ],
+      "status": "ACCEPTED"
+    }
+  ],
+  "non_core_items": [
+    "RISK-001",
+    "RISK-002",
+    "UV-001",
+    "UV-002",
+    "UV-003",
+    "UV-004",
+    "UV-005",
+    "OPT-001",
+    "OPT-002",
+    "GAP-DEC004-2B",
+    "FIX-001"
+  ],
+  "non_core_edges": [
+    {
+      "item_id": "RISK-001",
+      "domain": "RISK",
+      "status": "UAT_VERIFY",
+      "checks": [
+        "CHK-BIZ-002"
+      ],
+      "decisions": [
+        "DEC-012"
+      ],
+      "task_id": "TASK-PVAM-08",
+      "work_id": "WORK-PVAM-08",
+      "steps": [
+        "STEP-PVAM-08-05",
+        "STEP-PVAM-08-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-08-05",
+        "TC-PVAM-08-08"
+      ],
+      "evidences": [
+        "EV-PVAM-08-05",
+        "EV-PVAM-08-P03"
+      ]
+    },
+    {
+      "item_id": "RISK-002",
+      "domain": "RISK",
+      "status": "UAT_VERIFY",
+      "checks": [
+        "CHK-TEST-004"
+      ],
+      "decisions": [
+        "DEC-013"
+      ],
+      "task_id": "TASK-PVAM-08",
+      "work_id": "WORK-PVAM-08",
+      "steps": [
+        "STEP-PVAM-08-03",
+        "STEP-PVAM-08-06",
+        "STEP-PVAM-08-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-08-03",
+        "TC-PVAM-08-06"
+      ],
+      "evidences": [
+        "EV-PVAM-08-06"
+      ]
+    },
+    {
+      "item_id": "UV-001",
+      "domain": "UV",
+      "status": "UAT_VERIFY",
+      "checks": [
+        "CHK-ARCH-001",
+        "CHK-DATA-007",
+        "CHK-BIZ-002",
+        "CHK-PUB-001",
+        "CHK-TEST-002",
+        "CHK-TEST-003"
+      ],
+      "decisions": [
+        "DEC-009",
+        "DEC-013"
+      ],
+      "task_id": "TASK-PVAM-08",
+      "work_id": "WORK-PVAM-08",
+      "steps": [
+        "STEP-PVAM-08-02",
+        "STEP-PVAM-08-03",
+        "STEP-PVAM-08-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-08-02",
+        "TC-PVAM-08-03",
+        "TC-PVAM-08-07"
+      ],
+      "evidences": [
+        "EV-PVAM-08-01",
+        "EV-PVAM-08-02",
+        "EV-PVAM-08-07",
+        "EV-PVAM-08-P02"
+      ]
+    },
+    {
+      "item_id": "UV-002",
+      "domain": "UV",
+      "status": "UAT_VERIFY",
+      "checks": [
+        "CHK-DATA-007",
+        "CHK-BIZ-009",
+        "CHK-PUB-001"
+      ],
+      "decisions": [
+        "DEC-009",
+        "DEC-013"
+      ],
+      "task_id": "TASK-PVAM-08",
+      "work_id": "WORK-PVAM-08",
+      "steps": [
+        "STEP-PVAM-08-02",
+        "STEP-PVAM-08-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-08-02"
+      ],
+      "evidences": [
+        "EV-PVAM-08-03",
+        "EV-PVAM-08-04"
+      ]
+    },
+    {
+      "item_id": "UV-003",
+      "domain": "UV",
+      "status": "UAT_VERIFY",
+      "checks": [
+        "CHK-TEST-002"
+      ],
+      "decisions": [
+        "DEC-013"
+      ],
+      "task_id": "TASK-PVAM-08",
+      "work_id": "WORK-PVAM-08",
+      "steps": [
+        "STEP-PVAM-08-04",
+        "STEP-PVAM-08-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-08-04",
+        "TC-PVAM-08-09"
+      ],
+      "evidences": [
+        "EV-PVAM-08-09",
+        "EV-PVAM-08-P03"
+      ]
+    },
+    {
+      "item_id": "UV-004",
+      "domain": "UV",
+      "status": "UAT_VERIFY",
+      "checks": [
+        "CHK-EVT-003",
+        "CHK-EVT-004",
+        "CHK-EVT-005",
+        "CHK-EVT-006",
+        "CHK-EVT-007",
+        "CHK-TEST-003"
+      ],
+      "decisions": [
+        "DEC-010",
+        "DEC-013"
+      ],
+      "task_id": "TASK-PVAM-08",
+      "work_id": "WORK-PVAM-08",
+      "steps": [
+        "STEP-PVAM-08-03",
+        "STEP-PVAM-08-04",
+        "STEP-PVAM-08-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-08-07",
+        "TC-PVAM-08-08"
+      ],
+      "evidences": [
+        "EV-PVAM-08-10"
+      ]
+    },
+    {
+      "item_id": "UV-005",
+      "domain": "UV",
+      "status": "UAT_VERIFY",
+      "checks": [
+        "CHK-ARCH-001",
+        "CHK-PUB-002",
+        "CHK-TEST-001",
+        "CHK-TEST-004"
+      ],
+      "decisions": [
+        "DEC-012",
+        "DEC-013",
+        "DEC-017"
+      ],
+      "task_id": "TASK-PVAM-08",
+      "work_id": "WORK-PVAM-08",
+      "steps": [
+        "STEP-PVAM-08-01",
+        "STEP-PVAM-08-03",
+        "STEP-PVAM-08-05",
+        "STEP-PVAM-08-06",
+        "STEP-PVAM-08-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-08-01",
+        "TC-PVAM-08-05",
+        "TC-PVAM-08-06"
+      ],
+      "evidences": [
+        "EV-PVAM-08-08",
+        "EV-PVAM-08-12"
+      ]
+    },
+    {
+      "item_id": "OPT-001",
+      "domain": "OPT",
+      "status": "ACCEPTED",
+      "checks": [
+        "CHK-TEST-001",
+        "CHK-TEST-004"
+      ],
+      "decisions": [
+        "DEC-013"
+      ],
+      "task_id": "TASK-PVAM-08",
+      "work_id": "WORK-PVAM-08",
+      "steps": [
+        "STEP-PVAM-08-06",
+        "STEP-PVAM-08-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-08-06"
+      ],
+      "evidences": [
+        "EV-PVAM-08-13",
+        "EV-PVAM-08-P04"
+      ]
+    },
+    {
+      "item_id": "OPT-002",
+      "domain": "OPT",
+      "status": "ACCEPTED",
+      "checks": [
+        "CHK-TEST-004"
+      ],
+      "decisions": [
+        "DEC-009",
+        "DEC-013"
+      ],
+      "task_id": "TASK-PVAM-08",
+      "work_id": "WORK-PVAM-08",
+      "steps": [
+        "STEP-PVAM-08-01",
+        "STEP-PVAM-08-05",
+        "STEP-PVAM-08-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-08-01",
+        "TC-PVAM-08-05"
+      ],
+      "evidences": [
+        "EV-PVAM-08-11",
+        "EV-PVAM-08-P01",
+        "EV-PVAM-08-P05"
+      ]
+    },
+    {
+      "item_id": "GAP-DEC004-2B",
+      "domain": "GAP",
+      "status": "DEFERRED",
+      "checks": [
+        "CHK-DATA-006",
+        "CHK-BIZ-007",
+        "CHK-BIZ-008",
+        "CHK-BIZ-009",
+        "CHK-BIZ-011"
+      ],
+      "decisions": [
+        "DEC-004",
+        "DEC-018"
+      ],
+      "task_id": "TASK-PVAM-08",
+      "work_id": "WORK-PVAM-08",
+      "steps": [
+        "STEP-PVAM-08-02",
+        "STEP-PVAM-08-07"
+      ],
+      "local_tests": [
+        "TC-PVAM-08-02",
+        "TC-PVAM-08-09"
+      ],
+      "evidences": [
+        "EV-PVAM-08-14"
+      ]
+    },
+    {
+      "item_id": "FIX-001",
+      "domain": "FIX",
+      "status": "CONFIRMED_CLOSED",
+      "checks": [
+        "CHK-BIZ-001"
+      ],
+      "decisions": [
+        "DEC-017"
+      ],
+      "task_id": null,
+      "work_id": null,
+      "steps": [],
+      "local_tests": [],
+      "evidences": []
+    }
+  ],
+  "controlled_test_mappings": [
+    {
+      "work_id": "WORK-PVAM-01",
+      "task_id": "TASK-PVAM-01",
+      "mapping_kind": "work_coverage_set",
+      "controlled_tc": [
+        "TC-001",
+        "TC-002",
+        "TC-003",
+        "TC-008",
+        "TC-030",
+        "TC-031",
+        "TC-032"
+      ],
+      "local_tc": [
+        "TC-PVAM-01-01",
+        "TC-PVAM-01-02",
+        "TC-PVAM-01-03",
+        "TC-PVAM-01-04",
+        "TC-PVAM-01-05",
+        "TC-PVAM-01-06"
+      ]
+    },
+    {
+      "work_id": "WORK-PVAM-02",
+      "task_id": "TASK-PVAM-02",
+      "mapping_kind": "work_coverage_set",
+      "controlled_tc": [
+        "TC-001",
+        "TC-002",
+        "TC-006",
+        "TC-008",
+        "TC-010",
+        "TC-012",
+        "TC-017",
+        "TC-018",
+        "TC-019",
+        "TC-021",
+        "TC-022",
+        "TC-023",
+        "TC-024",
+        "TC-026",
+        "TC-030",
+        "TC-031",
+        "TC-032"
+      ],
+      "local_tc": [
+        "TC-PVAM-02-01",
+        "TC-PVAM-02-02",
+        "TC-PVAM-02-03",
+        "TC-PVAM-02-04",
+        "TC-PVAM-02-05",
+        "TC-PVAM-02-06",
+        "TC-PVAM-02-07",
+        "TC-PVAM-02-08"
+      ]
+    },
+    {
+      "work_id": "WORK-PVAM-03",
+      "task_id": "TASK-PVAM-03",
+      "mapping_kind": "work_coverage_set",
+      "controlled_tc": [
+        "TC-004",
+        "TC-005",
+        "TC-013",
+        "TC-018",
+        "TC-031",
+        "TC-032"
+      ],
+      "local_tc": [
+        "TC-PVAM-03-01",
+        "TC-PVAM-03-02",
+        "TC-PVAM-03-03",
+        "TC-PVAM-03-04",
+        "TC-PVAM-03-05",
+        "TC-PVAM-03-06",
+        "TC-PVAM-03-07"
+      ]
+    },
+    {
+      "work_id": "WORK-PVAM-04",
+      "task_id": "TASK-PVAM-04",
+      "mapping_kind": "work_coverage_set",
+      "controlled_tc": [
+        "TC-007",
+        "TC-013",
+        "TC-014",
+        "TC-017",
+        "TC-018",
+        "TC-019",
+        "TC-021",
+        "TC-030",
+        "TC-031",
+        "TC-032"
+      ],
+      "local_tc": [
+        "TC-PVAM-04-01",
+        "TC-PVAM-04-02",
+        "TC-PVAM-04-03",
+        "TC-PVAM-04-04",
+        "TC-PVAM-04-05",
+        "TC-PVAM-04-06",
+        "TC-PVAM-04-07",
+        "TC-PVAM-04-08"
+      ]
+    },
+    {
+      "work_id": "WORK-PVAM-05",
+      "task_id": "TASK-PVAM-05",
+      "mapping_kind": "work_coverage_set",
+      "controlled_tc": [
+        "TC-009",
+        "TC-010",
+        "TC-014",
+        "TC-015",
+        "TC-016",
+        "TC-023",
+        "TC-025",
+        "TC-026",
+        "TC-029",
+        "TC-030",
+        "TC-031"
+      ],
+      "local_tc": [
+        "TC-PVAM-05-01",
+        "TC-PVAM-05-02",
+        "TC-PVAM-05-03",
+        "TC-PVAM-05-04",
+        "TC-PVAM-05-05",
+        "TC-PVAM-05-06",
+        "TC-PVAM-05-07",
+        "TC-PVAM-05-08"
+      ]
+    },
+    {
+      "work_id": "WORK-PVAM-06",
+      "task_id": "TASK-PVAM-06",
+      "mapping_kind": "work_coverage_set",
+      "controlled_tc": [
+        "TC-011",
+        "TC-023",
+        "TC-024",
+        "TC-025",
+        "TC-026",
+        "TC-028",
+        "TC-029",
+        "TC-030",
+        "TC-032"
+      ],
+      "local_tc": [
+        "TC-PVAM-06-01",
+        "TC-PVAM-06-02",
+        "TC-PVAM-06-03",
+        "TC-PVAM-06-04",
+        "TC-PVAM-06-05",
+        "TC-PVAM-06-06",
+        "TC-PVAM-06-07",
+        "TC-PVAM-06-08",
+        "TC-PVAM-06-09"
+      ]
+    },
+    {
+      "work_id": "WORK-PVAM-07A",
+      "task_id": "TASK-PVAM-07A",
+      "mapping_kind": "work_coverage_set",
+      "controlled_tc": [
+        "TC-027",
+        "TC-028",
+        "TC-031"
+      ],
+      "local_tc": [
+        "TC-PVAM-07A-01",
+        "TC-PVAM-07A-02",
+        "TC-PVAM-07A-03",
+        "TC-PVAM-07A-04",
+        "TC-PVAM-07A-05",
+        "TC-PVAM-07A-06",
+        "TC-PVAM-07A-07"
+      ]
+    },
+    {
+      "work_id": "WORK-PVAM-07B",
+      "task_id": "TASK-PVAM-07B",
+      "mapping_kind": "work_coverage_set",
+      "controlled_tc": [
+        "TC-023",
+        "TC-025",
+        "TC-026",
+        "TC-027",
+        "TC-028",
+        "TC-029",
+        "TC-031",
+        "TC-032"
+      ],
+      "local_tc": [
+        "TC-PVAM-07B-01",
+        "TC-PVAM-07B-02",
+        "TC-PVAM-07B-03",
+        "TC-PVAM-07B-04",
+        "TC-PVAM-07B-05",
+        "TC-PVAM-07B-06",
+        "TC-PVAM-07B-07",
+        "TC-PVAM-07B-08",
+        "TC-PVAM-07B-09"
+      ]
+    },
+    {
+      "work_id": "WORK-PVAM-08",
+      "task_id": "TASK-PVAM-08",
+      "mapping_kind": "work_coverage_set",
+      "controlled_tc": [
+        "TC-001",
+        "TC-032"
+      ],
+      "local_tc": [
+        "TC-PVAM-08-01",
+        "TC-PVAM-08-02",
+        "TC-PVAM-08-03",
+        "TC-PVAM-08-04",
+        "TC-PVAM-08-05",
+        "TC-PVAM-08-06",
+        "TC-PVAM-08-07",
+        "TC-PVAM-08-08",
+        "TC-PVAM-08-09"
+      ]
+    }
+  ],
+  "counting_rules": {
+    "core_issue_count": 13,
+    "core_edge_count": 14,
+    "r012_children_do_not_increment_core_count": true,
+    "uat_verify_count": 7,
+    "opt_count": 2,
+    "deferred_count": 1,
+    "closed_count": 1
+  }
+}

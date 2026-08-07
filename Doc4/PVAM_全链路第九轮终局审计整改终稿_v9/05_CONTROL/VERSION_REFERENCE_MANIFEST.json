@@ -1,0 +1,220 @@
+{
+  "schema_version": 5,
+  "active_versions": {
+    "plan": "v1.15",
+    "report": "v1.5",
+    "modplan": "v1.2",
+    "workplan": "v1.3",
+    "traceability": "v3",
+    "approved_commit_registry": "v2"
+  },
+  "baseline_commit": "2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb",
+  "historical_baseline": "097cae32e0ff7708eb6ee69a7f2ce188e80c060c",
+  "remediation_audit": "E8-01～E8-06 + P0-CTRL-E8-03 + P0-TRACE-REV-01 + P0-TRACE-CHAIN-09-01 + P1-WORK-INDEX-09-02 + P2-DELIVERY-NAME-09-03 + P2-DELIVERY-ROUND10-01",
+  "current_review_inputs": {
+    "audit_report": "06_HISTORY/全链路项目工程文档七轮终局审查与核验报告.md",
+    "current_disposition": "00_B7-01-B7-06_真实性核验与反驳表.md",
+    "prior_disposition": "06_HISTORY/00_S6-01-S6-06_真实性核验与反驳表.md"
+  },
+  "current_round_delivery_files": {
+    "final_qa_report": {
+      "path": "FINAL_QA_REPORT.md",
+      "official_title": "PVAM 第九轮终局审计意见核验、定点修补与终稿交付 QA 报告",
+      "file_role": "CURRENT_ROUND_FINAL_QA_REPORT"
+    },
+    "remediation_compilation": {
+      "path": "PVAM_全链路第八轮定点修订全文.md",
+      "official_title": "PVAM 全链路第八轮终局审计整改全文",
+      "file_role": "CURRENT_ROUND_CUMULATIVE_REMEDIATION_COMPILATION"
+    }
+  },
+  "main_files": [
+    "01_PLAN/Redemption_PV_Amount_Migration_d74_检查方案_v1.15.md",
+    "02_REPORT/REPORT-PVAM-v1.5.md",
+    "03_MODPLAN/MODPLAN-PVAM_v1.2_终稿修改方案套件/MODPLAN-PVAM_v1.2_总方案.md",
+    "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PLAN-PVAM_v1.3_施工总方案.md"
+  ],
+  "task_glob": "03_MODPLAN/MODPLAN-PVAM_v1.2_终稿修改方案套件/TASK-PVAM-*.md",
+  "work_glob": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-*.md",
+  "canonical_control_files": [
+    "05_CONTROL/TRACEABILITY_MANIFEST.json",
+    "05_CONTROL/TRACEABILITY_MANIFEST.md",
+    "05_CONTROL/validate_traceability_v3.py",
+    "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
+    "05_CONTROL/validate_parent_provenance.py",
+    "05_CONTROL/ensure_temp_root.sh",
+    "05_CONTROL/validate_document_governance.py",
+    "05_CONTROL/validate_version_references.py",
+    "05_CONTROL/AUTHORIZATION_STATUS-PVAM-v2.md"
+  ],
+  "forbidden_active_control_aliases": [
+    "TRACEABILITY_MANIFEST.v2.json",
+    "TRACEABILITY_MANIFEST.v2.md",
+    "validate_traceability_v2.py"
+  ],
+  "structured_validation": {
+    "markdown_structure": "h1+document_info_table+version_history_table",
+    "current_input_path_policy": "fixed_role_allowlist",
+    "shadow_token_policy": "reject",
+    "occurrence_count_policy": "exactly_one_raw_occurrence_including_fences_and_comments",
+    "authorization_round_heading": "第八轮技术就绪声明",
+    "root_sha256_policy": "all_non_root_regular_files"
+  },
+  "controlled_token_occurrences": [
+    {
+      "path": "03_MODPLAN/MODPLAN-PVAM_v1.2_终稿修改方案套件/MODPLAN-PVAM_v1.2_总方案.md",
+      "token": "v1.2-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.2-r8"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PLAN-PVAM_v1.3_施工总方案.md",
+      "token": "Traceability Manifest v3",
+      "expected_count": 1,
+      "location": {
+        "kind": "heading",
+        "level": 4,
+        "title": "Traceability Manifest v3"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PLAN-PVAM_v1.3_施工总方案.md",
+      "token": "v1.3-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.3-r8"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PLAN-PVAM_v1.3_施工总方案.md",
+      "token": "v1.3-r9",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "九轮 P0-TRACE-CHAIN-09-01 / P1-WORK-INDEX-09-02",
+        "version": "v1.3-r9"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-01_金额编码公共层与基础模型适配器.md",
+      "token": "v1.3-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.3-r8"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-02_订单退款金额边界与期间解析.md",
+      "token": "v1.3-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.3-r8"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-03_配置解析ppm与硬编码清理.md",
+      "token": "v1.3-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.3-r8"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-04_monthActivePV与Active同源现算.md",
+      "token": "v1.3-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.3-r8"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-05_Elite_SOURCE原子提交与发布批次.md",
+      "token": "v1.3-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.3-r8"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-06_结算状态机统一Guard与Topology接线.md",
+      "token": "v1.3-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.3-r8"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-07A_Consumer_ACK紧急修复.md",
+      "token": "v1.3-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.3-r8"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-07B_事件路由与Stream保留.md",
+      "token": "v1.3-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.3-r8"
+      }
+    },
+    {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-08_UAT准入与证据治理.md",
+      "token": "v1.3-r8",
+      "expected_count": 1,
+      "location": {
+        "kind": "revision_row",
+        "required_text": "七轮 B7",
+        "version": "v1.3-r8"
+      }
+    },
+    {
+      "path": "05_CONTROL/AUTHORIZATION_STATUS-PVAM-v2.md",
+      "token": "第八轮技术就绪声明",
+      "expected_count": 1,
+      "location": {
+        "kind": "heading",
+        "level": 2,
+        "title": "第八轮技术就绪声明"
+      }
+    }
+  ],
+  "artifact_hashes": {
+    "modplan_zip": {
+      "path": "03_MODPLAN/MODPLAN-PVAM_v1.2_终稿修改方案套件.zip",
+      "sha256": "5016812126ac48835f6c54c3a2e7dcdad5623cf8d528bc8d911fd45a37a96876"
+    },
+    "workplan_zip": {
+      "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件.zip",
+      "sha256": "89d905c9313b12d973e8d02bb5de0da486de6d80e8eb2a7a8d2bc5e983d07f1f"
+    },
+    "approved_commit_registry": {
+      "path": "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
+      "sha256": "4f45abd4ed7f53444d6452a7a65a46e93b3642eb40eb851ed91695f17c5bd52f",
+      "schema_version": 2
+    }
+  }
+}

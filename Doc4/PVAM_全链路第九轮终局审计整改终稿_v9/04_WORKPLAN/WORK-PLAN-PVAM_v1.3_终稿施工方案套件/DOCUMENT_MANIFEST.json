@@ -1,0 +1,14 @@
+{
+  "package_id": "WORK-PLAN-PVAM_v1.3",
+  "document_status": "DRAFT",
+  "document_technical_readiness": "APPROVED_FOR_CONSTRUCTION",
+  "authorization_status": "PENDING_ORGANIZATIONAL_APPROVAL",
+  "implementation_status": "BLOCKED",
+  "validation_status": "PENDING_TEST_ENV",
+  "baseline_commit": "2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb",
+  "modplan_archive_sha256": "5016812126ac48835f6c54c3a2e7dcdad5623cf8d528bc8d911fd45a37a96876",
+  "approved_commit_registry_schema": 2,
+  "document_generation_audit": "B7-01～B7-06",
+  "current_audit": "P0-TRACE-CHAIN-09-01 + P1-WORK-INDEX-09-02 + P2-DELIVERY-NAME-09-03",
+  "file_count_excluding_sha256": 13
+}

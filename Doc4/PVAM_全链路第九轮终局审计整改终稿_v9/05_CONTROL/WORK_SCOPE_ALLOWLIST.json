@@ -1,0 +1,197 @@
+{
+  "schema_version": 3,
+  "works": {
+    "WORK-PVAM-01": {
+      "exact": [
+        "Common/PvAmount.py",
+        "Common/AmountModelAdapter.py",
+        "Model/User/UserStats.py",
+        "Model/User/EliteBonusStats.py",
+        "User/UserStatsService.py",
+        "User/GlobalRecalculationService.py",
+        "User/EliteBonusService.py",
+        "User/GlobalEliteBonusRecalculationService.py",
+        "User/PlacementIncrementalService.py",
+        "User/PlacementRecalculationService.py",
+        "User/Test/test_pv_amount_common.py",
+        "User/Test/test_amount_model_version.py"
+      ],
+      "prefixes": [
+        "tests/pvam/WORK-PVAM-01/"
+      ],
+      "prerequisites": []
+    },
+    "WORK-PVAM-02": {
+      "exact": [
+        "Common/PeriodResolver.py",
+        "Model/Order/NormalizedPvEvent.py",
+        "MessageConsumer/PvEventSchema.py",
+        "MessageConsumer/PvEventNormalizer.py",
+        "Order/RefundReversalLedger.py",
+        "MessageConsumer/PvEventConsumer.py",
+        "User/UserStatsService.py",
+        "User/PlacementIncrementalService.py",
+        "User/EliteBonusService.py",
+        "User/PlacementRecalculationService.py",
+        "User/PEBonusService.py",
+        "User/SuperEliteBonusService.py",
+        "User/LeadershipBonusGPUService.py",
+        "User/EliteAchievementBonusService.py",
+        "User/Test/test_pv_event_normalizer.py",
+        "User/Test/test_period_resolver.py",
+        "User/Test/test_amount_dtype_migration.py",
+        "User/GlobalRecalculationService.py"
+      ],
+      "prefixes": [
+        "tests/pvam/WORK-PVAM-02/"
+      ],
+      "prerequisites": [
+        "WORK-PVAM-01"
+      ]
+    },
+    "WORK-PVAM-03": {
+      "exact": [
+        "Common/BonusConfig.py",
+        "Model/Config/ConfigSnapshot.py",
+        "User/PEBonusService.py",
+        "User/EliteBonusService.py",
+        "User/GlobalEliteBonusRecalculationService.py",
+        "User/SuperEliteBonusService.py",
+        "User/LeadershipBonusGPUService.py",
+        "User/EliteAchievementBonusService.py",
+        "User/team_bonus_tb.py",
+        "User/Test/test_bonus_config.py",
+        "User/Test/test_team_bonus_tb.py"
+      ],
+      "prefixes": [
+        "tests/pvam/WORK-PVAM-03/"
+      ],
+      "prerequisites": [
+        "WORK-PVAM-01"
+      ]
+    },
+    "WORK-PVAM-04": {
+      "exact": [
+        "Common/MonthActivePvProvider.py",
+        "Common/ActiveRule.py",
+        "User/PEBonusService.py",
+        "User/SuperEliteBonusService.py",
+        "User/LeadershipBonusGPUService.py",
+        "User/EliteAchievementBonusService.py",
+        "User/run_monthly_bonus_pipeline_v2.py",
+        "User/Test/test_month_active_pv.py"
+      ],
+      "prefixes": [
+        "tests/pvam/WORK-PVAM-04/"
+      ],
+      "prerequisites": [
+        "WORK-PVAM-01",
+        "WORK-PVAM-03"
+      ]
+    },
+    "WORK-PVAM-05": {
+      "exact": [
+        "Model/User/EliteSourceAssignment.py",
+        "User/EliteRedisCommit.py",
+        "User/EliteBonusCandidateBuilder.py",
+        "User/EliteBonusPublishBatch.py",
+        "User/EliteBonusService.py",
+        "User/GlobalEliteBonusRecalculationService.py",
+        "User/Test/test_elite_atomic_commit.py",
+        "User/Test/test_elite_publish_batch.py"
+      ],
+      "prefixes": [
+        "tests/pvam/WORK-PVAM-05/"
+      ],
+      "prerequisites": [
+        "WORK-PVAM-01",
+        "WORK-PVAM-02",
+        "WORK-PVAM-03"
+      ]
+    },
+    "WORK-PVAM-06": {
+      "exact": [
+        "Settlement/SettlementRunManifest.py",
+        "Settlement/SettlementGuard.py",
+        "Settlement/SettlementCoordinator.py",
+        "User/GlobalRecalculationService.py",
+        "User/GlobalEliteBonusRecalculationService.py",
+        "User/PlacementRecalculationService.py",
+        "User/UserStatsService.py",
+        "User/TopologyMutationService.py",
+        "MessageConsumer/UserConsumer.py",
+        "MessageConsumer/PvEventConsumer.py",
+        "User/Test/test_settlement_coordinator.py",
+        "User/Test/test_settlement_guard.py",
+        "User/Test/test_topology_mutation_wiring.py"
+      ],
+      "prefixes": [
+        "tests/pvam/WORK-PVAM-06/"
+      ],
+      "prerequisites": [
+        "WORK-PVAM-01",
+        "WORK-PVAM-02",
+        "WORK-PVAM-05"
+      ]
+    },
+    "WORK-PVAM-07A": {
+      "exact": [
+        "MessageConsumer/RecalcProcessResult.py",
+        "MessageConsumer/RecalcStreamConsumer.py",
+        "MessageConsumer/Test/test_recalc_ack_fail_closed.py"
+      ],
+      "prefixes": [
+        "tests/pvam/WORK-PVAM-07A/"
+      ],
+      "prerequisites": []
+    },
+    "WORK-PVAM-07B": {
+      "exact": [
+        "MessageConsumer/RecalcEventSchema.py",
+        "MessageConsumer/RecalcHandlerRegistry.py",
+        "MessageConsumer/RecalcDisposition.py",
+        "Settlement/RecalcEventPublisher.py",
+        "Ops/RecalcStreamRetention.py",
+        "MessageConsumer/RecalcStreamConsumer.py",
+        "User/GlobalRecalculationService.py",
+        "User/GlobalEliteBonusRecalculationService.py",
+        "User/PlacementRecalculationService.py",
+        "User/PlacementIncrementalService.py",
+        "MessageConsumer/Test/test_recalc_event_v2.py",
+        "MessageConsumer/Test/test_stream_retention.py"
+      ],
+      "prefixes": [
+        "tests/pvam/WORK-PVAM-07B/"
+      ],
+      "prerequisites": [
+        "WORK-PVAM-06",
+        "WORK-PVAM-07A"
+      ]
+    },
+    "WORK-PVAM-08": {
+      "exact": [
+        "traceability_manifest.json",
+        "evidence/manifest.schema.json"
+      ],
+      "prefixes": [
+        "uat/",
+        "tests/pvam/WORK-PVAM-08/",
+        "docs/pvam/"
+      ],
+      "prerequisites": [],
+      "stage_prerequisites": {
+        "A": [],
+        "B": [
+          "WORK-PVAM-01",
+          "WORK-PVAM-02",
+          "WORK-PVAM-03",
+          "WORK-PVAM-04",
+          "WORK-PVAM-05",
+          "WORK-PVAM-06",
+          "WORK-PVAM-07A",
+          "WORK-PVAM-07B"
+        ]
+      }
+    }
+  }
+}
