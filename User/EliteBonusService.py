@@ -325,7 +325,18 @@ class EliteBonusService:
         # region 通过图获取该用户所有层级的祖先
         actor = self.dask_client.get_dataset("graph_actor").result()
         df_bfs = actor.get_allparent(user_id).result()
-        pdf = df_bfs.sort_values("level", ascending=True)
+        required_columns = {"ancestor", "predecessor", "level"}
+        missing_columns = required_columns - set(df_bfs.columns)
+        if missing_columns:
+            raise RuntimeError(
+                f"get_allparent 缺少必要列: {missing_columns}"
+            )
+
+        # graph_actor 对上级节点使用 ancestor；服务内部沿用 descendant 作为祖先节点键。
+        pdf = df_bfs.rename(columns={"ancestor": "descendant"}).sort_values(
+            "level",
+            ascending=True,
+        )
         ancestors_info = pdf[["descendant", "predecessor", "level"]].astype(str).to_dict("records")
 
         delta_update = initial_delta

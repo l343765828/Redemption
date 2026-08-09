@@ -68,13 +68,26 @@ class UserStatsService:
             df_bfs = fut.result()
             # endregion
 
-            # region 验证
-            if df_bfs is None or len(df_bfs) == 0:
+            # region 验证图 Actor 输出合同
+            if df_bfs is None:
+                return []
+
+            required_columns = {"ancestor", "predecessor", "level"}
+            missing_columns = required_columns - set(df_bfs.columns)
+            if missing_columns:
+                raise RuntimeError(
+                    f"get_allparent 缺少必要列: {missing_columns}"
+                )
+            if len(df_bfs) == 0:
                 return []
             # endregion
 
             # region 按level排序 并换成对象list
-            pdf = df_bfs.sort_values("level", ascending=True)
+            # graph_actor 对上级节点使用 ancestor；服务内部沿用 descendant 作为祖先节点键。
+            pdf = df_bfs.rename(columns={"ancestor": "descendant"}).sort_values(
+                "level",
+                ascending=True,
+            )
 
             rows = pdf[["descendant", "predecessor", "level"]].astype({
                 "descendant": str, "predecessor": str, "level": int
