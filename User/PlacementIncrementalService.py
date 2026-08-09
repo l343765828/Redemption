@@ -286,16 +286,18 @@ class PlacementIncrementalService(UserStatsService):
             logger.info("双轨增量 BV 为 0, 跳过处理: period=%s, user_id=%s, order_id=%s", period, user_id, order_id)
             return
 
-        # region 加载并冻结本次业务运行配置
+        # region 幂等验证（已完成订单不创建新的业务 run）
         redis_conn = UserStats.db()
+        if redis_conn.exists(done_key):
+            logger.warning("检测到双轨重复订单 %s，忽略本次请求。", order_id)
+            return
+        # endregion
+
+        # region 加载并冻结本次业务运行配置
         run_config = PVAmountRunSession.start(
             PVAmountConfigProvider(redis_conn)
         ).config
         # endregion
-
-        if redis_conn.exists(done_key):
-            logger.warning("检测到双轨重复订单 %s，忽略本次请求。", order_id)
-            return
 
         order_lock = None
         try:

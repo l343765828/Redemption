@@ -1,0 +1,3 @@
+interface:
+  display_name: "Redemption Comment Style"
+  short_description: "Apply Redemption region and Step comment conventions to Python changes."

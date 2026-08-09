@@ -100,7 +100,7 @@ def compute_snapshot_checksum(
         load_mode: str,
         source: str,
 ) -> str:
-    """计算跨发布端与读取端一致的 canonical snapshot SHA-256。"""
+    """计算发布端/读取端一致性用 canonical SHA-256；它不是授权或 MAC。"""
 
     if type(read_v2) is not bool or type(write_v2) is not bool:
         raise PVAmountConfigError("INVALID_BOOL_TYPE")

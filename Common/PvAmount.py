@@ -157,6 +157,11 @@ def parse_db_amount_to_units(
     *,
     max_decimals: int = 2,
 ) -> int:
+    """解析 DB 金额边界；默认两位是来源精度策略，不是内部 scale 上限。
+
+    已批准的更高精度来源必须显式传入 ``max_decimals``；``PV_SCALE`` 只定义
+    内部 micro-units 分辨率，不能反向放宽外部数据库字段的精度合同。
+    """
 
     if isinstance(raw, Decimal):
         value = raw
@@ -271,6 +276,11 @@ def units_to_decimal_string(units: int) -> str:
 # PPM 费率解析与 int64 安全算术
 # =====================================================================
 def parse_percent_to_ppm(raw: Decimal | str) -> int:
+    """把百分数值转换为 ppm：15 表示 15%，0.15 表示 0.15%。
+
+    本函数不接受“已除以 100 的比例值”语义；normalized fraction 必须由调用方
+    在其获批边界显式处理，不能把 0.15（15% fraction）误传到这里。
+    """
     if isinstance(raw, Decimal):
         value = raw
     elif isinstance(raw, str) and _CANONICAL_DECIMAL.fullmatch(raw):

@@ -458,7 +458,7 @@ class GlobalEliteBonusRecalculationService:
     def _new_blank_stats(self, uid: str, period: str, run_config: PVAmountRunConfig) -> EliteBonusStats:
         return EliteBonusStats(
             pk=f"{period}:{uid}", id=f"{period}:{uid}", user_id=uid, period_num=int(period),
-            pv_pcs=0, gpv=0, gpv_real=0, contrib_to_parent=0, estimated_bonus=0.0,
+            pv_pcs=0, gpv=0, gpv_real=0, contrib_to_parent=0,
             **build_factory_amount_fields(
                 run_config.state,
                 include_bonus_cents=True,

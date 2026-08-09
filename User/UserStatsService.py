@@ -392,17 +392,17 @@ class UserStatsService:
             return
         # endregion
 
-        # region 加载并冻结本次业务运行配置
+        # region 幂等验证（已完成订单不创建新的业务 run）
         redis_conn = UserStats.db()
-        run_config = PVAmountRunSession.start(
-            PVAmountConfigProvider(redis_conn)
-        ).config
-        # endregion
-
-        # region 幂等验证
         if redis_conn.exists(done_key):
             logger.warning("检测到重复订单 %s，忽略本次请求。", order_id)
             return
+        # endregion
+
+        # region 加载并冻结本次业务运行配置
+        run_config = PVAmountRunSession.start(
+            PVAmountConfigProvider(redis_conn)
+        ).config
         # endregion
 
         order_lock = None

@@ -98,6 +98,10 @@ class PvAmountCommonTests(unittest.TestCase):
     def test_decimal_precision_has_two_independent_gates(self):
         with self.assertRaisesRegex(ValueError, "maximum is 2"):
             parse_db_amount_to_units("1.234")
+        self.assertEqual(
+            100_000_000,
+            parse_db_amount_to_units(Decimal("100.000000"), max_decimals=6),
+        )
         with self.assertRaisesRegex(ValueError, "finer than micro-units"):
             parse_db_amount_to_units(Decimal("1.2345678"), max_decimals=7)
 
@@ -237,6 +241,7 @@ class PvAmountCommonTests(unittest.TestCase):
         cases = [
             ("0", 0),
             ("15", 150_000),
+            (Decimal("0.15"), 1_500),
             (Decimal("29.7"), 297_000),
             ("-15", -150_000),
             ("100", 1_000_000),

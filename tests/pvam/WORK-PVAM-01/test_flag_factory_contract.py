@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import ast
 import copy
+import importlib.util
 import inspect
 import re
 import sys
 import unittest
 from pathlib import Path
+from types import ModuleType
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
@@ -77,6 +80,87 @@ def make_config(read_v2: bool, write_v2: bool, version: int) -> PVAmountRunConfi
         checksum=checksum,
     )
 
+
+def load_real_elite_factory_modules():
+    """隔离外部依赖后加载两处真实生产 factory。"""
+
+    class CapturedEliteBonusStats:
+        def __init__(self, **kwargs):
+            for name, value in kwargs.items():
+                setattr(self, name, value)
+
+    dask = ModuleType("dask")
+    dask.__path__ = []
+    dask_distributed = ModuleType("dask.distributed")
+    dask_distributed.Client = type("Client", (), {})
+
+    redis_om = ModuleType("redis_om")
+    redis_om.NotFoundError = type("NotFoundError", (Exception,), {})
+
+    model = ModuleType("Model")
+    model.__path__ = []
+    model_user = ModuleType("Model.User")
+    model_user.__path__ = []
+    elite_model = ModuleType("Model.User.EliteBonusStats")
+    elite_model.EliteBonusStats = CapturedEliteBonusStats
+
+    user = ModuleType("User")
+    user.__path__ = []
+    user_stats_service = ModuleType("User.UserStatsService")
+    user_stats_service.SCHEDULE_ADDRESS = "test-only://not-connected"
+
+    stubs = {
+        "dask": dask,
+        "dask.distributed": dask_distributed,
+        "redis_om": redis_om,
+        "Model": model,
+        "Model.User": model_user,
+        "Model.User.EliteBonusStats": elite_model,
+        "User": user,
+        "User.UserStatsService": user_stats_service,
+    }
+
+    def load(path: Path, module_name: str):
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise AssertionError(f"cannot load module: {path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    with patch.dict(sys.modules, stubs):
+        incremental = load(
+            PROJECT_ROOT / "User" / "EliteBonusService.py",
+            "_pvam_test_elite_bonus_service",
+        )
+        global_recalculation = load(
+            PROJECT_ROOT / "User" / "GlobalEliteBonusRecalculationService.py",
+            "_pvam_test_global_elite_bonus_recalculation_service",
+        )
+
+    return incremental, global_recalculation
+
+def load_production_method(relative: str, class_name: str, function_name: str):
+    """从真实生产源码提取单个方法，用最小 globals 执行目标控制流。"""
+    path = PROJECT_ROOT / relative
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    class_node = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == class_name
+    )
+    function_node = next(
+        copy.deepcopy(node)
+        for node in class_node.body
+        if isinstance(node, ast.FunctionDef) and node.name == function_name
+    )
+    function_node.decorator_list = []
+    isolated = ast.Module(body=[function_node], type_ignores=[])
+    ast.fix_missing_locations(isolated)
+    namespace = {}
+    exec(compile(isolated, str(path), "exec"), namespace)
+    return namespace[function_name]
 
 def effective_production_sources():
     """遵循项目 file-filter，动态扫描 User 生产 Python，而非预列工厂名。"""
@@ -364,6 +448,24 @@ class ConditionalFactoryContractTests(unittest.TestCase):
             admit_production_run_config(test_fixture)
         self.assertEqual("V2_STATE_NOT_AUTHORIZED", captured.exception.code)
 
+    def test_tc_flag_20_real_private_elite_factories_accept_test_only_11(self):
+        incremental_module, global_module = load_real_elite_factory_modules()
+        test_fixture = make_config(True, True, 77)
+
+        incremental_service = object.__new__(incremental_module.EliteBonusService)
+        incremental_service.period_num = 77
+        incremental_node = incremental_service._build_blank_node("42", test_fixture)
+
+        global_service = object.__new__(
+            global_module.GlobalEliteBonusRecalculationService
+        )
+        global_node = global_service._new_blank_stats("42", "77", test_fixture)
+
+        for node in (incremental_node, global_node):
+            self.assertEqual(AMOUNT_ENCODING_VERSION_V2, node.amount_encoding_version)
+            self.assertIsNone(node.estimated_bonus)
+            self.assertEqual(0, node.estimated_bonus_cents)
+
     def test_tc_flag_21_production_has_no_test_only_bypass(self):
         self.assertEqual(
             ["config"],
@@ -394,6 +496,58 @@ class ConditionalFactoryContractTests(unittest.TestCase):
                     )
         self.assertEqual([], violations)
 
+    def test_completed_duplicate_short_circuits_before_config_load(self):
+        class CompletedOrderRedis:
+            @staticmethod
+            def exists(_key):
+                return True
+
+        class FakeUserStats:
+            @classmethod
+            def db(cls):
+                return CompletedOrderRedis()
+
+        class SessionMustNotStart:
+            @classmethod
+            def start(cls, _provider):
+                raise AssertionError("completed duplicate created a config run")
+
+        class SilentLogger:
+            @staticmethod
+            def warning(*_args):
+                return None
+
+            @staticmethod
+            def info(*_args):
+                return None
+
+        for relative, class_name, function_name in (
+            (
+                "User/UserStatsService.py",
+                "UserStatsService",
+                "update_elite_performance",
+            ),
+            (
+                "User/PlacementIncrementalService.py",
+                "PlacementIncrementalService",
+                "update_placement_performance",
+            ),
+        ):
+            method = load_production_method(relative, class_name, function_name)
+            method.__globals__.update(
+                UserStats=FakeUserStats,
+                PVAmountRunSession=SessionMustNotStart,
+                logger=SilentLogger(),
+            )
+            self.assertIsNone(
+                method(
+                    object(),
+                    period="202608",
+                    user_id="42",
+                    bv=1,
+                    order_id="already-completed",
+                )
+            )
     # endregion
 
 
