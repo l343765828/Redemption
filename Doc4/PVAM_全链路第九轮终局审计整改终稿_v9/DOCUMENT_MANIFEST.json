@@ -1,61 +1,62 @@
 {
-  "package_version": "round9-trace-chain-work-index-fix-v9",
-  "delivery_reverification": "round10-stale-v8-submission-corrected",
-  "document_status": "DRAFT",
-  "document_technical_readiness": "APPROVED_FOR_CONSTRUCTION",
-  "authorization_status": "PENDING_ORGANIZATIONAL_APPROVAL",
-  "implementation_status": "BLOCKED",
-  "validation_status": "PENDING_TEST_ENV",
-  "baseline_commit": "2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb",
-  "plan": "PLAN-PVAM-v1.15",
-  "report": "REPORT-PVAM-v1.5",
-  "modplan": "MODPLAN-PVAM_v1.2",
-  "workplan": "WORK-PLAN-PVAM_v1.3",
-  "traceability_schema": 3,
-  "parent_provenance_schema": 2,
-  "approved_commit_registry_schema": 2,
-  "code_audit_conclusion": "REJECTED",
-  "dec_013": "OPEN",
-  "gate_c": "OPEN",
-  "real_work_patches_generated": false,
-  "real_dev_executed": false,
-  "real_uat_executed": false,
-  "modplan_archive_sha256": "5016812126ac48835f6c54c3a2e7dcdad5623cf8d528bc8d911fd45a37a96876",
-  "workplan_archive_sha256": "89d905c9313b12d973e8d02bb5de0da486de6d80e8eb2a7a8d2bc5e983d07f1f",
-  "approved_commit_registry": {
-    "path": "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
-    "sha256": "4f45abd4ed7f53444d6452a7a65a46e93b3642eb40eb851ed91695f17c5bd52f",
-    "schema_version": 2
-  },
-  "approved_commit_registry_sha256": "4f45abd4ed7f53444d6452a7a65a46e93b3642eb40eb851ed91695f17c5bd52f",
-  "current_round_delivery_files": {
-    "final_qa_report": {
-      "path": "FINAL_QA_REPORT.md",
-      "official_title": "PVAM 第九轮终局审计意见核验、定点修补与终稿交付 QA 报告",
-      "file_role": "CURRENT_ROUND_FINAL_QA_REPORT"
-    },
-    "remediation_compilation": {
-      "path": "PVAM_全链路第八轮定点修订全文.md",
-      "official_title": "PVAM 全链路第八轮终局审计整改全文",
-      "file_role": "CURRENT_ROUND_CUMULATIVE_REMEDIATION_COMPILATION"
-    }
-  },
-  "package_file_count_total": 105,
-  "package_file_count_excluding_root_sha256": 104,
-  "root_sha256_entry_count": 104,
-  "construction_readiness": "DOCUMENTS_APPROVED_ORGANIZATIONAL_APPROVAL_PENDING",
-  "control_script_status": "SELFTEST_PASS",
-  "archive_readiness": "READY_FOR_ARCHIVE",
-  "document_generation_audit": "B7-01～B7-06",
-  "current_audit": "P0-TRACE-CHAIN-09-01 + P1-WORK-INDEX-09-02 + P2-DELIVERY-NAME-09-03 + P2-DELIVERY-ROUND10-01",
-  "governance_blockers_closed": [
-    "P0-CTRL-E8-03",
-    "P0-TRACE-REV-01",
-    "P0-TRACE-CHAIN-09-01",
-    "P1-WORK-INDEX-09-02"
-  ],
-  "delivery_findings_closed": [
-    "P2-DELIVERY-NAME-09-03",
-    "P2-DELIVERY-ROUND10-01"
-  ]
+    "package_version":  "round10-dec019-flag-runtime-contract-r10",
+    "delivery_reverification":  "round10-dec019-governance-reconciled",
+    "document_status":  "DRAFT",
+    "document_technical_readiness":  "APPROVED_FOR_CONSTRUCTION",
+    "authorization_status":  "PENDING_ORGANIZATIONAL_APPROVAL",
+    "implementation_status":  "BLOCKED",
+    "validation_status":  "PENDING_TEST_ENV",
+    "baseline_commit":  "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
+    "plan":  "PLAN-PVAM-v1.15",
+    "report":  "REPORT-PVAM-v1.5",
+    "modplan":  "MODPLAN-PVAM_v1.2",
+    "workplan":  "WORK-PLAN-PVAM_v1.3",
+    "traceability_schema":  3,
+    "parent_provenance_schema":  2,
+    "approved_commit_registry_schema":  2,
+    "code_audit_conclusion":  "REJECTED",
+    "dec_013":  "OPEN",
+    "gate_c":  "OPEN",
+    "real_work_patches_generated":  false,
+    "real_dev_executed":  false,
+    "real_uat_executed":  false,
+    "modplan_archive_sha256":  "b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898",
+    "workplan_archive_sha256":  "0a0e4b131abc6254c6befb574ff55c1b8399d2fd8b9baede33f168f8a71cb262",
+    "approved_commit_registry":  {
+                                     "path":  "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
+                                     "sha256":  "6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68",
+                                     "schema_version":  2
+                                 },
+    "approved_commit_registry_sha256":  "6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68",
+    "current_round_delivery_files":  {
+                                         "final_qa_report":  {
+                                                                 "path":  "FINAL_QA_REPORT.md",
+                                                                 "official_title":  "PVAM 第九轮终局审计意见核验、定点修补与终稿交付 QA 报告",
+                                                                 "file_role":  "CURRENT_ROUND_FINAL_QA_REPORT"
+                                                             },
+                                         "remediation_compilation":  {
+                                                                         "path":  "PVAM_全链路第八轮定点修订全文.md",
+                                                                         "official_title":  "PVAM 全链路第八轮终局审计整改全文",
+                                                                         "file_role":  "CURRENT_ROUND_CUMULATIVE_REMEDIATION_COMPILATION"
+                                                                     }
+                                     },
+    "package_file_count_total":  103,
+    "package_file_count_excluding_root_sha256":  102,
+    "root_sha256_entry_count":  102,
+    "construction_readiness":  "DOCUMENTS_APPROVED_ORGANIZATIONAL_APPROVAL_PENDING",
+    "control_script_status":  "SELFTEST_PASS",
+    "archive_readiness":  "READY_FOR_ARCHIVE",
+    "document_generation_audit":  "B7-01～B7-06",
+    "current_audit":  "P0-TRACE-CHAIN-09-01 + P1-WORK-INDEX-09-02 + DEC-019 + GAP-PVAM-FLAG-CONTRACT + WORK-PVAM-01C",
+    "governance_blockers_closed":  [
+                                       "P0-CTRL-E8-03",
+                                       "P0-TRACE-REV-01",
+                                       "P0-TRACE-CHAIN-09-01",
+                                       "P1-WORK-INDEX-09-02",
+                                       "BLOCK-PVAM-01-FLAG-CONTRACT"
+                                   ],
+    "delivery_findings_closed":  [
+                                     "P2-DELIVERY-NAME-09-03",
+                                     "P2-DELIVERY-ROUND10-01"
+                                 ]
 }

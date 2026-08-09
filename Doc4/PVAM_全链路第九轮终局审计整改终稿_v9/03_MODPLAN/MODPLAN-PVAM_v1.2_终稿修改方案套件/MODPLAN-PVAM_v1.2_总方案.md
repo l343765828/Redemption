@@ -1,7 +1,7 @@
 # Redemption PV Amount Migration 本轮修改方案 v1.2（主控总方案）
 
 > 文档编号：`MODPLAN-PVAM_v1.2`  
-> 受控代码基线：`l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`  
+> 受控代码基线：`l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`  
 > 当前状态：`DRAFT`  
 > 授权状态：`PENDING_ORGANIZATIONAL_APPROVAL`  
 > 状态含义：本轮只完成技术文档修订；当前未提供可识别组织批准人、角色、签名或批准原文，不构成施工授权。
@@ -12,8 +12,8 @@
 
 - 授权状态：`PENDING_ORGANIZATIONAL_APPROVAL`；权威登记见 `05_CONTROL/AUTHORIZATION_STATUS-PVAM-v2.md`。历史 `APPROVAL-PVAM-20260805-01` 仅作 `UNVERIFIED/HISTORICAL_ONLY` 记录。
 - 上游检查/复核：`PLAN-PVAM-v1.15`、`REPORT-PVAM-v1.5`。
-- 受控代码基线：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`。
-- 拟申请批准范围：R-001～R-013及TASK-01～08的既定处置；不关闭DEC-013、Gate C或任何UAT AC。
+- 受控代码基线：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`。
+- 拟申请批准范围：R-001～R-013、GAP-PVAM-FLAG-CONTRACT 及 TASK-01、01C、02～08 的既定处置；不关闭 DEC-013、Gate C 或任何 UAT AC。
 
 ## 1. 文档控制
 
@@ -24,7 +24,7 @@
 | 文档版本 | `v1.2` |
 | 当前状态 | `DRAFT` |
 | 受控仓库 | `l343765828/Redemption` |
-| 受控提交 | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控提交 | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 代码/SQL事实基线 | 与 `097cae32e0ff7708eb6ee69a7f2ce188e80c060c` 一致；两提交区间仅 Elite 规则 DOCX 变化 |
 | 对应检查方案 | `Redemption_PV_Amount_Migration_d74_检查方案_v1.15.md` / `PLAN-PVAM-v1.15` |
 | 对应复核报告 | `Redemption_PV_Amount_Migration_d74_复核报告_v1.5.md` |
@@ -58,15 +58,16 @@
 | v1.1 | 2026-08-05 | 历史全链路修订版；其自述批准记录因不可独立验证而由本版取代 | SUPERSEDED |
 | v1.2 | 2026-08-05 | 第四轮关闭追溯、状态、patch/DEV、版本和设计边界问题 | DRAFT |
 | v1.2-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根、工件摘要、独立临时目录、AC 来源保真及当前轮次引用 | DRAFT |
+| v1.2-r10 | 2026-08-08 | 登记 DEC-019/GAP-PVAM-FLAG-CONTRACT，新增 TASK-PVAM-01C，并条件化 TASK-PVAM-01 AC-02/03 与 WORK-01 路由 | DRAFT |
 
 ## 2. 本轮目标与边界
 
 ### 2.1 目标
 
-本方案保持 8 个逻辑任务组；为降低 R-012 的紧急风险，将 TASK-07 拆为 07A/07B，因此实际交付 9 份施工任务书：
+本方案在原 8 个逻辑任务组之外新增独立 flag runtime 配置组 01C；TASK-07 仍拆为 07A/07B，因此实际交付 10 份施工任务书：
 
 - 关闭 R-001～R-013 的设计缺口并给出可执行 AC；
-- 金额域统一为 int64 micro-units、费率 ppm、最终奖金 integer cents；
+- 金额域统一为 int64 micro-units、费率 ppm、最终奖金 integer cents；通过独立 01C 建立 Redis flag Provider、atomic bootstrap、run-freeze 与四态 admission；
 - 只允许外部事件和 DB loader 两处放大；
 - monthActivePV 使用唯一读取 getter，各消费方同源现算 Active；
 - Elite stats/SOURCE/revision/outbox 原子化并输出外部发布 proof；
@@ -104,7 +105,7 @@
 | 合同 | 唯一规则 |
 |---|---|
 | PV/BV/GPV/1L/2L/结余/奖金基数 | `int64 micro-units`，`PV_SCALE=1_000_000` |
-| amount version | 新计算记录显式 `amount_encoding_version=2`；缺失/None 为 legacy/unknown，默认阻断 |
+| amount version | 只有进入获批 V2 domain 且全部共享字段满足 V2 合同的 record 才显式2；00/01共享-key Legacy record不写2；legacy/unknown只在V2 calculation entry阻断 |
 | 费率 | 有符号整数 ppm，scale=1_000_000 |
 | 最终奖金 | 内部 integer cents；外部两位 Decimal string |
 | 放大边界 | 外部规范十进制字符串→units；DB Decimal/string→units |
@@ -139,6 +140,7 @@
 | DEC-016 | CLOSED | monthActivePV 重复取真实行一条；负/上限不二次业务阻断 | 04 |
 | DEC-017 | CLOSED | 文档已修；不等于代码行为 PASS | 05、08 |
 | DEC-018 | CLOSED | 无须物化 Active，各消费方同规则现算 | 04 |
+| DEC-019 | CLOSED | AR_CONFIG Source of Truth、Redis唯一runtime Provider、MANUAL_BOOTSTRAP原子01、fail-loud/run-freeze/四态admission；WORK-01 AC/CHG条件化 | 01C、01 |
 
 ## 5. 问题处置与双向追踪矩阵
 
@@ -146,7 +148,7 @@
 
 | 问题 | 级别 | 状态 | REM | W | V | 所属任务 | 本轮结果要求 |
 |---|---:|---|---|---|---|---|---|
-| R-001 amount version 缺失 | P0 | ACCEPTED | REM-001 | W-001 | V-001 | 01 | 新记录 v2；legacy/unknown 隔离 |
+| R-001 amount version 缺失 | P0 | ACCEPTED | REM-001 | W-001 | V-001 | 01 | 获批V2 record写2；00/01共享Legacy不写2；V2入口隔离legacy/unknown |
 | R-002 PvAmount 公共层缺失 | P1 | ACCEPTED | REM-002 | W-002 | V-002 | 01 | 唯一公共金额 API |
 | R-003 float/round 链 | P0 | ACCEPTED | REM-003 | W-003 | V-003 | 02 | 生产金额整数化 |
 | R-004 配置合同偏差 | P0 | ACCEPTED | REM-004 | W-004 | V-004 | 03 | signed ppm、snapshot、exact raw |
@@ -180,11 +182,12 @@
 | OPT-002 | ACCEPTED | 08 | 机器可读双向追踪 manifest |
 | FIX-001 | N/A — CONFIRMED_CLOSED | 文档基线 | DEC-017 文档修复，不计当前缺陷 |
 | GAP-DEC004-2B | DEFERRED | 08 | 本轮不建设写入/失效链；生产前必须另有施工任务 |
+| GAP-PVAM-FLAG-CONTRACT | ACCEPTED | 01C | DEC-019 已裁决；独立 Provider/bootstrap/run admission 卡接线，禁止扩大 WORK-01 production allowlist |
 
 ### 5.4 五状态统计
 
 - R/RISK/UV 强制范围：`ACCEPTED=13`、`UAT_VERIFY=7`、`REJECTED=0`、`DEFERRED=0`、`NEEDS_DECISION=0`。
-- `GAP-DEC004-2B` 是本方案派生的实现缺口，不改变复核报告 13+7 统计。
+- `GAP-DEC004-2B` 仍为 DEFERRED；`GAP-PVAM-FLAG-CONTRACT` 是 DEC-019 已接受的治理/实施缺口，均不改变复核报告 13+7 统计。
 - FIX-001 为已关闭修复，不进入五状态统计。
 
 ## 6. 模块化任务拆分
@@ -192,6 +195,7 @@
 | 任务 | 标题 | 主问题 | Gate | 独立交付边界 |
 |---|---|---|---|---|
 | 01 | 金额编码公共层与模型适配 | R-001/002 | A | API、version、legacy 隔离 |
+| 01C | Flag runtime Provider 与原子配置 | GAP-PVAM-FLAG-CONTRACT | A | Redis snapshot、CAS bootstrap、run-freeze、00/01/10/11 admission |
 | 02 | 订单/退款边界与 Period | R-003/007 | A/B/C | normalizer、resolver、无 float |
 | 03 | 配置/ppm | R-004 | A/B | matrix、snapshot、signed ppm |
 | 04 | monthActivePV/Active | R-005/006 | B | 读取 getter、消费方现算；2B 写入侧延期 |
@@ -336,6 +340,7 @@ flowchart LR
 | `00_F1-F7_审核意见核验与反驳表.md` | `HISTORICAL_ONLY`；不属于当前包，不参与活动门禁 |
 | `MODPLAN-PVAM_v1.2_总方案.md` | 主索引、范围、DEC、追踪、依赖、总验收 |
 | `TASK-PVAM-01_金额编码公共层与基础模型适配器.md` | R-001/002 |
+| `TASK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md` | GAP-PVAM-FLAG-CONTRACT / DEC-019 |
 | `TASK-PVAM-02_订单退款入口金额放大与边界转换.md` | R-003/007 |
 | `TASK-PVAM-03_配置解析ppm与硬编码清理.md` | R-004 |
 | `TASK-PVAM-04_monthActivePV与Active同源现算.md` | R-005/006；2B读取侧/延期边界 |
@@ -349,7 +354,7 @@ flowchart LR
 
 ## 13. 审批与授权状态
 
-本文件当前治理状态为 `DRAFT`，授权状态为 `PENDING_ORGANIZATIONAL_APPROVAL`。当前会话指令授权的是 B7-01～B7-06 的事实核验和文档/控制资产修订，不是代码施工、部署或生产发布授权。
+本文件当前治理状态为 `DRAFT`，授权状态为 `PENDING_ORGANIZATIONAL_APPROVAL`。DEC-019 是 CURRENT_CONTRACT 的业务/架构裁决；它授权本轮按 Phase G→I→D 施工与 DEV 验证，但不代替可识别组织批准、真实 UAT、部署或生产发布授权。
 
 升格为 `APPROVED` 前必须提供并归档：
 

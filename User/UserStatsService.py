@@ -7,6 +7,12 @@ from dask.distributed import Client
 from redis_om import NotFoundError
 import Model.User.UserLevel as UserLevel
 from Model.User.UserStats import UserStats
+from Common.AmountModelAdapter import build_factory_amount_fields
+from Redishelper.PVAmountConfigProvider import (
+    PVAmountConfigProvider,
+    PVAmountRunConfig,
+    PVAmountRunSession,
+)
 
 # 配置日志
 logging.basicConfig(
@@ -96,7 +102,7 @@ class UserStatsService:
             if owns_client and client is not None:
                 client.close()
 
-    def _get_or_init_user(self, period: str, user_id: str) -> UserStats:
+    def _get_or_init_user(self, period: str, user_id: str, run_config: PVAmountRunConfig) -> UserStats:
         """
         获取用户 stats; Redis 中不存在时返回零值的新对象 (不在此处落库,
         由后续 _save_models_pipeline 统一写回).
@@ -125,6 +131,7 @@ class UserStatsService:
                 virtual_width=0,
                 rank=UserLevel.NOTHING,
                 qualified_legs=set(),
+                **build_factory_amount_fields(run_config.state),
             )
         self._normalize_qualified_legs(u)
         # 每次加载时按当前 gpv 重新派生，避免快照/下游读取到空值。
@@ -385,8 +392,14 @@ class UserStatsService:
             return
         # endregion
 
-        # region 幂等验证
+        # region 加载并冻结本次业务运行配置
         redis_conn = UserStats.db()
+        run_config = PVAmountRunSession.start(
+            PVAmountConfigProvider(redis_conn)
+        ).config
+        # endregion
+
+        # region 幂等验证
         if redis_conn.exists(done_key):
             logger.warning("检测到重复订单 %s，忽略本次请求。", order_id)
             return
@@ -452,7 +465,7 @@ class UserStatsService:
                     # Step 1: 处理源用户
                     # ---------------------------------------------------------
                     # region 获取当前用户
-                    current_user = self._get_or_init_user(period, user_id)
+                    current_user = self._get_or_init_user(period, user_id, run_config)
                     # endregion
 
                     # region 获取当前用户状态以及等级
@@ -515,7 +528,7 @@ class UserStatsService:
                         # region 获取父级节点的信息
                         ancestor_id = str(row["descendant"])
                         leg_id = str(row["predecessor"])
-                        ancestor = self._get_or_init_user(period, ancestor_id)
+                        ancestor = self._get_or_init_user(period, ancestor_id, run_config)
                         # endregion
 
                         # region 记录父级节点的当前信息
@@ -535,7 +548,7 @@ class UserStatsService:
                         # (该 leg 在 lock_user_ids 中, 我们持有它的锁).
                         leg_node = processed_nodes.get(leg_id)
                         if leg_node is None:
-                            leg_node = self._get_or_init_user(period, leg_id)
+                            leg_node = self._get_or_init_user(period, leg_id, run_config)
                         # endregion
 
                         # region 判断直属下级这条线是否合格，这条线合格的条件是：

@@ -17,24 +17,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
-BASELINE = "2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASELINE = "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 
 CHECK_RE = re.compile(r"\bCHK-[A-Z]+-\d{3}\b")
 DEC_RE = re.compile(r"\bDEC-\d{3}\b")
 CORE_ISSUE_RE = re.compile(r"\bR-\d{3}(?:A|B)?\b")
 NON_CORE_RE = re.compile(r"\b(?:RISK|UV|OPT)-\d{3}\b|\bGAP-[A-Z0-9-]+\b|\bFIX-\d{3}\b")
-TASK_RE = re.compile(r"TASK-PVAM-(?:07A|07B|0[1-8])(?![0-9A-Z])")
-WORK_RE = re.compile(r"WORK-PVAM-(?:07A|07B|0[1-8])(?![0-9A-Z])")
+TASK_RE = re.compile(r"TASK-PVAM-(?:01C|07A|07B|0[1-8])(?![0-9A-Z])")
+WORK_RE = re.compile(r"WORK-PVAM-(?:01C|07A|07B|0[1-8])(?![0-9A-Z])")
 REM_RE = re.compile(r"\bREM-\d{3}(?:A|B)?\b")
 IMPL_RE = re.compile(r"\bW-\d{3}(?:A|B)?\b")
 VERIFY_RE = re.compile(r"\bV-\d{3}(?:A|B)?\b")
 STEP_RE = re.compile(r"^###\s+(STEP-PVAM-[0-9A-Z]+-[0-9]{2})[：:]", re.M)
-LOCAL_TC_RE = re.compile(r"^\|\s*(TC-PVAM-[0-9A-Z]+-[0-9]{2})\s*\|", re.M)
+LOCAL_TC_RE = re.compile(r"^\|\s*((?:TC-PVAM-[0-9A-Z]+|TC-FLAG)-[0-9]{2})\s*\|", re.M)
 EV_RE = re.compile(r"^\|\s*(EV-PVAM-[0-9A-Z]+-(?:[0-9]{2}|P[0-9]{2}))\s*\|", re.M)
 CONTROLLED_TC_RE = re.compile(r"\bTC-\d{3}\b")
 
 EXPECTED_TASKS = {
-    "TASK-PVAM-01", "TASK-PVAM-02", "TASK-PVAM-03", "TASK-PVAM-04",
+    "TASK-PVAM-01", "TASK-PVAM-01C", "TASK-PVAM-02", "TASK-PVAM-03", "TASK-PVAM-04",
     "TASK-PVAM-05", "TASK-PVAM-06", "TASK-PVAM-07A",
     "TASK-PVAM-07B", "TASK-PVAM-08",
 }
@@ -47,6 +47,10 @@ EXPECTED_NON_CORE_STATUS = {
     "OPT": "ACCEPTED",
     "GAP": "DEFERRED",
     "FIX": "CONFIRMED_CLOSED",
+}
+EXPECTED_NON_CORE_STATUS_BY_ID = {
+    "GAP-DEC004-2B": "DEFERRED",
+    "GAP-PVAM-FLAG-CONTRACT": "ACCEPTED",
 }
 
 
@@ -323,8 +327,8 @@ class ModplanContract:
 
 def task_ids_from_short(cell: str) -> set[str]:
     values: set[str] = set()
-    for item in re.findall(r"(?<!\d)(07A|07B|0?[1-8])(?!\d)", cell):
-        suffix = item if item in {"07A", "07B"} else f"{int(item):02d}"
+    for item in re.findall(r"(?<![0-9A-Z])(01C|07A|07B|0?[1-8])(?![0-9A-Z])", cell):
+        suffix = item if item in {"01C", "07A", "07B"} else f"{int(item):02d}"
         values.add(f"TASK-PVAM-{suffix}")
     return values
 
@@ -376,7 +380,7 @@ def parse_modplan(text: str) -> ModplanContract:
         core_dispositions=core,
         non_core_statuses=non_core_statuses,
         decision_statuses=decision_statuses,
-        task_tokens=set(tokens(text, re.compile(r"TASK-PVAM-(?:07A|07B|0[1-8])(?![0-9A-Z])"))),
+        task_tokens=set(tokens(text, re.compile(r"TASK-PVAM-(?:01C|07A|07B|0[1-8])(?![0-9A-Z])"))),
         issue_tokens=set(tokens(text, CORE_ISSUE_RE)),
         non_core_tokens=set(tokens(text, NON_CORE_RE)),
     )
@@ -723,14 +727,14 @@ def main() -> None:
     compare_sets(
         "non-core item IDs",
         non_core_ids,
-        {"RISK-001", "RISK-002", "UV-001", "UV-002", "UV-003", "UV-004", "UV-005", "OPT-001", "OPT-002", "GAP-DEC004-2B", "FIX-001"},
+        {"RISK-001", "RISK-002", "UV-001", "UV-002", "UV-003", "UV-004", "UV-005", "OPT-001", "OPT-002", "GAP-DEC004-2B", "GAP-PVAM-FLAG-CONTRACT", "FIX-001"},
     )
     if len(non_core_ids) != len(set(non_core_ids)):
         fail("duplicate non-core item rows")
     for row in non_core:
         item = row["item_id"]
         domain = row.get("domain")
-        expected_status = EXPECTED_NON_CORE_STATUS.get(domain)
+        expected_status = EXPECTED_NON_CORE_STATUS_BY_ID.get(item, EXPECTED_NON_CORE_STATUS.get(domain))
         if expected_status is None:
             fail(f"unknown non-core domain {domain} for {item}")
         if row.get("status") != expected_status:

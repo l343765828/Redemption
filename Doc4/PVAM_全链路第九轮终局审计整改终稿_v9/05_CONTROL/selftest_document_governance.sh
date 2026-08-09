@@ -179,6 +179,6 @@ expect_version_failure "$TMP/pkg" 'root SHA file-set mismatch' root_sha_missing_
 # Package count fields are verified against the physical package.
 rm -rf "$TMP/pkg"
 cp -a "$ROOT" "$TMP/pkg"
-sed -i 's/"package_file_count_total": 105/"package_file_count_total": 999/' \
+sed -E -i 's/"package_file_count_total":[[:space:]]*103/"package_file_count_total": 999/' \
   "$TMP/pkg/DOCUMENT_MANIFEST.json"
 expect_version_failure "$TMP/pkg" 'package_file_count_total does not match physical files' package_count_drift

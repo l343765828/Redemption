@@ -1,8 +1,8 @@
 {
-  "package_id": "MODPLAN-PVAM_v1.2",
-  "document_status": "DRAFT",
-  "authorization_status": "PENDING_ORGANIZATIONAL_APPROVAL",
-  "baseline_commit": "2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb",
-  "current_audit": "P0-TRACE-REV-01 metadata/edge equivalence alignment",
-  "file_count_excluding_sha256": 13
+    "package_id":  "MODPLAN-PVAM_v1.2",
+    "document_status":  "DRAFT",
+    "authorization_status":  "PENDING_ORGANIZATIONAL_APPROVAL",
+    "baseline_commit":  "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
+    "current_audit":  "DEC-019 + GAP-PVAM-FLAG-CONTRACT + TASK-PVAM-01C + WORK-01 conditional reconciliation",
+    "file_count_excluding_sha256":  14
 }

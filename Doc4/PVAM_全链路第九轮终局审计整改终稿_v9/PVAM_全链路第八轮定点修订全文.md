@@ -5442,7 +5442,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 | 七轮审查 | `B7-01～B7-06` 独立核验与第八轮定点修订；S6/F5 为历史来源 |
 | 九轮治理修补 | `P0-TRACE-CHAIN-09-01`、`P1-WORK-INDEX-09-02`、`P2-DELIVERY-NAME-09-03` 定点闭环；不改变文档业务版本 |
 | 项目代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| 修改方案套件SHA-256 | `5016812126ac48835f6c54c3a2e7dcdad5623cf8d528bc8d911fd45a37a96876`（对象：`MODPLAN-PVAM_v1.2_终稿修改方案套件.zip`，随本包提供） |
+| 修改方案套件SHA-256 | `b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898`（对象：`MODPLAN-PVAM_v1.2_终稿修改方案套件.zip`，随本包提供） |
 | SQL业务基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，排除Skill列明废弃/副本 |
 | 编制人 | AI Agent（施工方案编制） |
 | 复核人 | 待组织指派（AI Agent 仅完成文档自检，不代签组织审批） |
@@ -19548,14 +19548,14 @@ WORK.来源修改任务 == edge.task_id == WORK 编号对应的同号 TASK
   "real_work_patches_generated": false,
   "real_dev_executed": false,
   "real_uat_executed": false,
-  "modplan_archive_sha256": "5016812126ac48835f6c54c3a2e7dcdad5623cf8d528bc8d911fd45a37a96876",
-  "workplan_archive_sha256": "89d905c9313b12d973e8d02bb5de0da486de6d80e8eb2a7a8d2bc5e983d07f1f",
+  "modplan_archive_sha256": "b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898",
+  "workplan_archive_sha256": "0a0e4b131abc6254c6befb574ff55c1b8399d2fd8b9baede33f168f8a71cb262",
   "approved_commit_registry": {
     "path": "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
-    "sha256": "4f45abd4ed7f53444d6452a7a65a46e93b3642eb40eb851ed91695f17c5bd52f",
+    "sha256": "6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68",
     "schema_version": 2
   },
-  "approved_commit_registry_sha256": "4f45abd4ed7f53444d6452a7a65a46e93b3642eb40eb851ed91695f17c5bd52f",
+  "approved_commit_registry_sha256": "6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68",
   "current_round_delivery_files": {
     "final_qa_report": {
       "path": "FINAL_QA_REPORT.md",
@@ -19798,15 +19798,15 @@ WORK.来源修改任务 == edge.task_id == WORK 编号对应的同号 TASK
   "artifact_hashes": {
     "modplan_zip": {
       "path": "03_MODPLAN/MODPLAN-PVAM_v1.2_终稿修改方案套件.zip",
-      "sha256": "5016812126ac48835f6c54c3a2e7dcdad5623cf8d528bc8d911fd45a37a96876"
+      "sha256": "b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898"
     },
     "workplan_zip": {
       "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件.zip",
-      "sha256": "89d905c9313b12d973e8d02bb5de0da486de6d80e8eb2a7a8d2bc5e983d07f1f"
+      "sha256": "0a0e4b131abc6254c6befb574ff55c1b8399d2fd8b9baede33f168f8a71cb262"
     },
     "approved_commit_registry": {
       "path": "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
-      "sha256": "4f45abd4ed7f53444d6452a7a65a46e93b3642eb40eb851ed91695f17c5bd52f",
+      "sha256": "6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68",
       "schema_version": 2
     }
   }
@@ -19865,9 +19865,9 @@ E8 定点修补包括：registry/evidence 全路径链 no-follow 门禁；根 SH
 
 `FINAL_QA_REPORT.md` 与 `PVAM_全链路第八轮定点修订全文.md` 均在 Version/Document Manifest 中以 `path + official_title + file_role` 结构化登记；后者保留历史文件名并作为当前轮次累计整改汇编。
 
-canonical registry：`05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json`，SHA-256=`4f45abd4ed7f53444d6452a7a65a46e93b3642eb40eb851ed91695f17c5bd52f`。该摘要同时绑定于根 `DOCUMENT_MANIFEST.json` 与 `VERSION_REFERENCE_MANIFEST.json`；当前全部 registry 条目为 `PENDING`。
+canonical registry：`05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json`，SHA-256=`6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68`。该摘要同时绑定于根 `DOCUMENT_MANIFEST.json` 与 `VERSION_REFERENCE_MANIFEST.json`；当前全部 registry 条目为 `PENDING`。
 
 内嵌归档：
 
-- MODPLAN ZIP：`5016812126ac48835f6c54c3a2e7dcdad5623cf8d528bc8d911fd45a37a96876`
-- WORKPLAN ZIP：`89d905c9313b12d973e8d02bb5de0da486de6d80e8eb2a7a8d2bc5e983d07f1f`
+- MODPLAN ZIP：`b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898`
+- WORKPLAN ZIP：`0a0e4b131abc6254c6befb574ff55c1b8399d2fd8b9baede33f168f8a71cb262`

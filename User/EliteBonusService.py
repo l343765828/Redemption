@@ -32,6 +32,13 @@ import logging
 from dask.distributed import Client
 from redis_om import NotFoundError
 from Model.User.EliteBonusStats import EliteBonusStats
+from Common.AmountModelAdapter import build_factory_amount_fields
+from Redishelper.PVAmountConfigProvider import (
+    PVAmountConfigProvider,
+    PVAmountRunConfig,
+    PVAmountRunSession,
+    admit_production_run_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +240,12 @@ class EliteBonusService:
         并发: 源用户 + BFS 路径上每个祖先都加锁。树结构保证锁顺序单调,无环路死锁。
         异常: 锁等待超时 / Dask 失败 → 上抛,由调用方决定重试或入死信。
         """
+        # region 加载并冻结本次业务运行配置
+        run_config = PVAmountRunSession.start(
+            PVAmountConfigProvider(self.redis_conn)
+        ).config
+        # endregion
+
         acquired_locks: List[Any] = []
         try:
 
@@ -248,7 +261,7 @@ class EliteBonusService:
             # endregion
 
             # region 从redis中获取源用户
-            current_user = self._get_or_create_node(user_id)
+            current_user = self._get_or_create_node(user_id, run_config)
             # endregion
 
             # region 边界保护: 防退单 / 重复退单导致 pv 穿透到负
@@ -284,6 +297,7 @@ class EliteBonusService:
                     processed_nodes=processed_nodes,
                     models_to_save=models_to_save,
                     acquired_locks=acquired_locks,
+                    run_config=run_config,
                 )
 
             # ---- 统一原子化写入 ----
@@ -305,6 +319,7 @@ class EliteBonusService:
         processed_nodes: Dict[str, EliteBonusStats],
         models_to_save: List[EliteBonusStats],
         acquired_locks: List[Any],
+        run_config: PVAmountRunConfig,
     ) -> None:
         """沿祖先链 BFS 冒泡,逐层加锁、读、改、加入待写"""
         # region 通过图获取该用户所有层级的祖先
@@ -336,7 +351,7 @@ class EliteBonusService:
             # endregion
 
             # region 计算父级的gpv
-            ancestor = self._get_or_create_node(ancestor_id)
+            ancestor = self._get_or_create_node(ancestor_id, run_config)
             ancestor.gpv = (ancestor.gpv or 0) + delta_update
             # endregion
 
@@ -346,7 +361,7 @@ class EliteBonusService:
                 try:
                     leg_node = EliteBonusStats.get(f"{self.period_num}:{leg_id}")
                 except NotFoundError:
-                    leg_node = self._build_blank_node(leg_id)
+                    leg_node = self._build_blank_node(leg_id, run_config)
             # endregion
 
             # region 维护"已合格直属下线"集合
@@ -376,18 +391,22 @@ class EliteBonusService:
     # 节点工厂
     # =================================================================
 
-    def _get_or_create_node(self, user_id: str) -> EliteBonusStats:
+    def _get_or_create_node(self, user_id: str, run_config: PVAmountRunConfig) -> EliteBonusStats:
         node_id = f"{self.period_num}:{user_id}"
         try:
             return EliteBonusStats.get(node_id)
         except NotFoundError:
-            return self._build_blank_node(user_id)
+            return self._build_blank_node(user_id, run_config)
 
-    def _build_blank_node(self, user_id: str) -> EliteBonusStats:
+    def _build_blank_node(self, user_id: str, run_config: PVAmountRunConfig) -> EliteBonusStats:
         return EliteBonusStats(
             id=f"{self.period_num}:{user_id}",
             user_id=user_id,
             period_num=self.period_num,
+            **build_factory_amount_fields(
+                run_config.state,
+                include_bonus_cents=True,
+            ),
         )
 
     def _batch_save(self, models: List[EliteBonusStats]) -> None:
@@ -404,6 +423,18 @@ class EliteBonusService:
     # =================================================================
 
     def snapshot_period_to_db(self, db_executor: DbExecutor) -> Dict[str, int]:
+        # region 独立快照 run 加载并冻结一次 production 配置
+        run_config = PVAmountRunSession.start(
+            PVAmountConfigProvider(self.redis_conn)
+        ).config
+        return self._snapshot_period_to_db(db_executor, run_config)
+        # endregion
+
+    def _snapshot_period_to_db(
+        self,
+        db_executor: DbExecutor,
+        run_config: PVAmountRunConfig,
+    ) -> Dict[str, int]:
         """
         本期结束后调用一次,把所有 estimated_bonus > 0 的节点固化到 AR_CALC_BONUS_E,
         把 eb_source 链路固化到 AR_CALC_BONUS_E_SOURCE。
@@ -416,6 +447,10 @@ class EliteBonusService:
         ⚠️ 性能提示: 期内总用户数百万级时,find().all() 应改为分页;
           此处实现为一次性拉全量,适合中等量级(10w 以下)。
         """
+        # region 只接受已通过 production admission 的冻结配置
+        admit_production_run_config(run_config)
+        # endregion
+
         # ---- 1. 拉本期所有合格记录 ----
         all_records = list(
             EliteBonusStats.find(

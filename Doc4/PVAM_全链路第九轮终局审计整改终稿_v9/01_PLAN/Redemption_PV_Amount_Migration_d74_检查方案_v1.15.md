@@ -1,4 +1,4 @@
-# Redemption 项目检查方案（PV Amount Migration · 2475c6c4 基线）
+# Redemption 项目检查方案（PV Amount Migration · 3891f4b9 基线）
 
 > 使用说明：本方案用于定义“检查什么、依据什么检查、怎样判定通过”。  
 > 本文档处于方案阶段，不填写实际缺陷结论；`PV_Amount_Migration_v2.15_第八次复核_d74基线_完整修正版_v34.md` 中的历史结论和疑似缺陷仅转换为待独立执行的检查项。  
@@ -10,14 +10,14 @@
 
 | 项目 | 内容 |
 |---|---|
-| 文档名称 | `Redemption PV Amount Migration（2475c6c4 基线）检查方案` |
+| 文档名称 | `Redemption PV Amount Migration（3891f4b9 基线）检查方案` |
 | 文档编号 | `PLAN-PVAM-v1.15` |
 | 文档版本 | `v1.15` |
 | 当前状态 | `DRAFT` |
-| 待检查对象 | `l343765828/Redemption master@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 及本方案第 3.3 节审查材料；`d74cfb77c496e3a1564255f758dba80fa8644e33` 仅作为历史基线对照 |
+| 待检查对象 | `l343765828/Redemption master@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 及本方案第 3.3 节审查材料；`d74cfb77c496e3a1564255f758dba80fa8644e33` 仅作为历史基线对照 |
 | 项目仓库 | `https://github.com/l343765828/Redemption.git` |
 | 基线分支 | `master` |
-| 基线提交 | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 基线提交 | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制人 | `AI Agent（方案编制角色）` |
 | 复核人 | `AI Agent（全链路审计修订角色）` |
 | 编制日期 | `2026-07-29` |
@@ -26,8 +26,9 @@
 ### 1.0A 当前授权与基线迁移
 
 - 授权状态：`PENDING_ORGANIZATIONAL_APPROVAL`；当前指令仅授权文档复核与修订，不构成组织施工批准。
-- 当前唯一代码/SQL事实基线：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`。
+- 当前唯一代码/SQL事实基线：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`。
 - `097cae32`仅作为历史基线标识；其到当前基线的Python/SQL树无差异，不能继续作为活动证据ref。
+- `2475c6c4..3891f4b9` 仅新增本治理包，生产 Python/SQL 无变化；用户指定 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 为当前唯一活动基线。
 - 本方案与`REPORT-PVAM-v1.5`、`MODPLAN-PVAM_v1.2`、`WORK-PLAN-PVAM_v1.3`共同构成统一受控链。
 
 ### 1.0B 治理授权边界
@@ -55,6 +56,7 @@
 | v1.13 | `2026-08-02` | `用户（业务决策）/ AI Agent（落版）` | 依据用户对 §17 的业务决策关闭 DEC-018，并联动固化活跃结果“无须物化、各消费方按同一派生规则各自现算”的唯一预期行为 | `DRAFT` |
 | v1.14 | `2026-08-05` | `用户会话指令 / AI Agent（落版）` | 历史版本：统一受控基线至 `2475c6c4`；后因授权证据不可独立验证而被 v1.15 取代 | `SUPERSEDED` |
 | v1.15 | `2026-08-05` | `AI Agent（第四轮文档修订）` | 关闭 F3-01～F3-10 文档内缺陷：八级追溯、治理状态、patch/DEV 门禁、状态枚举、版本引用及设计边界 | `DRAFT` |
+| v1.15-r10 | `2026-08-08` | `用户（业务/架构决策）/ AI Agent（落版）` | 登记 DEC-019；固化 flag Source of Truth、Redis Provider、原子版本发布、run-freeze、四态 admission 与 WORK-01 条件化语义；活动基线迁移至 `3891f4b9` | `DRAFT` |
 
 本版本变更对照表：
 
@@ -95,6 +97,7 @@
 | USER-DECISION DEC-007（收窄） | §17 DEC-007、§9 CHK-PUB-002 |
 | USER-DECISION DEC-012 | §17 DEC-012、§8/§9 CHK-ARCH-002、§8/§9 CHK-BIZ-002 |
 | USER-DECISION DEC-018 | 编号引用：§1.1、§9 CHK-DATA-006、§9 CHK-BIZ-004/007/008/009/011、§9 CHK-TEST-004、§17 DEC-018；散文引用：§6 MAP-006/007/008/010、§8 CHK-DATA-006、CHK-BIZ-004/007/008/009/011、CHK-TEST-002、§9 CHK-DATA-006、CHK-BIZ-004/007/008/009/011、CHK-TEST-004、§11 TC-007 |
+| USER-DECISION DEC-019 | §1.0A/§1.1、§8/§9 CHK-ARCH-003、CHK-DATA-003、CHK-EVT-003、CHK-TEST-004、§11 TC-003/TC-024、§17 DEC-019；下游 `TASK/WORK-PVAM-01` 与 `TASK/WORK-PVAM-01C` |
 
 ---
 
@@ -102,7 +105,7 @@
 
 ### 2.1 背景
 
-Redemption 是以 Kafka/MQ、Redis、Dask/RAPIDS、MySQL/MariaDB 和推荐网/安置网为基础的月度奖金计算项目。当前专项拟将 PV/BV/GPV、左右区业绩、结余和奖金基数统一迁移到 `int64 micro-units`，同时保持有效 SQL 的 Legacy 结果或有明确来源的 corrected 决议，并补齐事件身份、结算屏障、正式发布、幂等和恢复能力。本轮以 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 为代码、SQL、治理、Skill 和 `Doc/奖金制度.md` 唯一固定基线；历史链路中 d74cfb77 到 097cae32 的唯一差异为新增该业务文档；097cae32 到 2475c6c4 仅修改 Elite 规则 DOCX，Python/SQL不变，Python、SQL、治理及配置内容不变。两份候选检查方案中的范围、断言和验收标准已经按第 15.1 节形成编制记录：可由材料证明的内容进入正式检查项，未经执行即写成“缺陷已确认、Gate 已失败、测试已通过”的内容不得继承为方案结论。预期交付物仅为本检查方案。
+Redemption 是以 Kafka/MQ、Redis、Dask/RAPIDS、MySQL/MariaDB 和推荐网/安置网为基础的月度奖金计算项目。当前专项拟将 PV/BV/GPV、左右区业绩、结余和奖金基数统一迁移到 `int64 micro-units`，同时保持有效 SQL 的 Legacy 结果或有明确来源的 corrected 决议，并补齐事件身份、结算屏障、正式发布、幂等和恢复能力。本轮以 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 为代码、SQL、治理、Skill 和 `Doc/奖金制度.md` 唯一固定基线；历史链路中 d74cfb77 到 097cae32 的唯一差异为新增该业务文档；097cae32 到 2475c6c4 仅修改 Elite 规则 DOCX，Python/SQL不变，Python、SQL、治理及配置内容不变。两份候选检查方案中的范围、断言和验收标准已经按第 15.1 节形成编制记录：可由材料证明的内容进入正式检查项，未经执行即写成“缺陷已确认、Gate 已失败、测试已通过”的内容不得继承为方案结论。预期交付物仅为本检查方案。
 
 ### 2.2 核心目标
 
@@ -161,24 +164,24 @@ Redemption 是以 Kafka/MQ、Redis、Dask/RAPIDS、MySQL/MariaDB 和推荐网/�
 | 基线编号 | 类型 | 文件/对象 | 版本或提交 | 权威范围 | 是否成功读取 | 备注 |
 |---|---|---|---|---|---|---|
 | BL-001 | 用户指令 | 本轮消息中的方案约束 | 2026-07-28 | 唯一交付物、模板 schema、范围及阶段边界 | YES | 本方案最高优先级 |
-| BL-002 | 治理 | `AGENTS.md` | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb / blob `57cd62a7` | 证据、优先级、Skill、正式审查流程 | YES | 与 d74 历史基线内容一致 |
-| BL-003 | 项目 Skill | `.claude/skills/redemption-file-filter/SKILL.md` | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb / blob `604886c2` | 文件过滤与业务查证顺序 | YES | 已成功读取 |
-| BL-004 | 项目 Skill | `.claude/skills/redemption-sql-doc-map/SKILL.md` | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb / blob `29d66be2` | SQL/文档/Python 路由 | YES | 已成功读取 |
+| BL-002 | 治理 | `AGENTS.md` | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 / blob `57cd62a7` | 证据、优先级、Skill、正式审查流程 | YES | 与 d74 历史基线内容一致 |
+| BL-003 | 项目 Skill | `.claude/skills/redemption-file-filter/SKILL.md` | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 / blob `604886c2` | 文件过滤与业务查证顺序 | YES | 已成功读取 |
+| BL-004 | 项目 Skill | `.claude/skills/redemption-sql-doc-map/SKILL.md` | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 / blob `29d66be2` | SQL/文档/Python 路由 | YES | 已成功读取 |
 | BL-005 | 复核材料 | `PV_Amount_Migration_v2.15_第八次复核_d74基线_完整修正版_v34.md` | v34 | 当前合同编译视图、overlay、开放政策、历史意见和待验收项 | YES | 仅作为检查项和依据来源；不继承其历史结论；其历史意见统计按 DEC-015 固定为“完全成立8、部分成立1”，各条意见仍须逐项核验证据 |
 | BL-006 | 专项清单 | `PV_Amount_Migration_Checklist_Final_v2.25_d74.md` | Final v2.25-d74 | 基础合同、Gate、P0/T0、模块范围 | YES | 与 BL-005 组合使用 |
-| BL-007 | 业务文档 | 仓库内 `Doc/奖金制度.md` | EKPlan20250324 / 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 资格、比例、Active、周期、大区等业务意图补充 | YES | 粗糙业务文档；不单独定义 Epoch、manifest、checkpoint 等技术合同 |
+| BL-007 | 业务文档 | 仓库内 `Doc/奖金制度.md` | EKPlan20250324 / 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 资格、比例、Active、周期、大区等业务意图补充 | YES | 粗糙业务文档；不单独定义 Epoch、manifest、checkpoint 等技术合同 |
 | BL-008 | 候选方案 | `Redemption_PV_Amount_Migration_检查方案_v1.0.md` | v1.0 | 候选范围、检查项和 Loop 闭环设计 | YES | 作为比较输入，不自动成为权威标准 |
 | BL-009 | 候选方案 | `PV_Amount_Migration_d74_检查方案_v1.0_other.md` | v1.0 | 候选范围、文件定位和验收细化 | YES | 作为比较输入；候选断言按第 15.1 节逐条登记后决定保留、转检查项或删除 |
-| BL-010 | SQL | `sql_uat/CALC_PV.sql`、`CALC_BE_E.sql`、`CALC_BE_PE.sql`、`CALC_BE_SE_COUNTRY.sql`、`CALC_BE_EAB.sql`、`CALC_BE_TB.sql` | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | PV、Elite、PE、SE、EAB 及 TB Legacy oracle | YES | 执行阶段仍须从固定 commit 完整读取并记录 blob/SHA |
-| BL-011 | SQL | `CALC_LV_ELITE.sql`、Honor/LB、编排、状态、汇总和发布相关有效 SQL | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | rank、Honor、Leadership、Period、执行顺序和结果表写入 | YES | 已逐文件读取；rank 0/10/20/30、Honor 12期窗口与2/3次门槛、只升不降、LB双闸门及编排/状态/汇总规则支持§8/§9预期；blob见下表 |
-| BL-012 | Python | 第 4.3 节列出的当前实现模块 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 当前实现事实、生产可达性和差异定位 | NO | 方案阶段只固定范围；执行阶段须从 2475c6c4 完整读取 |
-| BL-013 | 需求文档 | Skill 映射的 `Doc/` 需求与技术文档 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | SQL 解释、历史设计和业务上下文 | 部分 | 阶段 1 按映射逐份读取并验证是否过时；其中 `Doc/CALC_BE_E_需求分析_修订建议版.md` 已读取并用作 CHK-PUB-002 证据（见该项现状定性引用），其余映射需求文档待读 |
-| BL-014 | Schema/配置 | `sql/AR_CONFIG.sql`、经 DBA/架构批准的最小 schema manifest、SQL_MODE、Redis/Stream 配置 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb + 生产/UAT 批准清单待提供 | 覆盖本仓库全部生产可达输入、Redis 权威状态、事件/outbox 接口、有效 SQL oracle 所涉表，以及验证 amount version、金额字段类型与单位、主键/唯一键、数据库 assignment 和发布证明所必需的关系库对象 | NO | 依 DEC-009 采用批准的最小清单；清单须记录生产/UAT 环境、数据库版本、全局及会话 SQL_MODE、DDL 导出时间、对象版本和 SHA-256；清单外对象须有“不影响本专项”的调用链证据；任何必需对象缺失时，对应检查项标记 `BLOCKED` |
+| BL-010 | SQL | `sql_uat/CALC_PV.sql`、`CALC_BE_E.sql`、`CALC_BE_PE.sql`、`CALC_BE_SE_COUNTRY.sql`、`CALC_BE_EAB.sql`、`CALC_BE_TB.sql` | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | PV、Elite、PE、SE、EAB 及 TB Legacy oracle | YES | 执行阶段仍须从固定 commit 完整读取并记录 blob/SHA |
+| BL-011 | SQL | `CALC_LV_ELITE.sql`、Honor/LB、编排、状态、汇总和发布相关有效 SQL | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | rank、Honor、Leadership、Period、执行顺序和结果表写入 | YES | 已逐文件读取；rank 0/10/20/30、Honor 12期窗口与2/3次门槛、只升不降、LB双闸门及编排/状态/汇总规则支持§8/§9预期；blob见下表 |
+| BL-012 | Python | 第 4.3 节列出的当前实现模块 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 当前实现事实、生产可达性和差异定位 | NO | 方案阶段只固定范围；执行阶段须从 3891f4b9 完整读取 |
+| BL-013 | 需求文档 | Skill 映射的 `Doc/` 需求与技术文档 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | SQL 解释、历史设计和业务上下文 | 部分 | 阶段 1 按映射逐份读取并验证是否过时；其中 `Doc/CALC_BE_E_需求分析_修订建议版.md` 已读取并用作 CHK-PUB-002 证据（见该项现状定性引用），其余映射需求文档待读 |
+| BL-014 | Schema/配置 | `sql/AR_CONFIG.sql`、经 DBA/架构批准的最小 schema manifest、SQL_MODE、Redis/Stream 配置 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 + 生产/UAT 批准清单待提供 | 覆盖本仓库全部生产可达输入、Redis 权威状态、事件/outbox 接口、有效 SQL oracle 所涉表，以及验证 amount version、金额字段类型与单位、主键/唯一键、数据库 assignment 和发布证明所必需的关系库对象 | NO | 依 DEC-009 采用批准的最小清单；清单须记录生产/UAT 环境、数据库版本、全局及会话 SQL_MODE、DDL 导出时间、对象版本和 SHA-256；清单外对象须有“不影响本专项”的调用链证据；任何必需对象缺失时，对应检查项标记 `BLOCKED` |
 | BL-015 | 继承合同原文 | `PV_Amount_Migration_Checklist_Final_v2.15.md` | Final v2.15 | Epoch、coverage、ledger、amount version 等未被 v2.25 覆盖的继承技术条款 | YES | 用户已提供原文副本并成功读取；SHA-256 `c2f52559e4793674de5ed8616facf1f77a260287281f2b2f98d911808e1a2754`；不再因原文缺失将相关继承条款降级为 `UNVERIFIABLE`。实际交付件名为 `PV_Amount_Migration_Checklist_Final_v2.15.md`；本行使用真实文件名，不再维护下划线别名 |
 
 #### BL-011 SQL 证据登记表
 
-| 范围 | 有效 SQL | 2475c6c4 blob SHA |
+| 范围 | 有效 SQL | 3891f4b9 blob SHA |
 |---|---|---|
 | Elite / rank | `sql_uat/CALC_LV_ELITE.sql` | `45f874573026652bfc1c4ab3a2180573e781db4f` |
 | Elite 历史最高 | `sql_uat/CALC_LV_ELITE_HIGHEST.sql` | `2227a913c84f36b993f0ee810ef923f3fd4d8271` |
@@ -267,7 +270,7 @@ Redemption 是以 Kafka/MQ、Redis、Dask/RAPIDS、MySQL/MariaDB 和推荐网/�
 | 项目 | 基线值 |
 |---|---|
 | Git 分支 | `master` |
-| Git commit | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| Git commit | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | Python 版本 | `3.11`（来自 `environment.yml`；UAT实际版本须回传） |
 | 依赖锁文件 | `requirements.txt`：confluent-kafka 2.8.0、deltalake 1.2.1、delta-spark 3.3.2、pyspark 3.5.7、pydantic 2.11.10、redis 7.1.1、redis-om 1.0.6、apscheduler 3.10.4；`environment.yml` 摘要须入证据包 |
 | 数据库及版本 | `MySQL/MariaDB；服务器版本须随 DEC-009 批准的最小 schema manifest 回传，当前待补充` |
@@ -369,12 +372,12 @@ flowchart TD
 | 检查项编号 | 检查对象 | 预期规则 | 检查方法 | 通过标准 | 优先级 | 执行环境 | 计划证据 |
 |---|---|---|---|---|---|---|---|
 | CHK-GOV-001（RETIRED） | 编制记录已固化于第 15.1 节，非执行阶段检查对象 | 两份候选方案的章节、枚举和断言已分类登记；不再由方案自检其编制质量 | — | `RETIRED`；保留编号，不进入执行状态矩阵 | — | — | 第 15.1 节候选断言处置附录 |
-| CHK-ARCH-001 | GitHub `master@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`、`AGENTS.md`、两个项目 Skill、审查包、DEC-009 批准的最小 schema manifest | 审查只能使用固定 commit 和成功读取材料；先应用文件过滤，再建立 SQL/文档/Python 映射；批准的最小 schema manifest 须满足 DEC-009 的范围、元数据和清单外排除证据；排除对象不得作为当前事实证据 | STATIC | commit 固定；必检材料全部读取；schema manifest 中任何必需对象缺失时，对应检查项显式 `BLOCKED`；无排除文件进入证据集 | P1 | DEV | commit/文件 SHA、有效文件清单、schema manifest 批准记录与对象 SHA、清单外调用链排除证据、Skill 加载记录 |
+| CHK-ARCH-001 | GitHub `master@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`、`AGENTS.md`、两个项目 Skill、审查包、DEC-009 批准的最小 schema manifest | 审查只能使用固定 commit 和成功读取材料；先应用文件过滤，再建立 SQL/文档/Python 映射；批准的最小 schema manifest 须满足 DEC-009 的范围、元数据和清单外排除证据；排除对象不得作为当前事实证据 | STATIC | commit 固定；必检材料全部读取；schema manifest 中任何必需对象缺失时，对应检查项显式 `BLOCKED`；无排除文件进入证据集 | P1 | DEV | commit/文件 SHA、有效文件清单、schema manifest 批准记录与对象 SHA、清单外调用链排除证据、Skill 加载记录 |
 | CHK-ARCH-002 | Kafka/MQ 消费入口、订单服务、增量服务、月结编排、writer、Recalc consumer | 每个目标合同必须落在真实生产可达路径；孤立函数、demo、smoke 和未接线服务不能视为实现 | STATIC | 所有 P0/P1 目标实现均存在生产可达调用点；直接调用和补数路径不能绕过关键守卫 | P0 | BOTH | import/call graph、启动脚本、部署任务、Topic/Stream/存储过程调用记录 |
-| CHK-ARCH-003 | 目标 `Common/PvAmount.py`、Until/Common.py、各服务本地金额解析器 | 公共金额模块位于最低层；Common 仅被 User/Placement/Bonus 依赖；不得形成 PvAmount↔奖金模块循环；同一职责不得存在多个不一致实现 | STATIC | 依赖图满足单向规则；所有生产金额边界调用已批准公共适配器 | P1 | DEV | import graph、AST 搜索、重复函数清单 |
+| CHK-ARCH-003 | 目标 `Common/PvAmount.py`、`Redishelper/PVAmountConfigProvider.py`、各服务本地金额解析器 | 公共金额模块位于最低层且不得配置 I/O；flag Provider 位于 Redis infrastructure 层并复用既有连接；所有 production consumer 只接收同一 immutable run config，不得自行 Redis GET、查 AR_CONFIG、读 env 或 fallback；同一职责不得存在多个不一致实现 | STATIC | 依赖图满足单向规则；`Common/PvAmount.py` 不 import redis/User/Model.User/奖金模块；Provider 和 consumer 路径唯一 | P1 | DEV | import graph、AST 搜索、直接 flag GET/环境变量/fallback 扫描 |
 | CHK-DATA-001 | 订单/退款消息 schema、DB 批量装载、UserStats/Placement/Elite 增量入口 | 只允许“外部十进制字符串→units”和“DB Decimal/string→units”两处放大；内部服务只接收严格 units-int，拒绝 bool/int raw/float/指数/NaN/Infinity | EXECUTION | 仅两处边界转换；所有内部入口严格类型校验；三路收到相同 int | P0 | BOTH | schema、adapter 单测、入口失败日志、normalized payload |
 | CHK-DATA-002 | PV/BV/GPV、1L/2L、结余、奖金基数的 Python、pandas/dask/cuDF/NumPy 数据列 | 计算域统一 int64 micro-units（PV_SCALE=1,000,000）；禁止 float 标量/列、Decimal(str(float))、int(round(float)) 和 join 后静默浮点提升 | EXECUTION | 编码矩阵覆盖全部金额列；无生产 float 链；mutation 均被捕获 | P0 | BOTH | AST/类型扫描、DataFrame dtypes、mutation 测试、运行时断言 |
-| CHK-DATA-003 | UserStats、EliteBonusStats、所有持久化金额模型和 Redis 记录 | version=2 表示 micro-units；缺失/None 为 legacy/unknown，禁止直接进入新计算域；其他值 fail-loud；无金额模型不新增 version | EXECUTION | 全部金额模型和入口执行一致版本策略；UserPeriodHighestRank 等无金额模型保持不适用 | P0 | BOTH | 模型定义、Redis 样例、序列化/反序列化测试、迁移清库/重建记录 |
+| CHK-DATA-003 | UserStats、EliteBonusStats、所有持久化金额模型和 Redis 记录 | version=2 表示完整 V2 domain；缺失/None 为 legacy/unknown；version gate 只在进入 V2 calculation entry 时强制。00/01 的共享-key Legacy authoritative record 不得 stamping 2；只有获批 11 域且全部共享金额字段满足 V2 合同的 record 才能写2；模型默认永不为2 | EXECUTION | 全部金额模型和入口执行一致条件化版本策略；test-only 11 只用于 factory/domain 单测且不能进入 production admission；UserPeriodHighestRank 等无金额模型保持不适用 | P0 | BOTH | DEC-019、模型定义、真实 factory AST 扫描、Redis 样例、序列化/反序列化与 TC-FLAG-14～21 |
 | CHK-DATA-004 | RatesService、AR_CONFIG 快照、E/PE/LB/EAB/SE 配置解析及 TB SQL/oracle | 费率使用整数 ppm；缺失/显式0按已批准合同为0，重复/非法阻断；负费率允许并作为有符号 ppm 按各奖项既有配置及 SQL/oracle 计算，不得仅因负值阻断；费率最大值/专项上限由前一业务系统校验，当前系统不作二次业务校验；Country 空字符串/字面0及 EAB/LB 非 `bonus` TYPE 同样不列为当前系统二次校验项；TB 费率解析与 `capping=0` 无条件按配置 + SQL/oracle 验收；其余 Country/TYPE 路径仍按 EAB/SE/LB 独立矩阵处理 | DIFF | ppm 无 float；审计区分缺失与显式0；负费率按配置及 SQL/oracle 验收；不以已豁免的上游校验项判当前系统 FAIL；TB 费率/capping矩阵完成；SE exact raw TYPE；EAB/LB 不套用 SE 未批准规则 | P0 | BOTH | ConfigRequirementMatrix、原始行快照、解析结果、用户决策原文、TB SQL/oracle及SQL-Python差分 |
 | CHK-DATA-005 | AR_PERIOD、PERIOD_NUM、CALC_MONTH、事件时间、各服务入口和 writer | PERIOD_NUM 与 YYYYMM 语义不同；当前期必须唯一映射 AR_PERIOD；首期取 MIN；非首期 period-1 必须存在；CALC_MONTH=1..12；退款以批准时间为唯一权威时间字段，经 GMT+8 转换后映射 AR_PERIOD，业务生效时间、到达时间或本地时间不得替代 | DIFF | 无 YYYYMM 推导 period；缺上一期阻断；退款期以批准时间经 GMT+8 转换后唯一映射；writer/Active/config 与计算 run 一致 | P0 | BOTH | AR_PERIOD 样本、resolver 输出、DEC-006 用户原始决策、SQL/Python 参数、边界测试 |
 | CHK-DATA-006 | monthActivePV 唯一取值函数、AR_CONFIG→Delta→Redis 加载/失效链路、UserStats pv 源、PE/SE/Honor/LB/EAB/TB 的 is_active 输入及 Python 持久化活跃表读取路径；CALC_PV/MID7/AR_PERF_ACTIVE 仅作 SQL Legacy 区分性对照 | 门槛为 INTEGER_BV_ONLY、比较域 scale=100，30/30.00 可规范且30.1阻断；依 DEC-018，活跃结果无须物化为共享 snapshot，各消费方每次按同一 pv 源与唯一取值函数返回的 monthActivePV 各自现算，不读取持久化活跃表或把共享 snapshot 作为权威活跃源；PE/SE/LB/EAB/TB 不活跃不发，Elite active=N/A；run 启动取值后固化 manifest/checksum；目标供给链按 DEC-004 执行 Redis 为空等待2秒、再读 Delta、仍为空报错中断；配置行重复、负值、超出合理范围依 DEC-016 处理：负值/超范围由前一业务系统校验、当前系统不作二次业务校验；重复情形下取值函数只取一行、不阻断、不需特定排序规则 | DIFF | 唯一取值函数无默认/回退且所有消费可追溯；各消费方以同一派生规则各自现算，未建立共享 snapshot builder/唯一键不判 FAIL；Python 无持久化活跃表读取路径；供给链、run 冻结和各奖金行为符合 DEC-004；所有消费方 period/run/checksum 一致；缺失按 DEC-004 fail-loud；负值/超出合理范围由前一业务系统校验、当前系统不作二次业务校验；重复情形下取值函数确实只取一行且不阻断 | P0 | BOTH | DEC-004/DEC-018 用户原始决策、取值函数与调用图、配置原始值、Redis/Delta 加载及失败日志、各奖金输入与 manifest/checksum、DEC-016 用户原始决策、AR_CONFIG.CONFIG_NAME UNIQUE KEY 证据 |
@@ -392,17 +395,17 @@ flowchart TD
 | CHK-BIZ-011 | LeadershipBonusGPUService、CALC_BE_LB_COUNTRY、Honor/Active 派生/Country输入 | Active 由 LB 按 DEC-018 使用同一派生规则现算，不以共享 snapshot 为权威源；九代比例4.5/4.5/4.5/3.6/3.6/3.6/1.8/1.8/1.8；每国家/大区分级加权；layer<=ori进入分母、layer<=bonus发放；不活跃算理论不发；Country 空字符串/字面0及 LB 非 `bonus` TYPE 由前一业务系统校验，不列为当前系统二次校验项；其余 Country/TYPE 按 LB 专项矩阵 | DIFF | 双重拦截、Active 派生、合规 Country、ppm、截断和writer proof全部满足；未建设共享 snapshot 物化构件不判 FAIL；不以已豁免的上游校验项判当前系统 FAIL | P1 | BOTH | 逐代逐国 SQL-Python 差分、DEC-018 及其他用户决策原文、分母/理论/实际明细 |
 | CHK-EVT-001 | 订单/退款事件、GLOBAL_EVENT_REGISTRY、REFUND_EVENT_LEDGER、原订单状态 | 外部身份至少(source_system,source_event_id)且不含period；相同identity+hash幂等；不同hash冲突；任意商品退款触发原订单整单BV一次全额冲销；同一原订单首次整单冲销完成后的第二次整单冲销请求按 duplicate/no-op 处理，不再扣减；未发回原期、已发进处理当前期；退款期仅由批准时间经 GMT+8 转换后确定 | EXECUTION | registry全局唯一、原订单状态单向、退款期只由批准时间确定且首次解析后稳定、第二次整单冲销幂等 no-op、无二次负BV、证据完整 | P0 | UAT | registry/ledger、原订单和退款状态、DEC-005/DEC-006 用户原始决策、跨期重放日志、金额前后查询 |
 | CHK-EVT-002 | raw event、normalized delivery、UserStats/Placement/Elite stage | 每个业务revision只生成一个 immutable effective_pv_delta_units；previous/current revision连续；三个 stage 不重算、不各自钳制；重复幂等、revision gap阻断；依 DEC-010，测试阶段豁免生产级 Raw/Normalized checkpoint 与保留策略材料，但不豁免本项内容正确性与幂等验证 | EXECUTION | 每delivery三stage结果可追踪且无自行解析/钳制；缺少生产级 checkpoint/保留策略不判测试阶段 FAIL，但 Gate C 保持 `OPEN` | P0 | BOTH | DEC-010 用户原始决策、raw/normalized payload、stage ledger、三路输入hash和状态差分、Gate C 状态登记 |
-| CHK-EVT-003 | UserStats/Placement/Elite 状态key、消息入口、核心写入口、SETTLEMENT_EPOCH_MANAGER | 权威Epoch仅七状态；局部状态原子映射；消息入口和核心写入口双重守卫；全量前冻结新消费、等待in-flight归零、固定位置；Elite状态包含在统一守卫；persisted=false不得OPENED | EXECUTION | 三个子系统统一快照判定；OPENED仅在committed proof后；epoch单调 | P0 | UAT | 状态转换日志、锁/epoch快照、并发测试、offset/in-flight证明 |
+| CHK-EVT-003 | UserStats/Placement/Elite 状态key、消息入口、核心写入口、SETTLEMENT_EPOCH_MANAGER、PV amount run config | 权威Epoch仅七状态；局部状态原子映射；每个 settlement/recalculation/approved batch 在业务处理前原子加载一次 Redis flag snapshot 并冻结 READ/WRITE/config_version；00/01准入，10=`INVALID_STATE`，未批准11=`V2_STATE_NOT_AUTHORIZED`；运行途中不得 refresh | EXECUTION | 三个子系统统一快照判定；当前 run 不可见 Redis 中途变化，下一 run 才重载；OPENED仅在committed proof后；epoch/config_version 均可审计 | P0 | UAT | 状态转换日志、锁/epoch/config snapshot、并发测试、TC-FLAG-07/09/10/11 |
 | CHK-EVT-004 | REBUILD_COVERAGE_MANIFEST、NORMALIZED_DELIVERY_LEDGER、EVENT_STAGE_LEDGER | coverage按topic/partition记录next offset/checksum/revision；delivery状态与stage状态分离；唯一(event,generation,stage)；covered逐stage标REBUILT_COVERED；未覆盖旧delivery生成新generation并supersede+映射 | EXECUTION | manifest字段齐全、状态集合正确、replay后金额和stage ledger一致 | P0 | UAT | manifest/ledger记录、旧epoch replay测试、checksum对账 |
 | CHK-EVT-005 | Redis 权威提交边界、业务状态、dirty、stage marker、outbox 哨兵、checkpoint | 依 DEC-008 权威存储为 Redis：业务状态、revision、dirty、stage 与 outbox 须在同一 Redis 权威提交（pipeline/Lua/CAS）内完成；哨兵载荷完整可供下游落库；不得声称跨 Redis 与关系库的原子性；ACK/offset 不得早于权威提交；IN_DOUBT 可恢复；checkpoint 与事件持久化顺序可证明。关系库落库及两表同事务由业务系统负责，不在本项验收范围。依 DEC-010，生产级 Raw/Normalized checkpoint/保留策略材料在测试阶段豁免，但本项提交顺序与恢复验证不豁免 | EXECUTION | Redis 侧原子单元与恢复程序有可复现证据；哨兵载荷完整；测试使用的 checkpoint 不越过未完成业务；缺少生产级 Raw/Normalized checkpoint/保留策略材料不判测试阶段 FAIL，但 Gate C 保持 `OPEN` | P0 | UAT | DEC-008/DEC-010 用户原始决策、Redis pipeline/Lua 提交证据、故障注入、outbox/哨兵/checkpoint 前后状态、Gate C 状态登记 |
 | CHK-EVT-006 | RecalcStreamConsumer、所有 producer 和事件注册表 | 每个事件变体唯一识别并绑定schema和处置；JSON顶层必须object；未知/空/缺handler不得静默成功；仅在handler/audited noop/DLQ后ACK；同名SETTLEMENT_PERIOD_DONE按可靠discriminator路由 | EXECUTION | 无分支落空/pass默认成功；schema错误进入统一重试/DLQ；同名变体不混淆 | P0 | UAT | registry、schema、handler结果、PEL/ACK/DLQ和重复投递记录 |
 | CHK-EVT-007 | system:recalc_outbox_stream、四类producer、consumer group/PEL/XAUTOCLAIM | 权威payload在所有必要group ACK前不得无证明裁剪；若提前裁剪必须有持久重放源；容量按峰值/停机/延迟/group数证明；deleted IDs必须告警并恢复 | EXECUTION | 保留策略有容量证明；deleted ID可从权威源恢复并完成stage | P0 | UAT | 容量模型、stream/group指标、>100000 backlog测试、deleted-ID恢复记录 |
 | CHK-PUB-001 | 各奖金writer、Elite bonus/SOURCE、candidate/staging/live表、manifest | candidate未提交不可读；同run相关表原子可见；空candidate清旧period；资格/version/source-clean校验；row/key/amount/checksum/revision对账；依 DEC-008，本仓库不执行关系库落库，哨兵 persisted 恒为 false；若出现 persisted=true 必须有 committed proof；结果对象、唯一键、assignment 与发布证明所需关系库对象须纳入 DEC-009 批准的最小 schema manifest | EXECUTION | 原子可见、唯一键、空覆盖、资格/版本/dirty校验和reconciliation全部满足；必需 schema 对象缺失时本项 `BLOCKED` | P0 | UAT | DEC-009 批准的最小 schema manifest、staging/live切换、空快照查询、manifest/reconciliation/checksum |
-| CHK-PUB-002 | 全仓 Web/RPC 框架与读取入口扫描、CALC_BONUS 清空/重建调用时序 | 本引擎不新增任何对外读取入口；AR_CALC_BONUS_E 等结果表的清空/重建时序相对 2475c6c4 基线未扩大或改变；维护期读取一致性机制建设与验收不在本方案范围，不因业务系统如何处理该场景而判本项 FAIL | STATIC | 无新增读取入口；清空/重建时序与基线一致 | P1 | DEV | DEC-007 用户原始决策、API框架扫描记录、CALC_BONUS 调用顺序diff |
+| CHK-PUB-002 | 全仓 Web/RPC 框架与读取入口扫描、CALC_BONUS 清空/重建调用时序 | 本引擎不新增任何对外读取入口；AR_CALC_BONUS_E 等结果表的清空/重建时序相对 3891f4b9 基线未扩大或改变；维护期读取一致性机制建设与验收不在本方案范围，不因业务系统如何处理该场景而判本项 FAIL | STATIC | 无新增读取入口；清空/重建时序与基线一致 | P1 | DEV | DEC-007 用户原始决策、API框架扫描记录、CALC_BONUS 调用顺序diff |
 | CHK-TEST-001 | User/Test、MessageConsumer/Test、test_*.py、demo/smoke/usage脚本 | 测试必须导入当前commit生产实现、断言业务结果和失败路径；v2.25 §8.1/§8.2 六个具名文件必须逐一处置；§8.3 八个期间夹具必须按分类表登记；demo/print/自造替身不计生产通过 | EXECUTION | 测试命中生产代码；mutation被捕获；六文件处置和八文件分类完整；结果分类真实 | P1 | DEV | pytest收集、import路径、覆盖路径、具名文件处置表、期间夹具分类表、mutation survival |
 | CHK-TEST-002 | CALC_PV及已实现Python奖金对应的有效SQL和Python服务 | 同一数据、period、config、topology和精度口径运行 SQL 与 Python；Python Active 依 DEC-018 由各消费方按同一 pv 源与 monthActivePV 派生规则各自现算，不把共享 snapshot 作为权威源；Legacy parity 与 approved corrected 分列；每个差异可定位到规则/字段/阶段 | DIFF | 所有P0/P1字段差分为0或有已批准差异说明；未建设共享 Active snapshot 物化构件不判 FAIL | P0 | UAT | DEC-018 用户原始决策、fixture、SQL中间表、Python中间结果、逐字段差分和oracle版本 |
 | CHK-TEST-003 | 消息入口、锁、revision、Epoch、outbox、writer、consumer、Stream | 覆盖重复/乱序/并发、锁过期、部分提交、broker/Redis/DB失败、进程崩溃、重启reclaim和rollback；任一已执行功能测试不得漏算、双计或假成功；DEC-010 仅豁免测试阶段的生产级 Raw/Normalized checkpoint/保留策略材料 | EXECUTION | 已执行范围无漏/重、无假ACK/OPENED、恢复后checksum与干净重跑一致；生产级材料未提供时 Gate C 保持 `OPEN`，不得据此宣称生产就绪 | P0 | UAT | DEC-010 用户原始决策、故障注入矩阵、每次退出码、状态时间线、最终对账、Gate C 状态登记 |
-| CHK-TEST-004 | 检查项、测试执行清单、审计包、证据包、复核报告 | 开发环境不能执行的项标PENDING_TEST_ENV；UAT按固定commit/镜像/配置执行并回传原始证据；DEC-009 批准清单与 DEC-009/010 原始用户确认文本必须入审计包；DEC-010 豁免项须与 Gate C `OPEN` 状态分别登记；报告须逐项列出P0-0～P0-12和T0-1～T0-30状态，不回改方案 | STATIC | P0/P1全有明确状态；P0/T0矩阵无合并省略；schema manifest 范围及缺失对象可追踪；测试豁免不被误写成生产 Gate 关闭；overlay有原始确认文本而非报告转述；证据可重放且与方案ID一一对应 | P1 | BOTH | UAT回传包、DEC-009 批准清单、DEC-009/010 原始确认文本、Gate C 状态登记、P0/T0逐项矩阵、证据索引、报告交叉引用 |
+| CHK-TEST-004 | 检查项、测试执行清单、审计包、证据包、复核报告 | 开发环境不能执行的项标PENDING_TEST_ENV；UAT按固定commit/镜像/配置执行并回传原始证据；DEC-009/010/019 原始用户确认文本必须入审计包；TC-FLAG-01～23 逐项留痕，fake/stub 不得冒充真实 Redis UAT；DEC-010 豁免项须与 Gate C `OPEN` 状态分别登记 | STATIC | P0/P1与TC-FLAG全有明确状态；schema manifest 范围及缺失对象可追踪；测试豁免不被误写成生产 Gate 关闭；overlay有原始确认文本而非报告转述；证据可重放且与 TASK/WORK/AC 一一对应 | P1 | BOTH | UAT回传包、DEC-009/010/019 原始确认文本、Gate C 状态登记、P0/T0/TC-FLAG逐项矩阵、证据索引、报告交叉引用 |
 ---
 
 ## 9. 单项检查定义模板
@@ -426,10 +429,10 @@ flowchart TD
 | 关联范围 | S-001 / S-012 / S-013 / S-015 |
 | 权威依据 | BL-001～BL-007、BL-014；AGENTS.md §2～§9；两个项目 Skill；DEC-009 用户业务决策 |
 | 待查实现 | 仓库树、Git commit、文件 SHA、过滤脚本、SQL/文档映射表、DEC-009 批准的最小 schema manifest |
-| 前置条件 | 可访问 GitHub `master@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 和全部审查包；DBA/架构批准主体可追溯 |
+| 前置条件 | 可访问 GitHub `master@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 和全部审查包；DBA/架构批准主体可追溯 |
 | 检查方法 | STATIC |
 | 执行步骤 | 1. 固定 branch、完整 commit SHA 与仓库文件树<br>2. 按 Skill 生成纳入/排除清单并计算摘要<br>3. 逐项验证 SQL/文档/Python 路径存在且映射未过时<br>4. 核验最小 schema manifest 的 DBA/架构批准记录、DEC-009 覆盖对象与必填元数据；对清单外对象逐项检查“不影响本专项”的调用链证据 |
-| 输入数据 | 2475c6c4 仓库文件树、d74cfb77 历史差异对照、审查包文件、Skill 排除清单、DEC-009 批准的最小 schema manifest |
+| 输入数据 | 3891f4b9 仓库文件树、d74cfb77 历史差异对照、审查包文件、Skill 排除清单、DEC-009 批准的最小 schema manifest |
 | 预期结果 | 形成唯一有效材料清单；每个排除项有规则来源；每个映射对象可定位；schema manifest 覆盖全部生产可达输入、Redis 权威状态、事件/outbox、有效 SQL oracle 表及 version/金额/键/assignment/发布证明必需对象 |
 | 通过标准 | commit 固定；必检材料全部读取；schema manifest 的批准主体、环境、数据库版本、全局/会话 SQL_MODE、DDL 导出时间、对象版本和 SHA-256 完整；清单外对象排除证据成立；无排除文件进入证据集 |
 | 失败标准 | commit 不唯一、必检材料未读取却被引用、schema manifest 未获批准/范围或元数据不完整、清单外对象无“不影响本专项”的调用链证据、排除对象用于证明当前行为或映射失效未记录；任何必需对象缺失时不得推定通过，须将受影响检查项标记 `BLOCKED` |
@@ -585,7 +588,7 @@ flowchart TD
 | 检查目的 | 证明 Python 活跃值无须物化为共享 snapshot，而是由各消费方按同一 pv 源和唯一 monthActivePV 取值函数在每次判定时各自现算；供给侧加载失败 fail-loud，并避免持久化活跃表、共享 snapshot 权威源、各奖金自定义门槛、不活跃分母/发放行为漂移及小数门槛被错误接受。 |
 | 关联范围 | S-005～S-014 / MAP-002～MAP-012 |
 | 权威依据 | DEC-004/DEC-018 用户业务决策（CURRENT_CONTRACT overlay）；DEC-016 用户业务决策；BL-005/BL-006；v34 §3.3/§7.2；v2.25 §5.2/§5.3；Final v2.15 §2.4/§2.5（其中读取 AR_PERF_ACTIVE 的既有要素已被 DEC-004 取代）；奖金制度.md 活跃资格 |
-| 待查实现 | 消费侧：monthActivePV 取值方法/静态函数（`2475c6c4` 中不存在）、`User/PEBonusService.py` 的 IS_ACTIVE 派生点、`PEBonusService_Main.py` 的 `ddf_user_perf=None` 入口、`SuperEliteBonusService.required_perf` 注入及其生产 producer（当前不存在）、Honor 的 is_active 缺省处理、UserStats 的 pv 聚合；供给侧：AR_CONFIG→Python 的同步链路、目标 Redis 缓存/失效重载及 Delta 兜底（`2475c6c4` 中均不存在）。CALC_PV/MID7/AR_PERF_ACTIVE 仅作为 SQL Legacy 区分性对照，不作为 Python 应读取的活跃源。 |
+| 待查实现 | 消费侧：monthActivePV 取值方法/静态函数（`3891f4b9` 中不存在）、`User/PEBonusService.py` 的 IS_ACTIVE 派生点、`PEBonusService_Main.py` 的 `ddf_user_perf=None` 入口、`SuperEliteBonusService.required_perf` 注入及其生产 producer（当前不存在）、Honor 的 is_active 缺省处理、UserStats 的 pv 聚合；供给侧：AR_CONFIG→Python 的同步链路、目标 Redis 缓存/失效重载及 Delta 兜底（`3891f4b9` 中均不存在）。CALC_PV/MID7/AR_PERF_ACTIVE 仅作为 SQL Legacy 区分性对照，不作为 Python 应读取的活跃源。 |
 | 前置条件 | P0-10 的 INTEGER_BV_ONLY/scale=100 核心已冻结；缺失情形按 DEC-004 fail-loud；活跃结果形态按 DEC-018 已 `CLOSED`，无须物化共享 snapshot、各消费方按同一派生规则各自现算；重复、负值、超出合理范围按 DEC-016 已 `CLOSED`，负值/超范围不作二次业务校验、重复取一行。 |
 | 检查方法 | SQL-PYTHON-DIFF |
 | 执行步骤 | 1. 反向核验 Python 代码路径中不存在读取 MySQL 活跃表（含 `AR_PERF_ACTIVE`）的调用，并与 SQL Legacy 的 MID7/AR_PERF_ACTIVE 用途分开登记<br>2. 核验唯一 monthActivePV 取值函数及 PE/SE/Honor/LB/EAB/TB 调用链；确认各消费方均以同一 pv 源和同一派生规则各自现算，且不把共享 snapshot 作为权威活跃源；追踪 SE 注入值的生产 producer 与来源<br>3. 测试 30、30.00、30.1、缺失、重复、负值和极大值配置：30/30.00 规范化、30.1 阻断；缺失按 DEC-004；重复/负值/极大值按 DEC-016：负值、极大值（超出合理范围）由前一业务系统校验、不作二次业务校验；重复情形下核验取值函数确实只取一行且不阻断，不自造排序规则<br>4. 核验 AR_CONFIG 数据按 tb_user 同步模式进入 Delta 和 Redis；变更时删除并重载 Redis；Redis 为空时等待2秒并重新读取 Redis，仍为空才转读 Delta，Delta 仍为空则报错中断<br>5. 在 run 启动时取值并固化 manifest/checksum，验证 run 期间缓存失效/重载不改变已固化门槛；核对各奖金理论计算、分母与最终发放语义 |
@@ -686,7 +689,7 @@ flowchart TD
 | 关联范围 | S-012 / MAP-004 |
 | 权威依据 | BL-005/BL-006；v2.25 §7.5/§13.3/状态矩阵；v34 §14；DEC-018 用户业务决策；`redemption-file-filter`；`redemption-sql-doc-map`；`CALC_BE_TB.sql`；Team Bonus 文档和 `Doc/奖金制度.md` |
 | 待查实现 | `User/team_bonus_tb.py`、`User/run_team_bonus_tb.py`、相关测试、启动脚本、编排、import/call graph、writer |
-| 前置条件 | 固定 2475c6c4 代码树、真实部署/启动清单、AR_CONFIG 快照及隔离 SQL/oracle fixture 可读取 |
+| 前置条件 | 固定 3891f4b9 代码树、真实部署/启动清单、AR_CONFIG 快照及隔离 SQL/oracle fixture 可读取 |
 | 检查方法 | SQL-PYTHON-DIFF |
 | 执行步骤 | 1. 从启动脚本、编排和 import/call graph 判断 Team Bonus Python 是否生产可达；<br>2. 核验 oracle/demo 显式标记及生产隔离；<br>3. 不依赖生产可达性，无条件以配置 + SQL/oracle 执行标准对碰、rate矩阵、`capping=0`、Active、奖金池、TB_RATE六位截断、最终奖金及结余独立更新验收；其中 Python Active 必须按 DEC-018 由消费方使用同一 pv 源与 monthActivePV 派生规则现算，不把共享 snapshot 作为权威源，未建设 snapshot builder/唯一键/写入时点不判 FAIL；负 rate 必须允许并按有符号 ppm 与 SQL/oracle 计算，不得仅因负值阻断；<br>4. 将units-int生产实现缺失按v2.25既有状态登记为Gate缺口，不判Python算法失败、不要求本轮建设；<br>5. 核验测试证据等级，demo/print不能计为生产通过 |
 | 输入数据 | 生产部署/启动清单、import graph；标准对碰、rate缺失/0/正/负/重复/非法、`capping=0`、inactive、零分母、仅一侧结余变化样例 |
@@ -1002,16 +1005,16 @@ flowchart TD
 
 | 属性 | 内容 |
 |---|---|
-| 检查目的 | 证明本结算引擎自身不新增任何正式读取入口，且其对共享结果表（如 AR_CALC_BONUS_E）的清空/重建时序相对 2475c6c4 迁移前基线未发生扩大或改变；维护期读取一致性机制（含面向正式读取的 epoch/候选态暴露、BLOCK_ALL/SERVE_LAST_COMMITTED 读取策略与读取门控、正式版本切换）依 DEC-007 确立为业务系统职责，不在本项验收范围内，不因未实现而判 FAIL。 |
+| 检查目的 | 证明本结算引擎自身不新增任何正式读取入口，且其对共享结果表（如 AR_CALC_BONUS_E）的清空/重建时序相对 3891f4b9 迁移前基线未发生扩大或改变；维护期读取一致性机制（含面向正式读取的 epoch/候选态暴露、BLOCK_ALL/SERVE_LAST_COMMITTED 读取策略与读取门控、正式版本切换）依 DEC-007 确立为业务系统职责，不在本项验收范围内，不因未实现而判 FAIL。 |
 | 关联范围 | S-014 / MAP-011 |
 | 权威依据 | DEC-007 用户业务决策（narrows v34 §8.1/§8.6 提出的面向正式读取的 epoch/候选态暴露与读取门控机制为超出本仓库范围；引擎内部 epoch 生命周期仍属本仓库范围，由 CHK-EVT-003/CHK-EVT-004 验收） |
-| 待查实现 | 本仓库（SQL legacy 与 Python 迁移双侧）是否存在任何对外读取 API/RPC 框架；CALC_BONUS 主编排中 CALC_BE_REM_DATA 的 TRUNCATE 与 CALC_BE_E/CALC_BE 的重建时序，相对 2475c6c4 基线是否保持不变；面向正式读取的 epoch/候选态暴露（read path、status API）、BLOCK_ALL/SERVE_LAST_COMMITTED 读取策略与读取门控，以及业务系统落库后的正式版本切换，明确为业务系统职责，不在本仓库待建设范围；publish 的 retry/rollback 按提交方分层——Redis 权威提交/outbox 发送/引擎内部 run 失败恢复仍属本仓库职责（由 CHK-EVT-003/CHK-EVT-004/CHK-EVT-005 承接），业务系统落库后的正式读版本切换及其失败重试/回滚为业务系统职责 |
+| 待查实现 | 本仓库（SQL legacy 与 Python 迁移双侧）是否存在任何对外读取 API/RPC 框架；CALC_BONUS 主编排中 CALC_BE_REM_DATA 的 TRUNCATE 与 CALC_BE_E/CALC_BE 的重建时序，相对 3891f4b9 基线是否保持不变；面向正式读取的 epoch/候选态暴露（read path、status API）、BLOCK_ALL/SERVE_LAST_COMMITTED 读取策略与读取门控，以及业务系统落库后的正式版本切换，明确为业务系统职责，不在本仓库待建设范围；publish 的 retry/rollback 按提交方分层——Redis 权威提交/outbox 发送/引擎内部 run 失败恢复仍属本仓库职责（由 CHK-EVT-003/CHK-EVT-004/CHK-EVT-005 承接），业务系统落库后的正式读版本切换及其失败重试/回滚为业务系统职责 |
 | 前置条件 | DEC-007 已 `CLOSED` |
 | 检查方法 | STATIC |
-| 执行步骤 | 1. 全仓（SQL legacy 与 Python 迁移双侧）静态扫描 Web/RPC 框架引用（Flask/FastAPI/gRPC 等）及 epoch/candidate/staging/manifest 相关命名，确认无新增对外读取入口<br>2. 对比 2475c6c4 基线中 CALC_BONUS 的 CALC_BE_REM_DATA（TRUNCATE）与 CALC_BE_E/CALC_BE（重建）调用顺序，确认 Python 迁移侧未改变该清空/重建时序、也未使其扩大<br>3. 核对本项通过/失败不依赖业务系统如何处理维护期读取，也不对业务系统提出验收要求 |
+| 执行步骤 | 1. 全仓（SQL legacy 与 Python 迁移双侧）静态扫描 Web/RPC 框架引用（Flask/FastAPI/gRPC 等）及 epoch/candidate/staging/manifest 相关命名，确认无新增对外读取入口<br>2. 对比 3891f4b9 基线中 CALC_BONUS 的 CALC_BE_REM_DATA（TRUNCATE）与 CALC_BE_E/CALC_BE（重建）调用顺序，确认 Python 迁移侧未改变该清空/重建时序、也未使其扩大<br>3. 核对本项通过/失败不依赖业务系统如何处理维护期读取，也不对业务系统提出验收要求 |
 | 输入数据 | 全仓 API/RPC 框架与 epoch 关键词扫描结果；CALC_BONUS 调用顺序基线与迁移后对比 |
 | 预期结果 | 本引擎不暴露任何新读取入口；AR_CALC_BONUS_E 等结果表的清空/重建时序相对基线未扩大或改变；维护期读取一致性机制的建设与验收不在本方案范围，无论业务系统查询的是本仓库结果表本身还是独立同步副本，均不因此判本检查项 FAIL。现状定性：Doc/CALC_BE_E_需求分析_修订建议版.md 明确该表供客服查询/财务对账使用，且 CALC_BACKUP 归档发生在整个 run 提交之后而非运行前——该窗口在 SQL legacy 系统中已长期存在；本决议不改变、也不要求消除该窗口，只明确其处置责任不在本仓库（此段为核验发现，非用户原文）。 |
-| 通过标准 | 全仓无新增 Web/RPC 框架或读取入口；CALC_BONUS 清空/重建调用顺序与 2475c6c4 基线一致；本检查项的判定不依赖、也不要求业务系统的读取处理方式。 |
+| 通过标准 | 全仓无新增 Web/RPC 框架或读取入口；CALC_BONUS 清空/重建调用顺序与 3891f4b9 基线一致；本检查项的判定不依赖、也不要求业务系统的读取处理方式。 |
 | 失败标准 | ① Python 迁移侧新增任何对外读取 API/RPC 端点；② 迁移后 CALC_BE_REM_DATA 的 TRUNCATE 与后续重建之间的时序相对基线被扩大或改变，且未同步告知；③ 本检查项被用于对业务系统提出验收要求，或以业务系统未处理该场景为由判本项 FAIL。 |
 | 所需证据 | DEC-007 用户原始决策；全仓 API/RPC 框架扫描记录；CALC_BONUS 调用顺序 diff（基线 vs 迁移后）；Doc/CALC_BE_E_需求分析_修订建议版.md 客服查询/财务对账用途引用（核验发现，非用户原文）。 |
 | 执行环境 | DEV |
@@ -1167,7 +1170,7 @@ v34 中列出的缺陷标签、Gate 状态和实现矩阵均按本节处理；�
 | TC-000 | CHK-GOV-001（RETIRED） | RETIRED：候选方案编制记录已转第15.1节附录 | 模板、候选方案A/B、固定材料清单 | 不执行；保留编号，不进入测试完成率 | DEV | NO | 第15.1节候选断言处置附录 |
 | TC-001 | CHK-DATA-001 | 外部金额规范字符串与非法类型 | 正/负两位小数字符串；JSON number、float、bool、指数、NaN | 仅规范字符串转换为确定units；非法输入受控失败 | BOTH | YES | adapter结果、异常和normalized payload |
 | TC-002 | CHK-DATA-002 | ×100/×1e6及float mutation | 对关键聚合注入scale和float mutation | 所有mutation被测试捕获，dtype保持整数 | DEV | YES | mutation报告、dtype快照 |
-| TC-003 | CHK-DATA-003 | 新旧编码隔离 | None/1/2/未知及混合version Redis记录 | 仅version=2进入新域，其他按合同阻断/隔离 | BOTH | YES | Redis前后值、异常 |
+| TC-003 | CHK-DATA-003 | 新旧编码隔离与条件化 stamping | None/1/2/未知、00/01/11及混合version Redis记录 | 仅真正进入获批 V2 domain 的完整 V2 record 写2；00/01共享-key Legacy record 不写2；legacy/unknown 只在进入 V2 calculation entry 时阻断 | BOTH | YES | Redis前后值、factory 扫描、TC-FLAG-15～21、异常 |
 | TC-004 | CHK-DATA-004 | 已实现奖金费率矩阵及TB无条件费率/capping矩阵 | 缺失、0、正值、负值、重复、非法值；TB `teamTouchRate{CALC_ID}` / `teamTouchCapping{CALC_ID}`；不构造当前系统费率最大值/专项上限业务拒绝用例 | 负费率允许并按有符号 ppm、既有配置及 SQL/oracle 计算，不得仅因负值阻断；当前系统不二次验证费率最大值/专项上限；TB费率与`capping=0`按SQL/oracle执行，不依赖生产可达性 | BOTH | YES | 原始配置、DEC-001/DEC-002 用户原始决策、解析结果、TB SQL/oracle及可达性记录 |
 | TC-005 | CHK-DATA-004 | 合规 Country 路径与 SE exact TYPE | Country 无行/合法/重复及 SE TYPE 精确/大小写/空白变体；Country 空字符串/字面0和 EAB/LB 非 `bonus` TYPE 不作为当前系统二次校验用例 | 合规 Country 路径按各奖金矩阵处理；SE非exact阻断；未以已豁免的上游校验项判当前系统 FAIL | UAT | YES | 配置、DEC-003 用户原始决策、校验和奖金差分 |
 | TC-006 | CHK-DATA-005 | 期间边界与退款批准时间归期 | 首期非1、缺上一期、跨年、period/month不匹配；批准时间与业务生效时间/到达时间分属不同期间；GMT+8月边界 | 唯一AR_PERIOD映射；退款期只由批准时间经GMT+8转换后确定；非法组合阻断 | BOTH | YES | DEC-006 用户原始决策、各候选时间字段原始值、resolver输出与查询 |
@@ -1188,13 +1191,13 @@ v34 中列出的缺陷标签、Gate 状态和实现矩阵均按本节处理；�
 | TC-021 | CHK-BIZ-011 | LB九代双重拦截 | ori与bonus不同、inactive、多国家/大区 | 分母/发放/金额逐层一致 | UAT | YES | 逐层逐国diff |
 | TC-022 | CHK-EVT-001 | 退款幂等/冲突/批准时间归期 | 同消息重放、同一原订单首次整单冲销完成后的第二次整单冲销请求、identity/hash冲突、金额不符、已发/未发；批准时间与业务生效时间/到达时间分属不同期间 | 只冲销一次；第二次整单冲销按 duplicate/no-op；其他冲突留证；退款期只由批准时间经GMT+8转换后确定且首次归期固定 | UAT | YES | DEC-005/DEC-006 用户原始决策、各候选时间字段原始值、registry/ledger/period |
 | TC-023 | CHK-EVT-002 | revision CAS和三stage | 重复、乱序、gap、replacement；生产级 Raw/Normalized checkpoint/保留策略材料可缺席测试阶段 | 三路同delta；重复幂等；gap阻断；生产级材料缺席不判本功能用例 FAIL，Gate C 保持 `OPEN` | UAT | YES | DEC-010 用户原始决策、normalized和stage ledger、Gate C 状态登记 |
-| TC-024 | CHK-EVT-003 | 守卫与Epoch并发 | 三类全量运行时注入消息及direct-call | 写入被阻断/排空；状态转换合法 | UAT | YES | 状态/锁/offset时间线 |
+| TC-024 | CHK-EVT-003 | 守卫、Epoch 与 flag run-freeze 并发 | 三类全量运行时注入消息、direct-call，并在 run 中途发布新 flag version | 写入被阻断/排空；状态转换合法；当前 run 固定旧 snapshot，下一 run 才加载新 version | UAT | YES | 状态/锁/offset/config_version 时间线、TC-FLAG-09～11 |
 | TC-025 | CHK-EVT-004 | coverage与旧epoch replay | 各stage覆盖度不同、未覆盖旧delivery | 逐stage覆盖；新generation+supersede+mapping完整 | UAT | YES | manifest/ledger |
 | TC-026 | CHK-EVT-005 | Redis 权威提交边界故障注入 | Redis 超时/broker 失败/进程 kill；权威提交前后、哨兵发布前后、测试 checkpoint 前后；生产级 Raw/Normalized checkpoint/保留策略材料可缺席测试阶段 | 旧/新状态完整且可恢复；业务状态与哨兵同一权威提交；哨兵载荷完整；不声称跨存储原子；生产级材料缺席不判本功能用例 FAIL，Gate C 保持 `OPEN` | UAT | YES | DEC-008/DEC-010 用户原始决策、Redis pipeline 提交证据、outbox/哨兵/checkpoint、Gate C 状态登记 |
 | TC-027 | CHK-EVT-006 | Recalc schema/ACK | 空、非法JSON、array/null、未知、两类done事件 | 受控DLQ/重试/handler后才ACK | UAT | YES | PEL/ACK/DLQ |
 | TC-028 | CHK-EVT-007 | Stream超过100000与deleted ID | 消费者停机、多group、ACK前trim | 无永久丢失；deleted ID恢复/告警 | UAT | YES | 指标、replay结果 |
 | TC-029 | CHK-PUB-001 | 空快照、旧行清除与 persisted 反向核验 | 空candidate、资格脏行、未落库时的哨兵标志；DEC-009 批准清单内必需结果对象 | 旧行清除；proof完整；未实际落库时哨兵 persisted 恒为 false，不谎报持久化成功；必需 schema 对象缺失时本用例 `BLOCKED` | UAT | YES | DEC-008/DEC-009 用户原始决策、DEC-009 批准的最小 schema manifest、manifest/查询、哨兵载荷 |
-| TC-030 | CHK-PUB-002 | 读取入口扫描与清空/重建时序基线比对 | 全仓 API/RPC 框架扫描、CALC_BONUS 调用顺序与 2475c6c4 基线对比 | 无新增读取入口；清空/重建时序与基线一致；不对业务系统提出验收要求 | DEV | YES | DEC-007 用户原始决策、扫描记录、调用顺序diff |
+| TC-030 | CHK-PUB-002 | 读取入口扫描与清空/重建时序基线比对 | 全仓 API/RPC 框架扫描、CALC_BONUS 调用顺序与 3891f4b9 基线对比 | 无新增读取入口；清空/重建时序与基线一致；不对业务系统提出验收要求 | DEV | YES | DEC-007 用户原始决策、扫描记录、调用顺序diff |
 | TC-031 | CHK-TEST-001 | 测试收集与mutation有效性 | 当前全部测试及关键mutation | 真实收集、命中生产、关键mutation失败 | DEV | YES | collect/coverage/mutation |
 | TC-032 | CHK-TEST-004 | UAT全链路回传 | 固定commit/镜像，DEC-009 批准的最小 schema manifest，订单→月结→writer→consumer；DEC-010 生产级材料可缺席测试阶段 | 回传包字段完整，P0/P1可形成状态；必需 schema 对象缺失时对应项 `BLOCKED`；DEC-010 测试豁免与 Gate C `OPEN` 分别登记 | UAT | NO | DEC-009/DEC-010 用户原始决策、批准清单、Gate C 状态、命令、退出码、DB/Redis/Kafka/log证据 |
 
@@ -1343,7 +1346,7 @@ DEC-010 的判定约束：测试阶段缺少生产级 Raw/Normalized checkpoint 
 | Team Bonus units-int生产实现 | 要求核验现有实现/状态 | 登记生产实现存在性和合同状态 | 转检查项 | 生产实现缺失如实登记Gate缺口；不判Python算法失败、不要求本轮建设、不以`NOT_APPLICABLE`关闭 |
 | 候选中的Gate/缺陷/测试既成状态 | 不作为方案阶段结果继承 | 背景中含既有Gate状态转述 | 删除无依据或阶段越界 | 只保留为待执行检查标准；v1.2不预写本轮结果 |
 | 未实现奖金业务 | 依用户范围排除 | 依用户范围排除 | 删除范围外 | EX-004仅保留v2.25附录B四项PB/SFB/GPB/CRB |
-| 未绑定固定commit的行号或执行结果 | 要求执行阶段重新取证 | 含编制阶段定位信息 | 转检查项 | 固定2475c6c4后重新读取；准确定位可入证据，不能替代执行结果 |
+| 未绑定固定commit的行号或执行结果 | 要求执行阶段重新取证 | 含编制阶段定位信息 | 转检查项 | 固定3891f4b9后重新读取；准确定位可入证据，不能替代执行结果 |
 | 候选方案编号冲突 | 采用BL-008编号体系 | CHK-ARCH/DATA等编号与BL-008指向不同对象 | 删除无依据或阶段越界 | 不复用或重排已发布编号；内容按现有检查项吸收 |
 | 候选方案编制质量自检 | 未设独立执行方 | 作为候选合并输入 | 删除无依据或阶段越界 | CHK-GOV-001标记`RETIRED`，本表固化编制处置，不进入执行状态矩阵 |
 
@@ -1395,7 +1398,8 @@ DEC-010 的判定约束：测试阶段缺少生产级 Raw/Normalized checkpoint 
 | DEC-015 | v34内部统计冲突以何处为准 | 已决定 A：以 §0/第一章“完全成立8、部分成立1”为准。用户原文：“DEC-015：选 A，以 §0/第一章‘完全成立8、部分成立1’为准” | v34 历史意见统计口径固定为“完全成立8、部分成立1”；附录B“完全成立9、部分成立0”不再作为统计口径；各条意见仍须逐项核验证据；决议关闭不代表实现已经通过 | 用户（业务方） | 2026-07-31 | CLOSED |
 | DEC-016 | monthActivePV 配置行重复、负值、超出合理范围政策 | 已决定：负值、超出合理范围由前一业务系统校验，当前系统不作二次业务校验，与 DEC-002/003 同一豁免口径。理由（用户原文）："monthActivePV一定不会出错，因为业务系统有验证，python项目只是把业务系统的数据同步过来"。配置行重复：源表 AR_CONFIG.CONFIG_NAME 存在 UNIQUE KEY（sql/AR_CONFIG.sql），源头层面重复不可能；但同步下游（Delta/Redis）无对应唯一性约束，理论上仍可能出现多行——用户就此明确：取值函数在取值时只取一行即可，不要求特定排序/择一规则。理由（用户原文）："取值函数在取值的时候只取一行就好了"。不得把已由 DEC-004 确认的"缺失→Redis等待2秒→Delta→仍为空报错中断"重新并入本条。 | 确立 monthActivePV 配置行重复、负值、超出合理范围三项的处理语义，解除 CHK-DATA-006/TC-007 对这三类边界的待决状态；P0-10 的 INTEGER_BV_ONLY/scale=100 核心（30/30.00 规范化、30.1 阻断）不受本决议影响，二者相互独立；"取一行"取的是 AR_CONFIG 真实 VALUE 之一，不属于 DEC-004 禁止的"内置默认值/回退值"；不得因当前系统未做重复/负值/超范围的二次业务校验而判 FAIL；不得因取值函数在遇到多行时未阻断而判 FAIL；决议关闭不代表实现已经通过。 | 用户（业务方） | 2026-08-01 | CLOSED |
 | DEC-017 | Elite 文档传播表述待按 DEC-011 同步修订 | 已确认：文档所有者已完成对《Elite_Bonus_发奖规则说明.docx》的修订——阶段四安全停止条件由两项更正为三项（补入“合格下线集合规模未改变”）；“重要说明”节不再断言数量变化不触发传导，改为说明数量变化会触发传导（保守策略）；示例推演更正为 B 层继续传导、在 A 层停止。用户原文：“我已经修正完'Doc/Elite_Bonus_发奖规则说明.docx'了”。关于任务书原 A0-(4)，“与送审草稿的差异”段落已由文档所有者有意删除；用户本轮明确确认：“关于这点我已经删除，没有保留的必要了”，故不再要求恢复该段或保留“两种叙述下 A 的最终状态一致”结论。前三项已按 A0 逐条核验通过，A0-(4) 按用户当前裁决豁免。 | 确认 Elite 说明文档的传播表述已与 EliteBonusService 的实际行为（三条件安全停止：业绩差值、资格/路径、合格下线集合规模）一致；本决议只确认文档侧修订完成，不改变、也不影响 CHK-BIZ-001 的 P0 系统行为判定标准——该检查项的通过与否始终独立于本决议，与 DEC-017 原始登记的边界一致；决议关闭不代表 CHK-BIZ-001 已执行或已通过，二者互不蕴含。 | 用户（业务方） | 2026-08-02 | CLOSED |
-| DEC-018 | 活跃结果物化形态：monthActivePV 现算结果是否需要物化为可复用的共享 snapshot 表（含 builder、唯一键），还是仅需保证“同一 pv 源 + 同一取值函数”的派生规则统一、无须物化 | 已决定 A。用户原文：“选 A：无须物化，各消费方按同一派生规则各自现算即可；”<br>用户未另附理由原文，待补充；不得代拟。 | 确立活跃结果无须物化为共享 snapshot、各消费方按同一 pv 源和同一 monthActivePV 取值函数的派生规则各自现算为唯一预期行为；不要求 snapshot builder、唯一键或写入时点，不得因未建设这些物化构件而判 FAIL；任一消费方把共享 snapshot 作为权威活跃源而不按统一派生规则现算，或各消费方派生规则不一致，均判 FAIL；决议关闭不代表实现已经通过。 | 待补充（用户） | 待补充 | CLOSED |
+| DEC-018 | 活跃结果物化形态：monthActivePV 现算结果是否需要物化为可复用的共享 snapshot 表（含 builder、唯一键），还是仅需保证“同一 pv 源 + 同一取值函数”的派生规则统一、无须物化 | 已决定 A。用户原文：“选 A：无须物化，各消费方按同一派生规则各自现算即可；”<br>用户未另附理由原文，待补充；不得代拟。 | 确立活跃结果无须物化为共享 snapshot、各消费方按同一 pv 源和同一 monthActivePV 取值函数的派生规则各自现算为唯一预期行为；不要求 snapshot builder、唯一键或写入时点，不得因未建设这些物化构件而判 FAIL；任一消费方把共享 snapshot 作为权威活跃源而不按统一派生规则现算，或各消费方派生规则不一致，均判 FAIL；决议关闭不代表实现已经通过。 | 待补充（用户） | 待补充 | CLOSED |
+| DEC-019 | PV_AMOUNT_V2_READ/WRITE 的 Source of Truth、runtime Provider、getter、bootstrap、fail-loud、refresh/run-freeze、四态 admission、测试态与 WORK-01 条件化作用域 | 已决定：AR_CONFIG 仍是业务唯一 Source of Truth；当前 runtime 唯一 Provider 为 Redis；当前阶段由 MANUAL_BOOTSTRAP 原子发布 `READ=false/WRITE=true/config_version=<严格单调非负整数>/load_mode=MANUAL_BOOTSTRAP`，未来 Delta 同步只替换 Redis 供数机制。Provider 位于 Redis infrastructure/config 层并返回 immutable run config；缺失、非法、不一致、Redis 异常或原子性无法证明一律 fail-loud，无 AR_CONFIG/env/default/stale-cache fallback。每个 run 只加载一次并冻结。00/01 可进入生产 run；10 为 `INVALID_STATE`；11 结构合法但无正式 Gate/UAT/migration approval 时为 `V2_STATE_NOT_AUTHORIZED`。01 下 Legacy authoritative，UserStats/EliteBonusStats 共享-key Legacy record 不得 stamping 2；version gate 只作用于 V2 calculation entry；test-only 11 仅允许 unit/domain fixture，不能进入 production admission。Bootstrap 使用 versioned snapshot + active pointer 的 Redis Lua/CAS 原子边界，拒绝 stale version 与 lost update。AR_CONFIG→Delta→Redis 自动同步、独立 V2 carrier/keyspace、legacy float→cents、自动切11均不在本决议授权范围。 | 固化 CURRENT_CONTRACT；新建 `GAP-PVAM-FLAG-CONTRACT / TASK-PVAM-01C / WORK-PVAM-01C`，并条件化 TASK/WORK-PVAM-01 的 AC-02、AC-03 与 CHG-05～08；真实 Redis/GPU/Dask/UAT 仍由 WORK-08/DEC-013 控制。治理接线及 validator 全绿后解除真实执行台账中的 `BLOCK-PVAM-01-FLAG-CONTRACT`；决议关闭不等于生产 Gate 或 UAT 通过。 | 用户（业务/架构方） | 2026-08-08 | CLOSED |
 ---
 
 ## 18. 审批

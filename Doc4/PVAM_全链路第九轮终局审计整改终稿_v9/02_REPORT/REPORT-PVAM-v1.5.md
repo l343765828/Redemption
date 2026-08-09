@@ -1,7 +1,7 @@
 # Redemption PV Amount Migration 复核报告 v1.5
 
 > 本报告严格执行 `PLAN-PVAM-v1.15`，并依据 `PV_Amount_Migration_Checklist_Final_v2.25_d74.md` 的 P0/T0 权威登记册修正验收追踪矩阵。  
-> 代码、SQL、治理、Skill与文档证据统一锚定 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`。历史 `097cae32` 到当前基线仅变更 `Doc/Elite_Bonus_发奖规则说明.docx`，Python/SQL无差异；R-001～R-013的代码事实经当前ref重新确认。  
+> 代码、SQL、治理、Skill与文档证据统一锚定 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`。历史 `097cae32` 到当前基线仅变更 `Doc/Elite_Bonus_发奖规则说明.docx`，Python/SQL无差异；R-001～R-013的代码事实经当前ref重新确认。  
 > 报告没有把缺少原始日志的测试结果继承为事实，也没有把业务决议关闭写成实现通过。
 
 ## 1. 文档控制
@@ -13,9 +13,9 @@
 | 报告版本 | `v1.5` |
 | 当前状态 | `FINAL` |
 | 对应检查方案 | `Redemption_PV_Amount_Migration_d74_检查方案_v1.15.md` / `PLAN-PVAM-v1.15` |
-| 待审对象 | `l343765828/Redemption master@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 待审对象 | `l343765828/Redemption master@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 基线分支 | `master` |
-| 基线提交 | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`（代码、SQL、治理、Skill及当前文档证据的唯一活动基线） |
+| 基线提交 | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`（代码、SQL、治理、Skill及当前文档证据的唯一活动基线） |
 | 检查开始时间 | `2026-08-04 10:25 GMT+8` |
 | 检查结束时间 | `2026-08-04 10:27 GMT+8` |
 | 复核人 | `AI Agent（QA 架构与事实核验角色）` |
@@ -29,14 +29,14 @@
 | v1.1 | `2026-08-04` | AI Agent（合并复核角色） | 交叉诊断、证据降级、状态重算与终稿合并 | `097cae32e0ff7708eb6ee69a7f2ce188e80c060c`（HISTORICAL_ONLY） |
 | v1.2 | `2026-08-04` | AI Agent（QA 架构与事实核验角色） | 历史版本 | 代码/SQL `097cae32`；文档overlay `2475c6c4`（HISTORICAL_ONLY） |
 | v1.3 | `2026-08-04` | AI Agent（QA 架构与事实核验角色） | 历史版本 | 代码/SQL `097cae32`；文档overlay `2475c6c4`（HISTORICAL_ONLY） |
-| v1.4 | `2026-08-05` | `用户会话指令 / AI Agent（全链路审计修订角色）` | 历史版本：统一基线、更正函数锚点并补齐专项追踪边 | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| v1.5 | `2026-08-05` | `AI Agent（第四轮事实与治理修订）` | 修正 compare 证据叙述；绑定 PLAN v1.15、Traceability v3；登记 F3-01～F3-10 的文档闭环边界 | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| v1.4 | `2026-08-05` | `用户会话指令 / AI Agent（全链路审计修订角色）` | 历史版本：统一基线、更正函数锚点并补齐专项追踪边 | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| v1.5 | `2026-08-05` | `AI Agent（第四轮事实与治理修订）` | 修正 compare 证据叙述；绑定 PLAN v1.15、Traceability v3；登记 F3-01～F3-10 的文档闭环边界 | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 
 ---
 
 ### 1.2A 基线迁移与证据继承裁决
 
-- 活动证据ref统一为`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`。
+- 活动证据ref统一为`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`。
 - `097cae32e0ff7708eb6ee69a7f2ce188e80c060c`仅保留为`HISTORICAL_ONLY`版本说明。
 - Git树比较确认两基线间Python/SQL无差异；唯一变化为Elite规则DOCX，因此静态缺陷事实可继承，但链接、commit元数据和DOCX证据均已改用当前ref。
 - 报告治理状态为`FINAL`；报告业务结论仍为`REJECTED`，不得因文档定版而弱化13项缺陷。
@@ -93,8 +93,8 @@
 |---|---|---|---|
 | 仓库/交付包 | `l343765828/Redemption` | GitHub repository/commit metadata | PASS |
 | 分支 | `master` | repository metadata | PASS |
-| Git commit | 代码/SQL `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；DEC-017 文档 overlay `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` | commit lookup、compare 与固定 ref 读取 | PASS |
-| 文件摘要/manifest | 核心代码文件有 blob SHA；`097cae32e0ff7708eb6ee69a7f2ce188e80c060c..2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 仅一份 DOCX 变化；完整 source/archive manifest 未随附件提供 | 固定 ref、commit compare 与附件核对 | PARTIAL |
+| Git commit | 代码/SQL `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；DEC-017 文档 overlay `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` | commit lookup、compare 与固定 ref 读取 | PASS |
+| 文件摘要/manifest | 核心代码文件有 blob SHA；`097cae32e0ff7708eb6ee69a7f2ce188e80c060c..3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 仅一份 DOCX 变化；完整 source/archive manifest 未随附件提供 | 固定 ref、commit compare 与附件核对 | PARTIAL |
 | 数据库 Schema | DEC-009 批准的最小 schema manifest | 附件核对 | UNVERIFIED |
 | 配置版本 | 仓库代码/SQL可静态读取；UAT运行快照未提供 | 固定ref读取 | UNVERIFIED |
 | DEC-017 文档 overlay | `Doc/Elite_Bonus_发奖规则说明.docx` @ `2475c6c4`，blob `892640e6…`，SHA-256 `f80ea693…` | 两提交差异核验 + 文档内容核对 | PASS |
@@ -115,22 +115,22 @@
 | EV-REG-001 | `PV_Amount_Migration_Checklist_Final_v2.25_d74.md` §十一/§十二 | Final v2.25-d74 | P0/T0 权威编号、主题及分层状态 |
 | EV-GIT-001 | `097cae32..2475c6c4` commit compare | 2 commits | 区间唯一变化为 `Doc/Elite_Bonus_发奖规则说明.docx` |
 | EV-DOC-001 | `Doc/Elite_Bonus_发奖规则说明.docx` | `2475c6c4` / 当前blob重新取证 / SHA-256 `f80ea693…` | DEC-017 三条件停止、数量变化保守传播、示例与删除段核验 |
-| EV-CODE-001 | `Model/User/UserStats.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `224b9e82…` | 金额模型字段 |
-| EV-CODE-002 | `Model/User/EliteBonusStats.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `ccaa18d9…` | Elite金额/版本/float |
-| EV-CODE-003 | `User/EliteBonusService.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `00b95fa0…` | SOURCE、writer、float |
-| EV-CODE-004 | `User/PEBonusService.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `0504b88b…` | 费率、Active、round/float |
-| EV-CODE-005 | `User/SuperEliteBonusService.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `fe22615d…` | rate/TYPE/scale |
-| EV-CODE-006 | `User/LeadershipBonusGPUService.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `022a1e0a…` | float64截断 |
-| EV-CODE-007 | `User/GlobalEliteBonusRecalculationService.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `0830fd87…` | persisted/DONE/Elite guard/maxlen |
-| EV-CODE-008 | `User/UserStatsService.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `ac6369dc…` | Global/Placement guard、corrected floor 静态形态 |
-| EV-CODE-009 | `MessageConsumer/RecalcStreamConsumer.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `d72abe4…` | ACK/路由 |
-| EV-CODE-010 | `User/GlobalRecalculationService.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `6974cd1c…` | period推导/maxlen |
-| EV-CODE-011 | `User/PlacementIncrementalService.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `1fbc87da…` | XADD maxlen |
-| EV-CODE-012 | `User/PlacementRecalculationService.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `616c93f…` | XADD maxlen |
-| EV-CODE-013 | `Common/PvAmount.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` | 固定ref读取为不存在 |
-| EV-SQL-001 | `sql_uat/CALC_BE_E.sql` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `84490b5a…` | Elite oracle |
-| EV-SQL-002 | `sql_uat/CALC_BE_PE.sql` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `d648b309…` | PE oracle |
-| EV-SQL-003 | `sql_uat/CALC_BE_SE_COUNTRY.sql` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` / blob `540afa62…` | SE oracle |
+| EV-CODE-001 | `Model/User/UserStats.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `224b9e82…` | 金额模型字段 |
+| EV-CODE-002 | `Model/User/EliteBonusStats.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `ccaa18d9…` | Elite金额/版本/float |
+| EV-CODE-003 | `User/EliteBonusService.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `00b95fa0…` | SOURCE、writer、float |
+| EV-CODE-004 | `User/PEBonusService.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `0504b88b…` | 费率、Active、round/float |
+| EV-CODE-005 | `User/SuperEliteBonusService.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `fe22615d…` | rate/TYPE/scale |
+| EV-CODE-006 | `User/LeadershipBonusGPUService.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `022a1e0a…` | float64截断 |
+| EV-CODE-007 | `User/GlobalEliteBonusRecalculationService.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `0830fd87…` | persisted/DONE/Elite guard/maxlen |
+| EV-CODE-008 | `User/UserStatsService.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `ac6369dc…` | Global/Placement guard、corrected floor 静态形态 |
+| EV-CODE-009 | `MessageConsumer/RecalcStreamConsumer.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `d72abe4…` | ACK/路由 |
+| EV-CODE-010 | `User/GlobalRecalculationService.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `6974cd1c…` | period推导/maxlen |
+| EV-CODE-011 | `User/PlacementIncrementalService.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `1fbc87da…` | XADD maxlen |
+| EV-CODE-012 | `User/PlacementRecalculationService.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `616c93f…` | XADD maxlen |
+| EV-CODE-013 | `Common/PvAmount.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` | 固定ref读取为不存在 |
+| EV-SQL-001 | `sql_uat/CALC_BE_E.sql` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `84490b5a…` | Elite oracle |
+| EV-SQL-002 | `sql_uat/CALC_BE_PE.sql` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `d648b309…` | PE oracle |
+| EV-SQL-003 | `sql_uat/CALC_BE_SE_COUNTRY.sql` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` / blob `540afa62…` | SE oracle |
 
 #### 未读取或读取失败
 
@@ -208,10 +208,10 @@
 | 执行编号 | 环境 | 命令/测试 | 输入或数据集 | 退出码 | 结果 | 证据 |
 |---|---|---|---|---:|---|---|
 | RUN-MRG-001 | DEV | 读取并解析报告A/B、模板 | 三份用户附件 | 0 | PASS | EV-MRG-001~003 |
-| RUN-MRG-002 | DEV | 固定ref读取具名代码/SQL | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` | 0 | PASS（静态读取） | EV-CODE/EV-SQL |
+| RUN-MRG-002 | DEV | 固定ref读取具名代码/SQL | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` | 0 | PASS（静态读取） | EV-CODE/EV-SQL |
 | RUN-MRG-003 | DEV | 逐项重算34个检查项状态 | PLAN+任务书+证据 | 0 | PASS（报告一致性） | 本报告§6 |
 | RUN-MRG-004 | DEV | 统计自检 | 13 FAIL+14 PENDING+7 BLOCKED | 0 | PASS | 本报告§2/§6 |
-| RUN-MRG-005 | DEV | 对比 `097cae32e0ff7708eb6ee69a7f2ce188e80c060c..2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 并核验 DEC-017 文档 overlay | Git commit compare + 修订版 DOCX | 0 | PASS（文档侧） | EV-GIT-001、EV-DOC-001 |
+| RUN-MRG-005 | DEV | 对比 `097cae32e0ff7708eb6ee69a7f2ce188e80c060c..3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 并核验 DEC-017 文档 overlay | Git commit compare + 修订版 DOCX | 0 | PASS（文档侧） | EV-GIT-001、EV-DOC-001 |
 
 ### 5.3 未执行命令或测试
 
@@ -389,7 +389,7 @@
 **定位**
 
 - 文件/类/函数/字段：`Model/User/UserStats.py::UserStats`；`Model/User/EliteBonusStats.py::EliteBonusStats`
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -404,7 +404,7 @@ UserStats: pv/gpv/gpv_real/gpv_unreal/pv_1l/... 为整数金额字段；EliteBon
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -466,7 +466,7 @@ UserStats: pv/gpv/gpv_real/gpv_unreal/pv_1l/... 为整数金额字段；EliteBon
 **定位**
 
 - 文件/类/函数/字段：目标路径 `Common/PvAmount.py`（缺失）
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -481,7 +481,7 @@ UserStats: pv/gpv/gpv_real/gpv_unreal/pv_1l/... 为整数金额字段；EliteBon
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -543,7 +543,7 @@ Leadership `_truncate_gpu` 将值转为 `float64` 并用 `nextafter/trunc`；PE 
 **定位**
 
 - 文件/类/函数/字段：`User/LeadershipBonusGPUService.py::_truncate_gpu`；`User/PEBonusService.py::_apply_truncate`；`User/SuperEliteBonusService.py::calculate_se_bonus`；`Model/User/EliteBonusStats.py::estimated_bonus`
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -558,7 +558,7 @@ Leadership `_truncate_gpu` 将值转为 `float64` 并用 `nextafter/trunc`；PE 
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -620,7 +620,7 @@ PE 构造函数固定 `_pro_elite_rate_ppm=150000`；SE 对 config/type 做 stri
 **定位**
 
 - 文件/类/函数/字段：`User/PEBonusService.py::PEBonusService.__init__`；`User/SuperEliteBonusService.py::_parse_se_rate/_parse_country_mapping`
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -635,7 +635,7 @@ PE 构造函数固定 `_pro_elite_rate_ppm=150000`；SE 对 config/type 做 stri
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -697,7 +697,7 @@ Active 阈值只能经批准的 monthActivePV 取值函数取得，并在同一 
 **定位**
 
 - 文件/类/函数/字段：`User/PEBonusService.py::execute_batch` 的活跃派生分支
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -712,7 +712,7 @@ Active 阈值只能经批准的 monthActivePV 取值函数取得，并在同一 
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -774,7 +774,7 @@ PE 的 REQUIRED_PERF_COLS 明确要求 `IS_ACTIVE`；SE/EAB 接收 `ddf_user_per
 **定位**
 
 - 文件/类/函数/字段：`User/PEBonusService.py::REQUIRED_PERF_COLS`；`User/SuperEliteBonusService.py` Step 5；`User/EliteAchievementBonusService.py` 入参合同
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -789,7 +789,7 @@ PE 的 REQUIRED_PERF_COLS 明确要求 `IS_ACTIVE`；SE/EAB 接收 `ddf_user_per
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -851,7 +851,7 @@ Global `_get_previous_period` 把 period 转 int，`period==1` 视为首期，�
 **定位**
 
 - 文件/类/函数/字段：`User/GlobalRecalculationService.py::_get_previous_period`；`User/PlacementRecalculationService.py::_get_prev_period`；`User/PlacementIncrementalService.py::_get_prev_period`
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -866,7 +866,7 @@ Global `_get_previous_period` 把 period 转 int，`period==1` 视为首期，�
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -928,7 +928,7 @@ stats mutation、assignment ledger、revision、dirty、outbox 必须在同一 R
 **定位**
 
 - 文件/类/函数/字段：`User/EliteBonusService.py::_track_bonus_source/update_elite_bonus_incremental/_batch_save`
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -943,7 +943,7 @@ SOURCE hash 写入发生在 `_batch_save(models_to_save)` 之前，二者没有�
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -1005,7 +1005,7 @@ Elite 未持久化正式结果时仍写 DONE 并发布完成事件。
 **定位**
 
 - 文件/类/函数/字段：`User/GlobalEliteBonusRecalculationService.py::settle_period/_emit_settlement_done`
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -1020,7 +1020,7 @@ Elite 未持久化正式结果时仍写 DONE 并发布完成事件。
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -1082,7 +1082,7 @@ Elite 未持久化正式结果时仍写 DONE 并发布完成事件。
 **定位**
 
 - 文件/类/函数/字段：`User/UserStatsService.py::assert_period_settlement_available`；`User/GlobalEliteBonusRecalculationService.py::assert_period_settlement_available`
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -1097,7 +1097,7 @@ UserStats guard 的状态键集合中没有 Elite；Elite guard 不读取 Global
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -1159,7 +1159,7 @@ EliteBonusStats 不含 PV_PSS；增量入口直接创建/更新节点；snapshot
 **定位**
 
 - 文件/类/函数/字段：`Model/User/EliteBonusStats.py::EliteBonusStats`；`User/EliteBonusService.py::update_elite_bonus_incremental/snapshot_period_to_db`
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -1174,7 +1174,7 @@ EliteBonusStats 不含 PV_PSS；增量入口直接创建/更新节点；snapshot
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -1236,7 +1236,7 @@ Recalc consumer 对空、未知或未处理事件可返回成功并 ACK。
 **定位**
 
 - 文件/类/函数/字段：`MessageConsumer/RecalcStreamConsumer.py::process_event/_dispatch_business/_reclaim_stale`
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -1251,7 +1251,7 @@ ACK 表示消息已完成，但代码没有产生业务副作用或受控 dispos
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -1313,7 +1313,7 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 **定位**
 
 - 文件/类/函数/字段：`User/GlobalRecalculationService.py`、`User/GlobalEliteBonusRecalculationService.py`、`User/PlacementIncrementalService.py`、`User/PlacementRecalculationService.py` 的 outbox XADD
-- Git commit：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- Git commit：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 行号：不使用行号；以固定提交中的类、函数、字段和 blob 定位
 
 **原始证据**
@@ -1328,7 +1328,7 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 
 **复现步骤**
 
-1. 固定读取 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 的上述文件；
+1. 固定读取 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 的上述文件；
 2. 对照 `PLAN-PVAM-v1.15`、有效 SQL 和已关闭 DEC；
 3. 检查稳定函数/字段及最小代码片段；
 4. 本轮未执行真实 MySQL/Redis/Kafka/Dask/GPU 运行时复现；运行时结果仍进入第13节。
@@ -1400,7 +1400,7 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 
 | 历史问题编号 | 历史问题 | 当前修复证据 | 验证方式 | 结果 |
 |---|---|---|---|---|
-| FIX-001 | DEC-017：Elite 说明文档仍使用两项停止条件、称数量变化不触发传导、示例在 B 层停止，并保留“与送审草稿的差异”段 | `097cae32e0ff7708eb6ee69a7f2ce188e80c060c..2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` 唯一变化为该 DOCX；后继版本 blob `892640e6…` / SHA-256 `f80ea693…` 已改为三项停止条件、数量变化触发保守传导、B 层继续到 A 层，并删除差异段 | STATIC / DOCUMENT DIFF（受控后继 overlay） | CONFIRMED（P1 文档修复；不表示 CHK-BIZ-001 已执行或通过） |
+| FIX-001 | DEC-017：Elite 说明文档仍使用两项停止条件、称数量变化不触发传导、示例在 B 层停止，并保留“与送审草稿的差异”段 | `097cae32e0ff7708eb6ee69a7f2ce188e80c060c..3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` 唯一变化为该 DOCX；后继版本 blob `892640e6…` / SHA-256 `f80ea693…` 已改为三项停止条件、数量变化触发保守传导、B 层继续到 A 层，并删除差异段 | STATIC / DOCUMENT DIFF（受控后继 overlay） | CONFIRMED（P1 文档修复；不表示 CHK-BIZ-001 已执行或通过） |
 
 ---
 
@@ -1630,9 +1630,9 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 | EV-REG-001 | DOC | v2.25 §十一/§十二 P0/T0 登记册 | Final v2.25-d74 | 权威编号、主题与分层状态 | COMPLETE |
 | EV-GIT-001 | QUERY | `097cae32..2475c6c4` commit compare | 2026-08-04 核验 | 唯一变化为 DEC-017 DOCX | COMPLETE |
 | EV-DOC-001 | DOC | `Doc/Elite_Bonus_发奖规则说明.docx` | `2475c6c4` / 当前blob重新取证 | 三条件停止、保守传导、示例改写及删除段 | COMPLETE |
-| EV-CODE-001~012 | CODE | 固定提交具名Python文件 | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` | 模型、金额、Active、Period、Elite、guard、consumer、Stream | COMPLETE（具名范围） |
-| EV-CODE-013 | QUERY | `Common/PvAmount.py` | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` | 路径不存在 | COMPLETE |
-| EV-SQL-001~003 | SQL | CALC_BE_E/PE/SE_COUNTRY | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` | 候选、费率、TRUNCATE | COMPLETE |
+| EV-CODE-001~012 | CODE | 固定提交具名Python文件 | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` | 模型、金额、Active、Period、Elite、guard、consumer、Stream | COMPLETE（具名范围） |
+| EV-CODE-013 | QUERY | `Common/PvAmount.py` | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` | 路径不存在 | COMPLETE |
+| EV-SQL-001~003 | SQL | CALC_BE_E/PE/SE_COUNTRY | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` | 候选、费率、TRUNCATE | COMPLETE |
 | UV-001~005 | MISSING | 环境/schema/archive/audit pack | 本轮 | 无法验证边界 | PARTIAL |
 
 ## 附录 B：问题追踪矩阵

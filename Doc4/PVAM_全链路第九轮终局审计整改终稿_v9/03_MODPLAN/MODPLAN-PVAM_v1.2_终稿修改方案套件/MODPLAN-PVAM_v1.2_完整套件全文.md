@@ -8,7 +8,7 @@
 # Redemption PV Amount Migration 本轮修改方案 v1.2（主控总方案）
 
 > 文档编号：`MODPLAN-PVAM_v1.2`  
-> 受控代码基线：`l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`  
+> 受控代码基线：`l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`  
 > 当前状态：`DRAFT`  
 > 授权状态：`PENDING_ORGANIZATIONAL_APPROVAL`  
 > 状态含义：本轮只完成技术文档修订；当前未提供可识别组织批准人、角色、签名或批准原文，不构成施工授权。
@@ -19,8 +19,8 @@
 
 - 授权状态：`PENDING_ORGANIZATIONAL_APPROVAL`；权威登记见 `05_CONTROL/AUTHORIZATION_STATUS-PVAM-v2.md`。历史 `APPROVAL-PVAM-20260805-01` 仅作 `UNVERIFIED/HISTORICAL_ONLY` 记录。
 - 上游检查/复核：`PLAN-PVAM-v1.15`、`REPORT-PVAM-v1.5`。
-- 受控代码基线：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`。
-- 拟申请批准范围：R-001～R-013及TASK-01～08的既定处置；不关闭DEC-013、Gate C或任何UAT AC。
+- 受控代码基线：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`。
+- 拟申请批准范围：R-001～R-013、GAP-PVAM-FLAG-CONTRACT 及 TASK-01、01C、02～08 的既定处置；不关闭 DEC-013、Gate C 或任何 UAT AC。
 
 ## 1. 文档控制
 
@@ -31,7 +31,7 @@
 | 文档版本 | `v1.2` |
 | 当前状态 | `DRAFT` |
 | 受控仓库 | `l343765828/Redemption` |
-| 受控提交 | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控提交 | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 代码/SQL事实基线 | 与 `097cae32e0ff7708eb6ee69a7f2ce188e80c060c` 一致；两提交区间仅 Elite 规则 DOCX 变化 |
 | 对应检查方案 | `Redemption_PV_Amount_Migration_d74_检查方案_v1.15.md` / `PLAN-PVAM-v1.15` |
 | 对应复核报告 | `Redemption_PV_Amount_Migration_d74_复核报告_v1.5.md` |
@@ -65,15 +65,16 @@
 | v1.1 | 2026-08-05 | 历史全链路修订版；其自述批准记录因不可独立验证而由本版取代 | SUPERSEDED |
 | v1.2 | 2026-08-05 | 第四轮关闭追溯、状态、patch/DEV、版本和设计边界问题 | DRAFT |
 | v1.2-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根、工件摘要、独立临时目录、AC 来源保真及当前轮次引用 | DRAFT |
+| v1.2-r10 | 2026-08-08 | 登记 DEC-019/GAP-PVAM-FLAG-CONTRACT，新增 TASK-PVAM-01C，并条件化 TASK-PVAM-01 AC-02/03 与 WORK-01 路由 | DRAFT |
 
 ## 2. 本轮目标与边界
 
 ### 2.1 目标
 
-本方案保持 8 个逻辑任务组；为降低 R-012 的紧急风险，将 TASK-07 拆为 07A/07B，因此实际交付 9 份施工任务书：
+本方案在原 8 个逻辑任务组之外新增独立 flag runtime 配置组 01C；TASK-07 仍拆为 07A/07B，因此实际交付 10 份施工任务书：
 
 - 关闭 R-001～R-013 的设计缺口并给出可执行 AC；
-- 金额域统一为 int64 micro-units、费率 ppm、最终奖金 integer cents；
+- 金额域统一为 int64 micro-units、费率 ppm、最终奖金 integer cents；通过独立 01C 建立 Redis flag Provider、atomic bootstrap、run-freeze 与四态 admission；
 - 只允许外部事件和 DB loader 两处放大；
 - monthActivePV 使用唯一读取 getter，各消费方同源现算 Active；
 - Elite stats/SOURCE/revision/outbox 原子化并输出外部发布 proof；
@@ -111,7 +112,7 @@
 | 合同 | 唯一规则 |
 |---|---|
 | PV/BV/GPV/1L/2L/结余/奖金基数 | `int64 micro-units`，`PV_SCALE=1_000_000` |
-| amount version | 新计算记录显式 `amount_encoding_version=2`；缺失/None 为 legacy/unknown，默认阻断 |
+| amount version | 只有进入获批 V2 domain 且全部共享字段满足 V2 合同的 record 才显式2；00/01共享-key Legacy record不写2；legacy/unknown只在V2 calculation entry阻断 |
 | 费率 | 有符号整数 ppm，scale=1_000_000 |
 | 最终奖金 | 内部 integer cents；外部两位 Decimal string |
 | 放大边界 | 外部规范十进制字符串→units；DB Decimal/string→units |
@@ -146,6 +147,7 @@
 | DEC-016 | CLOSED | monthActivePV 重复取真实行一条；负/上限不二次业务阻断 | 04 |
 | DEC-017 | CLOSED | 文档已修；不等于代码行为 PASS | 05、08 |
 | DEC-018 | CLOSED | 无须物化 Active，各消费方同规则现算 | 04 |
+| DEC-019 | CLOSED | AR_CONFIG Source of Truth、Redis唯一runtime Provider、MANUAL_BOOTSTRAP原子01、fail-loud/run-freeze/四态admission；WORK-01 AC/CHG条件化 | 01C、01 |
 
 ## 5. 问题处置与双向追踪矩阵
 
@@ -153,7 +155,7 @@
 
 | 问题 | 级别 | 状态 | REM | W | V | 所属任务 | 本轮结果要求 |
 |---|---:|---|---|---|---|---|---|
-| R-001 amount version 缺失 | P0 | ACCEPTED | REM-001 | W-001 | V-001 | 01 | 新记录 v2；legacy/unknown 隔离 |
+| R-001 amount version 缺失 | P0 | ACCEPTED | REM-001 | W-001 | V-001 | 01 | 获批V2 record写2；00/01共享Legacy不写2；V2入口隔离legacy/unknown |
 | R-002 PvAmount 公共层缺失 | P1 | ACCEPTED | REM-002 | W-002 | V-002 | 01 | 唯一公共金额 API |
 | R-003 float/round 链 | P0 | ACCEPTED | REM-003 | W-003 | V-003 | 02 | 生产金额整数化 |
 | R-004 配置合同偏差 | P0 | ACCEPTED | REM-004 | W-004 | V-004 | 03 | signed ppm、snapshot、exact raw |
@@ -187,11 +189,12 @@
 | OPT-002 | ACCEPTED | 08 | 机器可读双向追踪 manifest |
 | FIX-001 | N/A — CONFIRMED_CLOSED | 文档基线 | DEC-017 文档修复，不计当前缺陷 |
 | GAP-DEC004-2B | DEFERRED | 08 | 本轮不建设写入/失效链；生产前必须另有施工任务 |
+| GAP-PVAM-FLAG-CONTRACT | ACCEPTED | 01C | DEC-019 已裁决；独立 Provider/bootstrap/run admission 卡接线，禁止扩大 WORK-01 production allowlist |
 
 ### 5.4 五状态统计
 
 - R/RISK/UV 强制范围：`ACCEPTED=13`、`UAT_VERIFY=7`、`REJECTED=0`、`DEFERRED=0`、`NEEDS_DECISION=0`。
-- `GAP-DEC004-2B` 是本方案派生的实现缺口，不改变复核报告 13+7 统计。
+- `GAP-DEC004-2B` 仍为 DEFERRED；`GAP-PVAM-FLAG-CONTRACT` 是 DEC-019 已接受的治理/实施缺口，均不改变复核报告 13+7 统计。
 - FIX-001 为已关闭修复，不进入五状态统计。
 
 ## 6. 模块化任务拆分
@@ -199,6 +202,7 @@
 | 任务 | 标题 | 主问题 | Gate | 独立交付边界 |
 |---|---|---|---|---|
 | 01 | 金额编码公共层与模型适配 | R-001/002 | A | API、version、legacy 隔离 |
+| 01C | Flag runtime Provider 与原子配置 | GAP-PVAM-FLAG-CONTRACT | A | Redis snapshot、CAS bootstrap、run-freeze、00/01/10/11 admission |
 | 02 | 订单/退款边界与 Period | R-003/007 | A/B/C | normalizer、resolver、无 float |
 | 03 | 配置/ppm | R-004 | A/B | matrix、snapshot、signed ppm |
 | 04 | monthActivePV/Active | R-005/006 | B | 读取 getter、消费方现算；2B 写入侧延期 |
@@ -343,6 +347,7 @@ flowchart LR
 | `00_F1-F7_审核意见核验与反驳表.md` | `HISTORICAL_ONLY`；不属于当前包，不参与活动门禁 |
 | `MODPLAN-PVAM_v1.2_总方案.md` | 主索引、范围、DEC、追踪、依赖、总验收 |
 | `TASK-PVAM-01_金额编码公共层与基础模型适配器.md` | R-001/002 |
+| `TASK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md` | GAP-PVAM-FLAG-CONTRACT / DEC-019 |
 | `TASK-PVAM-02_订单退款入口金额放大与边界转换.md` | R-003/007 |
 | `TASK-PVAM-03_配置解析ppm与硬编码清理.md` | R-004 |
 | `TASK-PVAM-04_monthActivePV与Active同源现算.md` | R-005/006；2B读取侧/延期边界 |
@@ -356,7 +361,7 @@ flowchart LR
 
 ## 13. 审批与授权状态
 
-本文件当前治理状态为 `DRAFT`，授权状态为 `PENDING_ORGANIZATIONAL_APPROVAL`。当前会话指令授权的是 B7-01～B7-06 的事实核验和文档/控制资产修订，不是代码施工、部署或生产发布授权。
+本文件当前治理状态为 `DRAFT`，授权状态为 `PENDING_ORGANIZATIONAL_APPROVAL`。DEC-019 是 CURRENT_CONTRACT 的业务/架构裁决；它授权本轮按 Phase G→I→D 施工与 DEV 验证，但不代替可识别组织批准、真实 UAT、部署或生产发布授权。
 
 升格为 `APPROVED` 前必须提供并归档：
 
@@ -369,7 +374,6 @@ flowchart LR
 上述证据缺失时，所有 TASK/WORK 均保持 `DRAFT/BLOCKED`；不得使用历史 `APPROVED_BY_USER_INSTRUCTION` 记录代签。
 
 <!-- END MODPLAN-PVAM_v1.2_总方案.md -->
-
 
 ---
 
@@ -388,14 +392,14 @@ flowchart LR
 | 处置项 | `REM-001、REM-002` |
 | 施工项 | `W-001、W-002` |
 | 验证项 | `V-001、V-002` |
-| 关联决策 | `DEC-002、DEC-008、DEC-014` |
+| 关联决策 | `DEC-002、DEC-008、DEC-014、DEC-019` |
 | 严重级别 | `P0 / P1` |
 | 当前状态 | `DRAFT` |
-| 受控基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |
-| 前置任务 | 无（所有代码任务的根前置） |
+| 前置任务 | `WORK-PVAM-01C` Phase A Provider/bootstrap 接口先完成 DEV 验证 |
 
 > `DRAFT` 表示技术内容已修订但尚无可核验组织施工授权；不得启动代码施工、部署或生产发布。
 
@@ -411,8 +415,8 @@ flowchart LR
 
 ### 2.1 已核实事实
 
-- `Model/User/UserStats.py::UserStats` 持有 `pv/gpv/gpv_real/gpv_unreal/pv_1l/pv_2l/pre_surplus/total/remain` 等金额字段，但没有 `amount_encoding_version`。
-- `Model/User/EliteBonusStats.py::EliteBonusStats` 持有 `pv_pcs/gpv/gpv_real/estimated_bonus`，同样没有金额编码版本；`estimated_bonus` 还是 float 字段。
+- `Model/User/UserStats.py::UserStats` 的共享 Legacy 刻度字段为 `pv/gpv/gpv_real/gpv_unreal/contrib/pv_1l/pv_2l/pre_surplus_1l/pre_surplus_2l/total_1l/total_2l/remain_surplus_1l/remain_surplus_2l`，没有 `amount_encoding_version`；不得用不存在的 `pre_surplus/total/remain` 作静态锚点。
+- `Model/User/EliteBonusStats.py::EliteBonusStats` 的共享 Legacy 整数域为 `pv_pcs/gpv/gpv_real/contrib_to_parent`，同样没有金额编码版本；`estimated_bonus` 是 legacy float，additive `estimated_bonus_cents` 只表示 V2 blank/init，不能证明 bonus parity。
 - 固定提交中 `Common/PvAmount.py` 不存在；PE、SE、EAB、Leadership、Elite 各自保留金额/精度处理，形成多套 scale 和舍入语义。
 - `UserPeriodHighestRank` 不持有金额字段，不属于 amount version 模型，禁止误加版本字段。
 
@@ -428,7 +432,7 @@ flowchart LR
 ## 3. 本任务修改目标
 
 1. 建立项目唯一的公共金额域，统一 micro-units、integer cents、ppm、严格类型检查和 int64 上界保护。
-2. 为所有持久化金额模型建立可审计的编码版本；新记录显式为 v2，legacy/unknown 不得静默混入。
+2. 为持久化金额模型建立可审计编码版本；只有真正进入获批 V2 domain 且全部共享金额字段满足 V2 合同的记录才显式写2；00/01 共享-key Legacy record 不写2，legacy/unknown 只在 V2 calculation entry 阻断。
 3. 提供只在两个批准边界使用的转换 API，并为后续 TASK 提供稳定、无业务反向依赖的底层接口。
 4. 采用 additive-first 兼容策略，使本任务可先独立合入、独立测试和独立回滚。
 
@@ -436,7 +440,7 @@ flowchart LR
 
 ### 4.1 采用方案
 
-新增 `Common/PvAmount.py`，作为最低层纯函数模块；模型增加可空 `amount_encoding_version`，但所有新建 v2 记录必须由工厂显式传入 `2`。
+新增 `Common/PvAmount.py`，作为最低层纯函数模块；模型增加可空 `amount_encoding_version`。工厂只有在获批 V2 domain 且完整记录满足 V2 编码合同时才显式传入 `2`；当前 production 01 的共享-key Legacy record 统一为 `V2_WRITE_NOT_AVAILABLE`。
 
 核心常量：
 
@@ -468,8 +472,8 @@ assert_integer_amount_dtype(df, columns, df_name: str) -> None
 ### 4.2 版本策略
 
 - 模型字段定义采用 `Optional[int] = None`，防止旧 Redis JSON 因字段缺失而无法反序列化。
-- 新记录工厂必须显式写 `amount_encoding_version=2`；禁止把模型默认值设置为 2，因为这会把旧记录静默伪装成新编码。
-- 读路径：`2` 可进入新计算域；`None/缺失` 只允许进入隔离的 legacy adapter 或迁移工具；其他值 fail-loud。
+- 只有真正进入获批 V2 domain 且全部共享金额字段满足 V2 编码合同的工厂才显式写 `amount_encoding_version=2`；00/01 的共享-key Legacy authoritative record 不写2。禁止把模型默认值设置为2。
+- 读路径：version gate 只作用于 V2 calculation entry；`READ=false` 的 Legacy authoritative path 不得无条件 require 2。`None/缺失` 可进入 Legacy path 或只读审计 adapter，但不得进入 V2 calculation；其他值在 V2 入口 fail-loud。
 - 不在本任务自动把 legacy 数值乘以 `1_000_000`。历史转换必须由有来源、有审计清单的 migration/rebuild 完成。
 
 ### 4.3 被否决方案
@@ -498,13 +502,21 @@ assert_integer_amount_dtype(df, columns, df_name: str) -> None
 | `Model/User/UserStats.py` | 新增 `amount_encoding_version: Optional[int] = None`；金额字段注释统一为 units |
 | `Model/User/EliteBonusStats.py` | 新增 version；增加 integer-cents 目标字段或标注 legacy float 字段只读 |
 | `Redishelper/BaseRedisModel.py` | 如需，增加模型后置版本校验 hook；不得耦合奖金业务 |
-| `User/UserStatsService.py` | 新建/零值工厂显式传 v2 |
-| `User/GlobalRecalculationService.py` | `_new_zero_user_stats` 显式传 v2；反序列化校验 version |
-| `User/PlacementIncrementalService.py` | 新对象显式传 v2 |
-| `User/PlacementRecalculationService.py` | 新对象/批量读取校验 version |
-| `User/EliteBonusService.py` | `_get_or_create_node` 显式传 v2 |
-| `User/GlobalEliteBonusRecalculationService.py` | 新节点/批量读取校验 version |
+| `User/UserStatsService.py` | 接收同一 immutable run config；00/01 共享-key Legacy 工厂不写2，获批11 V2 factory 显式传2 |
+| `User/GlobalRecalculationService.py` | run 前加载/冻结一次 config；version gate 仅在 V2 entry；00/01 工厂不写2 |
+| `User/PlacementIncrementalService.py` | batch/run config 冻结；00/01 共享 UserStats 工厂不写2 |
+| `User/PlacementRecalculationService.py` | run config 冻结；批量 version gate 仅在 V2 entry |
+| `User/EliteBonusService.py` | `_get_or_create_node` 按 frozen config 条件化；01 不把 legacy float 洗白为 cents |
+| `User/GlobalEliteBonusRecalculationService.py` | frozen config；00/01 新节点不写2，V2 entry 才校验 version |
 
+### 5.3 DEC-019 条件化字段与 factory 合同
+
+- UserStats 精确共享字段：`pv`、`gpv`、`gpv_real`、`gpv_unreal`、`contrib`、`pv_1l`、`pv_2l`、`pre_surplus_1l`、`pre_surplus_2l`、`total_1l`、`total_2l`、`remain_surplus_1l`、`remain_surplus_2l`。
+- EliteBonusStats 精确共享整数域：`pv_pcs`、`gpv`、`gpv_real`、`contrib_to_parent`；`estimated_bonus` 为 legacy float，禁止折算成 cents；`estimated_bonus_cents=0` 只证明 blank/init。
+- 当前基线使用共享 Redis key/字段，故 production 01 下所有真实 UserStats/EliteBonusStats factory 均为 `V2_WRITE_NOT_AVAILABLE`；不得自行新建影子 key/table/namespace。
+- 00/01 的 Legacy path 不做 V2 version gate；获批11的 V2 entry 必须 gate 并 stamping2。
+- DEV/unit test 可直接构造 test-only 11 snapshot 验证 factory/domain；它不能进入 production admission、写真实 Redis 或构成生产 approval。
+- factory 覆盖必须由 AST 扫描真实构造点产生，不得只锚定预写函数名单；TC-FLAG-14～21 承接此合同。
 ## 6. 明确排除项（防越界红线）
 
 - 不在本任务重写 PE/SE/EAB/LB/Elite 具体奖金公式；它们在 TASK-02/03/04/05 迁移到公共 API。
@@ -566,8 +578,8 @@ Model adapters / User / Placement / Bonus
 | AC | 验收标准 | 环境 | 关联 TC |
 |---|---|---|---|
 | AC-01 | `Common/PvAmount.py` 存在，import graph 无循环，公共层无业务模块 import | DEV | TC-002、TC-031 |
-| AC-02 | UserStats、EliteBonusStats 新建记录均显式写 version=2 | DEV+UAT | TC-003 |
-| AC-03 | 旧 JSON 缺 version 可反序列化，但进入 v2 计算入口时必定阻断 | DEV+UAT | TC-003 |
+| AC-02 | 只有真正进入获批 V2 domain 且全部共享金额字段满足 V2 编码合同的 UserStats/EliteBonusStats record 才显式写 version=2；00/01 共享-key Legacy record 不得 stamping 2 | DEV+UAT | TC-003 |
+| AC-03 | 旧 JSON 缺 version 可反序列化；legacy/unknown version 仅在进入 v2 计算入口时必定阻断，READ=false 的 Legacy authoritative path 不得无条件 require version=2 | DEV+UAT | TC-003 |
 | AC-04 | version=1、3、字符串2、bool 等非法值全部阻断 | DEV | TC-003 |
 | AC-05 | 外部/DB 边界 parser 与内部 `require_units_int` 职责分离 | DEV | TC-001、TC-002 |
 | AC-06 | `0.1` float、`True`、NaN、Infinity、指数文本均被相应用例拒绝 | DEV | TC-001、TC-002 |
@@ -600,7 +612,7 @@ Model adapters / User / Placement / Bonus
 
 ## 11. 独立回滚与风险控制
 
-1. 先通过 feature flag `PV_AMOUNT_V2_READ/WRITE` 开启新域；默认 shadow-read，不直接切生产。
+1. flag 只能由 `PVAmountConfigProvider` 的 frozen run config 提供；当前批准状态为01且 Legacy authoritative。00/01 共享-key record 不写2，10/未批准11不得进入 production run。
 2. 回滚时关闭 v2 新写并恢复旧读路径，但保留 version 字段和 v2 键供审计。
 3. 已经写入的 v2 数值禁止除以 `1_000_000` 回写旧键；需要回退时以最后一个 committed legacy snapshot 服务。
 4. 如果模型新增字段导致兼容问题，只回滚 reader enforcement，不删除 Redis JSON 字段。
@@ -610,9 +622,171 @@ Model adapters / User / Placement / Bonus
 ### 第四轮补充：有符号整数除法合同
 
 `trunc_div_zero(numerator, denominator)` 必须支持任意非零分母，并对 `(+,+)、(+,-)、(-,+)、(-,-)` 四象限均向零截断；分母为零必须抛出异常。
+## 12. 版本记录
+
+| 版本 | 日期 | 变更 | 治理状态 |
+|---|---|---|---|
+| v1.2-r10 | 2026-08-08 | 依据 DEC-019 条件化 AC-02/03、共享-key factory stamping、version gate 与 TEST-ONLY V2 domain | DRAFT |
 
 <!-- END TASK-PVAM-01_金额编码公共层与基础模型适配器.md -->
 
+---
+
+<!-- BEGIN TASK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md -->
+
+# TASK-PVAM-01C Flag Runtime Contract 与 Redis 原子配置
+
+## 1. 文档信息
+
+| 项目 | 内容 |
+|---|---|
+| 任务编号 | `TASK-PVAM-01C` |
+| 所属总方案 | `MODPLAN-PVAM_v1.2` |
+| 文档版本 | `v1.2` |
+| 文档状态 | `DRAFT` |
+| 授权状态 | `PENDING_ORGANIZATIONAL_APPROVAL` |
+| 来源检查项 | `CHK-ARCH-001、CHK-ARCH-003、CHK-DATA-003、CHK-EVT-003、CHK-TEST-003、CHK-TEST-004` |
+| 来源问题 | `GAP-PVAM-FLAG-CONTRACT` |
+| 关联决策 | `DEC-019` |
+| 处置项 | `REM-014` |
+| 施工项 | `W-014` |
+| 验证项 | `V-014` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+
+## 2. 已核实事实与任务目标
+
+### 2.1 已核实事实
+
+- 现有 `Redishelper/BaseRedisModel.py` 提供项目 Redis 连接；仓库没有可复用的 flag ConfigService、配置 revision/epoch 或配置 CAS primitive。
+- 现有 settlement/recalculation 入口拥有各自 `run_id`，但没有统一 PV amount flag run context。
+- 原 WORK-PVAM-01 的机器 allowlist 不含 Config Provider、Redis runtime loader、MANUAL_BOOTSTRAP 或 run admission 文件。
+- 当前执行台账真实存在 `BLOCK-PVAM-01-FLAG-CONTRACT`；本任务只在治理接线和 validator 全部通过后解除，仓库中未发现需被本决策替换的旧 `USER-DECISION-PVAM-01-FLAG`。
+
+### 2.2 目标
+
+1. 复用现有 Redis 连接，在 infrastructure 层建立唯一 `PVAmountConfigProvider.load_run_config()`。
+2. 返回 immutable `PVAmountRunConfig(read_v2, write_v2, config_version)`，并保留 active pointer/checksum 原子性证明。
+3. 建立生产 run admission 与 run-freeze：每个 run 只加载一次，运行途中不刷新。
+4. 建立 MANUAL_BOOTSTRAP，原子发布当前批准状态 01，并拒绝 stale version/lost update。
+5. 提供 DEV stub/fake 与隔离 Redis UAT 的分层证据，禁止 fake 冒充真实 UAT。
+
+## 3. 正式运行合同
+
+### 3.1 Source of Truth 与 Provider
+
+```text
+AR_CONFIG（业务 Source of Truth）
+  -> MANUAL_BOOTSTRAP（当前）
+  -> Redis（唯一 runtime Provider）
+  -> PVAmountConfigProvider
+  -> immutable PVAmountRunConfig
+```
+
+未来 AR_CONFIG→Delta→Redis 只替换 Redis 供数机制，不改变 Provider、getter、snapshot schema、flag 语义、fail-loud、run-freeze 或 admission。本任务不实现该自动同步。
+
+### 3.2 Redis snapshot schema
+
+| 对象 | 字段/值 | 合同 |
+|---|---|---|
+| active pointer | `config_version:checksum` | 指向唯一不可变 versioned snapshot |
+| versioned snapshot | `PV_AMOUNT_V2_READ` | canonical `true` 或 `false` |
+| versioned snapshot | `PV_AMOUNT_V2_WRITE` | canonical `true` 或 `false` |
+| versioned snapshot | `config_version` | 严格单调、可比较的非负整数 |
+| versioned snapshot | `load_mode` | 当前必须为 `MANUAL_BOOTSTRAP` |
+| versioned snapshot | `source` | 当前为 `AR_CONFIG` |
+| versioned snapshot | `checksum` | 与 active pointer 及 canonical payload 一致 |
+
+Provider 以单次 Redis Lua 原子读取同时取得 active pointer 与对应 hash；任何缺失、非法、不一致、Redis 异常或无法证明原子性均 fail-loud。禁止 AR_CONFIG/env/default/stale-cache fallback。
+
+### 3.3 四态 admission
+
+| READ | WRITE | 生产 admission | 业务语义 |
+|---:|---:|---|---|
+| false | false | 允许 | 00，Legacy authoritative |
+| false | true | 允许 | 01，当前批准状态；Legacy authoritative，只有批准且独立的安全 V2 carrier 才可 shadow write |
+| true | false | 拒绝 `INVALID_STATE` | 10 结构非法，不自动修正 |
+| true | true | 当前拒绝 `V2_STATE_NOT_AUTHORIZED` | 11 结构合法，但当前没有正式 Gate/UAT/migration approval |
+
+### 3.4 Run freeze 与 TEST-ONLY
+
+- production run 只能通过 production admission 取得 config；run 创建后 config 不可变。
+- 当前 run 对 Redis 中途更新不可见；下一 run 才重新加载。
+- unit/domain test 可直接构造 11 snapshot 验证 V2 factory，但不得经过 production admission、写真实 Redis、产生正式 run 或暴露为普通 production 配置 bypass。
+
+### 3.5 MANUAL_BOOTSTRAP
+
+- 发布前校验完整 payload；使用同一 Lua/CAS 边界判断 `new_version > active_version`、写 versioned snapshot、切 active pointer。
+- 初次发布显式走 initial-create；发布 N 或 N-1 到当前 N 必须 `STALE_CONFIG_VERSION`。
+- 发布后通过 Provider read-after-write verify；失败非零退出；禁止分字段 SET。
+- 当前批准 payload 为 `READ=false / WRITE=true / load_mode=MANUAL_BOOTSTRAP / source=AR_CONFIG`。
+
+## 4. 文件范围
+
+### 4.1 批准 production 文件
+
+- `Redishelper/PVAmountConfigProvider.py`
+- `Redishelper/PVAmountConfigBootstrap.py`
+
+### 4.2 批准测试文件
+
+- `tests/pvam/WORK-PVAM-01C/`
+
+### 4.3 明确排除
+
+- 不修改 `Common/PvAmount.py`，不在 Common 引入 Redis/config I/O。
+- 不新增独立 V2 keyspace、影子表或 AR_CONFIG→Delta→Redis 自动同步。
+- 不在本卡修改 UserStats/EliteBonusStats 共享字段或奖金业务公式；这些条件化 factory 行为仍由 WORK-PVAM-01 承接。
+- 不以 env、常量、True/True、silent fallback 或 stale cache 作为正式 Provider。
+
+## 5. 验收标准（AC）
+
+| AC | 验收标准 | 环境 | 关联 TC |
+|---|---|---|---|
+| AC-01 | 合法 01 snapshot 原子加载成功并返回 immutable run config | DEV+UAT | TC-FLAG-01 |
+| AC-02 | active snapshot 缺失时 fail-loud | DEV | TC-FLAG-02 |
+| AC-03 | READ 缺失时 fail-loud | DEV | TC-FLAG-03 |
+| AC-04 | WRITE 缺失时 fail-loud | DEV | TC-FLAG-04 |
+| AC-05 | config_version 缺失时 fail-loud | DEV | TC-FLAG-05 |
+| AC-06 | 非 canonical bool 时 fail-loud | DEV | TC-FLAG-06 |
+| AC-07 | 状态 10 在 production admission 抛 `INVALID_STATE` | DEV | TC-FLAG-07 |
+| AC-08 | Provider 异常时不存在 AR_CONFIG/env/default fallback | DEV | TC-FLAG-08 |
+| AC-09 | run 加载 01 后 Redis 变 11，当前 run 仍固定 01 | DEV | TC-FLAG-09 |
+| AC-10 | 下一 production run 加载 11 且无正式 approval 时抛 `V2_STATE_NOT_AUTHORIZED` | DEV | TC-FLAG-10 |
+| AC-11 | active pointer 与 snapshot 跨 version 或 checksum 不一致时 fail-loud | DEV | TC-FLAG-11 |
+| AC-12 | bootstrap 以单一原子操作发布完整 01 并 read-after-write verify | DEV+UAT | TC-FLAG-12 |
+| AC-13 | production consumer 无直接 Redis flag GET | DEV | TC-FLAG-13 |
+| AC-14 | 当前 version=N 时发布 N 或 N-1 均抛 `STALE_CONFIG_VERSION` | DEV+UAT | TC-FLAG-22 |
+| AC-15 | 两个并发 bootstrap 至多一个成功，active version 为较新合法版本且无 lost update | DEV+UAT | TC-FLAG-23 |
+
+> `DEV+UAT` 条目可先用 injected fake 验证功能合同；真实 Redis 证据缺失时必须保留 `PENDING_TEST_ENV`，不得以 fake/stub 升格。
+
+受控检查方案用例映射：`TC-003, TC-024, TC-031, TC-032`。`TC-FLAG-01～13/22/23` 是本卡局部执行用例，不新增或改号 PLAN 的受控 TC。
+
+## 6. 依赖与执行顺序
+
+1. Phase G 先完成 DEC/GAP/TASK/WORK、allowlist、traceability、version/document manifest、test command 与 SHA 闭包。
+2. Phase I 先实现本卡 Provider/bootstrap；随后 WORK-PVAM-01 才可接入 conditional factory/run config。
+3. Phase D 在组合树执行全部 TC-FLAG；真实环境继续由 WORK-PVAM-08/DEC-013 管理。
+
+## 7. DEV / UAT 边界
+
+- DEV：允许 injected stub、in-memory fake；执行结构解析、状态 admission、run-freeze、Lua/CAS 模拟和静态扫描。
+- UAT：仅隔离 Redis 可证明真实 Lua/CAS 与并发发布；无环境时为 `PENDING_TEST_ENV/BLOCKED`。
+- 禁止把静态阅读或 fake 结果写成真实 Redis UAT PASS。
+
+## 8. 回滚与停止条件
+
+- Provider/bootstrap 可独立回滚；已发布的 versioned snapshot 不删除，保留审计。
+- active pointer 不得由非 CAS 普通 SET 回退；如需回退必须发布更高 config_version 的合法 00/01 snapshot。
+- 任一实现需要独立 V2 carrier 时立即以 `V2_CARRIER_NOT_APPROVED` 停工并回到 DEC/TASK/MODPLAN/WORK。
+
+## 9. 版本记录
+
+| 版本 | 日期 | 变更 | 治理状态 |
+|---|---|---|---|
+| v1.2-r10 | 2026-08-08 | 依据 DEC-019 新建独立 flag runtime contract 任务卡 | DRAFT |
+
+<!-- END TASK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md -->
 
 ---
 
@@ -634,7 +808,7 @@ Model adapters / User / Placement / Bonus
 | 关联决策 | `DEC-002、DEC-005、DEC-006、DEC-007、DEC-010` |
 | 严重级别 | `P0` |
 | 当前状态 | `DRAFT` |
-| 受控基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |
@@ -866,7 +1040,6 @@ effective_pv_delta_units = new_business_units - old_business_units
 
 <!-- END TASK-PVAM-02_订单退款入口金额放大与边界转换.md -->
 
-
 ---
 
 <!-- BEGIN TASK-PVAM-03_配置解析ppm与硬编码清理.md -->
@@ -887,7 +1060,7 @@ effective_pv_delta_units = new_business_units - old_business_units
 | 关联决策 | `DEC-001、DEC-002、DEC-003、DEC-009、DEC-014` |
 | 严重级别 | `P0` |
 | 当前状态 | `DRAFT` |
-| 受控基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |
@@ -1063,7 +1236,6 @@ SE 要求 exact raw 的字段使用原始字符串精确比较；不能先 strip
 
 <!-- END TASK-PVAM-03_配置解析ppm与硬编码清理.md -->
 
-
 ---
 
 <!-- BEGIN TASK-PVAM-04_monthActivePV与Active同源现算.md -->
@@ -1085,7 +1257,7 @@ SE 要求 exact raw 的字段使用原始字符串精确比较；不能先 strip
 | 关联决策 | `DEC-004、DEC-016、DEC-018` |
 | 严重级别 | `P0` |
 | 当前状态 | `DRAFT` |
-| 受控基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |
@@ -1256,7 +1428,6 @@ getter 可按 config source version 缓存 canonical threshold；Delta/Redis 版
 
 <!-- END TASK-PVAM-04_monthActivePV与Active同源现算.md -->
 
-
 ---
 
 <!-- BEGIN TASK-PVAM-05_Elite_SOURCE原子性与Writer_Proof.md -->
@@ -1277,7 +1448,7 @@ getter 可按 config source version 缓存 canonical threshold；Delta/Redis 版
 | 关联决策 | `DEC-007、DEC-008、DEC-011、DEC-017` |
 | 严重级别 | `P0` |
 | 当前状态 | `DRAFT` |
-| 受控基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |
@@ -1458,7 +1629,6 @@ assignment_hash, updated_at
 
 <!-- END TASK-PVAM-05_Elite_SOURCE原子性与Writer_Proof.md -->
 
-
 ---
 
 <!-- BEGIN TASK-PVAM-06_全量重算状态机发布分层与统一Guard.md -->
@@ -1480,7 +1650,7 @@ assignment_hash, updated_at
 | 关联决策 | `DEC-007、DEC-008、DEC-010、DEC-012` |
 | 严重级别 | `P0` |
 | 当前状态 | `DRAFT` |
-| 受控基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |
@@ -1666,7 +1836,6 @@ receipt 验证 -> PUBLISHED
 
 <!-- END TASK-PVAM-06_全量重算状态机发布分层与统一Guard.md -->
 
-
 ---
 
 <!-- BEGIN TASK-PVAM-07A_Consumer_ACK紧急修复.md -->
@@ -1687,7 +1856,7 @@ receipt 验证 -> PUBLISHED
 | 关联决策 | `DEC-010` |
 | 严重级别 | `P0` |
 | 当前状态 | `DRAFT` |
-| 受控基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |
@@ -1826,7 +1995,6 @@ normal read 与 xautoclaim 只调用一个 `process_entry()`；单条异常不�
 
 <!-- END TASK-PVAM-07A_Consumer_ACK紧急修复.md -->
 
-
 ---
 
 <!-- BEGIN TASK-PVAM-07B_事件路由与Stream保留.md -->
@@ -1847,7 +2015,7 @@ normal read 与 xautoclaim 只调用一个 `process_entry()`；单条异常不�
 | 关联决策 | `DEC-007、DEC-010` |
 | 严重级别 | `P0` |
 | 当前状态 | `DRAFT` |
-| 受控基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |
@@ -2006,7 +2174,6 @@ producer 不再指定固定 MAXLEN。独立 retention job 仅在以下全部满�
 
 <!-- END TASK-PVAM-07B_事件路由与Stream保留.md -->
 
-
 ---
 
 <!-- BEGIN TASK-PVAM-08_风险延期与UAT准入证据包.md -->
@@ -2028,7 +2195,7 @@ producer 不再指定固定 MAXLEN。独立 retention job 仅在以下全部满�
 | 关联决策 | `DEC-004、DEC-009、DEC-010、DEC-012、DEC-013、DEC-017、DEC-018` |
 | 严重级别 | `P0 / P1` |
 | 当前状态 | `DRAFT` |
-| 受控基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |

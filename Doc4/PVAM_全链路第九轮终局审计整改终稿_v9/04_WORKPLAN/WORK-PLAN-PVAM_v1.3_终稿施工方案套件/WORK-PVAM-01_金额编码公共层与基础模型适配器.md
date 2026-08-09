@@ -6,7 +6,7 @@
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 只实施 `R-001、R-002` 中已 `ACCEPTED` 或由来源 TASK 明确批准的条件代码事项。任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-01-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-01-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -21,15 +21,15 @@
 | 来源问题 | `R-001、R-002` |
 | 复核闭环追踪号 | `REM-001、REM-002 / W-001、W-002 / V-001、V-002` |
 | 来源检查项 | `CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002` |
-| 关联决策 | `DEC-002、DEC-008、DEC-014` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 关联决策 | `DEC-002、DEC-008、DEC-014、DEC-019` |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
 | 当前状态 | `BLOCKED` |
 | 文档治理状态 | `DRAFT`（`PENDING_ORGANIZATIONAL_APPROVAL`） |
-| 前置任务 | 无 |
+| 前置任务 | `WORK-PVAM-01C` Phase A Provider/bootstrap 接口 DEV_VERIFIED |
 | 功能开关 | `PV_AMOUNT_V2_READ / PV_AMOUNT_V2_WRITE` |
 
 ### 1.1 一对一追溯摘要
@@ -37,7 +37,7 @@
 ```text
 CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
   └─ R-001、R-002
-       └─ DEC-002、DEC-008、DEC-014
+       └─ DEC-002、DEC-008、DEC-014、DEC-019
             └─ TASK-PVAM-01 (DRAFT / PENDING_ORGANIZATIONAL_APPROVAL)
                  └─ WORK-PVAM-01
                       ├─ STEP-PVAM-01-01 / STEP-PVAM-01-02 / STEP-PVAM-01-03 / STEP-PVAM-01-04 / STEP-PVAM-01-05
@@ -54,18 +54,18 @@ CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
 | 复核报告 | `Redemption_PV_Amount_Migration_d74_复核报告_v1.5` | R-001、R-002 的代码事实与严重级别 | CONFIRMED |
 | 修改任务书 | `TASK-PVAM-01` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002 | CONTROLLED |
-| 正式决策 | DEC-002、DEC-008、DEC-014 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 正式决策 | DEC-002、DEC-008、DEC-014、DEC-019 | int64、Redis authority、Final 合同与 flag runtime 条件化语义 | CLOSED / 按上游登记 |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-01` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
-- [ ] 前置关系满足：无。
+- [ ] 前置关系满足：WORK-PVAM-01C Phase A Provider/bootstrap 接口已 DEV_VERIFIED。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
 - [ ] DEV测试依赖已安装；UAT项具备WORK-08生成的环境/数据/schema manifest。
-- [ ] 功能开关默认关闭，回滚路径已演练。
+- [ ] Redis 已由 MANUAL_BOOTSTRAP 原子发布当前批准01；缺失配置必须 fail-loud；回滚通过更高 config_version 的合法00/01 snapshot。
 
 未满足任一关键项时，本任务状态为 `BLOCKED`；不得用假设替代。
 
@@ -75,12 +75,12 @@ CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
 
 | 项目 | 内容 |
 |---|---|
-| 预期行为 | 新增最低层公共金额合同，并把所有持久化金额模型的新记录显式标记为 version=2；旧/未知编码只能被隔离读取，不得直接进入 v2 计算域。 |
+| 预期行为 | 新增最低层公共金额合同与 additive version 字段；只有真正进入获批 V2 domain 且全部共享金额字段满足 V2 合同的记录才写2。00/01 共享-key Legacy record 不写2；legacy/unknown 只在 V2 calculation entry 阻断。 |
 | 当前行为 | `Model/User/UserStats.py::UserStats` 的 `pv/gpv/gpv_real/gpv_unreal/contrib` 及 1L/2L/结余字段均为 `Optional[int]`，基线没有 `amount_encoding_version`。；`Model/User/EliteBonusStats.py::EliteBonusStats` 没有编码版本，且 `estimated_bonus: Optional[float] = 0.0`。；`Redishelper/BaseRedisModel.py::BaseRedisModel` 仅绑定 Redis OM 连接，没有金额版本后置校验。；固定提交中 `Common/PvAmount.py` 不存在；金额缩放、ppm、cents、截断与溢出校验分散在奖金服务。 |
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 / P1 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-01`；检查项 `CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-01`；检查项 `CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002` |
 
 ### 3.2 已确认代码事实
 
@@ -91,7 +91,7 @@ CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
 
 ### 3.3 本任务目标
 
-新增最低层公共金额合同，并把所有持久化金额模型的新记录显式标记为 version=2；旧/未知编码只能被隔离读取，不得直接进入 v2 计算域。
+新增最低层公共金额合同与 additive version 字段；按 DEC-019 接收同一 frozen run config，条件化全部真实 factory/version gate；当前01的共享-key Legacy record 不写2，获批11 V2 domain 才显式写2。
 
 ### 3.4 完成定义
 
@@ -128,8 +128,8 @@ CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
 | 消费者 | 依赖内容 | 预期影响 | 是否同步修改 | 对应步骤/测试 |
 |---|---|---|---|---|
 | UserStats/Global | 金额字段和版本 | 读写需同步修改 | 是 | STEP-PVAM-01-03/TC-003 |
-| Placement | 1L/2L/结余 | 新节点写 v2，旧记录阻断 | 是 | STEP-PVAM-01-03/TC-003 |
-| Elite | pv_pcs/gpv/bonus | 新节点写 v2，奖金逐步迁移为 cents | 是 | STEP-PVAM-01-04/TC-003 |
+| Placement | UserStats 精确 1L/2L/结余共享字段 | 00/01 Legacy factory 不写2；V2 entry 才 gate/stamping | 是 | STEP-PVAM-01-03/TC-003 |
+| Elite | pv_pcs/gpv/gpv_real/contrib_to_parent + legacy estimated_bonus | 00/01 不写2且不做 float→cents；V2 blank cents=0 不代表 parity | 是 | STEP-PVAM-01-04/TC-003 |
 | UserPeriodHighestRank | 无金额字段 | 保持不变 | 否 | TC-003 |
 
 ## 5. 施工设计
@@ -173,12 +173,23 @@ CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
 | CHG-02 | `Common/AmountModelAdapter.py` | `AmountRecordState`、`classify_amount_record` | 新增 | 不存在 | 隔离 NEW/LEGACY_UNKNOWN/INCOMPATIBLE | 普通计算只能接收 NEW | 不得自动乘 scale |
 | CHG-03 | `Model/User/UserStats.py` | `UserStats.amount_encoding_version` | 修改 | 无字段 | 增加 `Optional[int]=None` 与 units 注释 | 新记录显式2，旧记录保持None | 不得默认2 |
 | CHG-04 | `Model/User/EliteBonusStats.py` | version、`estimated_bonus_cents` | 修改 | 无version；bonus float | additive 增加 version 与 integer cents；旧 float 只读兼容 | v2 不写 float | 不得删除旧字段 |
-| CHG-05 | `User/UserStatsService.py` | `_get_or_init_user` | 修改 | 新节点无version | 显式 version=2；已存在记录校验 | 单位可审计 | 不得转换旧值 |
-| CHG-06 | `User/GlobalRecalculationService.py` | `_new_zero_user_stats`、`_mget_users_with_exists` | 修改 | 无version校验 | 新节点写2；批量读阻断旧/未知 | 全量不混算 | 不得把缺失补2 |
-| CHG-07 | `User/PlacementIncrementalService.py` / `User/PlacementRecalculationService.py` | 节点构造与批量读取 | 修改 | 无version | 新节点写2；跨期/批量读取校验 | placement全字段同单位 | 不得读取legacy结余 |
-| CHG-08 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | `_build_blank_node` / `_new_blank_stats` 等 | 修改 | 无version | 新节点写2；现存节点校验 | Elite状态可判编码 | 不得自动重建 |
+| CHG-05 | `User/UserStatsService.py` | `_get_or_init_user` 及 public run/batch 入口 | 修改 | 新节点无version | 每次 run/batch 加载一次 immutable config；00/01 factory 不写2；获批11 V2 factory 写2并 gate | Legacy/V2 作用域可审计 | 不得 refresh、fallback 或转换旧值 |
+| CHG-06 | `User/GlobalRecalculationService.py` | `settle_period`、`_new_zero_user_stats`、`_mget_users_with_exists` | 修改 | 无 run config/version scope | settle 前加载一次并冻结；00/01 不写2且不无条件 gate；获批11 V2 entry 才写2/阻断旧未知 | 当前 run 不见中途 flag 变化 | 不得把缺失补2 |
+| CHG-07 | `User/PlacementIncrementalService.py` / `User/PlacementRecalculationService.py` | public run/batch、节点构造与批量读取 | 修改 | 无 run config/version scope | 每个 batch/run 冻结一次；00/01 Legacy 结余照旧且不写2；获批11 V2 entry 才 gate/stamping | placement 全字段域一致 | 不得在01重解释 legacy 结余 |
+| CHG-08 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | public run/batch、`_build_blank_node` / `_new_blank_stats` 等全部真实构造点 | 修改 | 无 run config/version scope | 每个 batch/run 冻结一次；00/01 不写2且禁止 legacy float→cents；获批11 V2 blank 写2且 cents=0 仅为 init | Elite 状态可判编码 | 不得自动重建或声称 bonus parity |
 | CHG-09 | `User/Test/test_pv_amount_common.py` / `User/Test/test_amount_model_version.py` | pytest 用例 | 新增 | 不存在 | 覆盖类型、边界、序列化、mutation | 可自动验证 | 不得依赖GPU |
 
+### 6.0A DEC-019 条件化合同
+
+- Provider：只从 `PVAmountConfigProvider.load_run_config()` 获取 Redis snapshot；所有 production entry 使用同一 immutable run config，禁止直接 Redis flag GET、env/default/fallback 或途中 refresh。
+- 00：Legacy authoritative，factory 不写2。
+- 01：当前批准状态；UserStats/EliteBonusStats 仍为共享 key + Legacy authoritative，全部 production factory 为 `V2_WRITE_NOT_AVAILABLE`，不得写2、不得原地放大、不得 legacy float→cents。
+- 10：production admission `INVALID_STATE`。
+- 11：只有正式 approval 才可 production admission；当前无 approval 必须 `V2_STATE_NOT_AUTHORIZED`。
+- TEST-ONLY 11：测试可直接构造 snapshot 调用 private factory/domain，但不能进入 production admission。
+- UserStats 静态字段必须精确覆盖 `pv/gpv/gpv_real/gpv_unreal/contrib/pv_1l/pv_2l/pre_surplus_1l/pre_surplus_2l/total_1l/total_2l/remain_surplus_1l/remain_surplus_2l`。
+- EliteBonusStats 静态字段必须精确覆盖 `pv_pcs/gpv/gpv_real/contrib_to_parent`；`estimated_bonus_cents=0` 只表示 blank/init。
+- factory 测试通过 AST 发现全部真实 `UserStats(...)` / `EliteBonusStats(...)` 构造点，不使用预写函数数量作为覆盖证明。
 ### 6.1 固定基线锚点复验
 
 | 文件与符号 | 基线事实 | 施工动作 |
@@ -386,7 +397,7 @@ def trunc_div_zero(numerator: int, denominator: int) -> int:
 - 目标符号：字段与节点工厂
 - 精确操作：
 1. additive 增加 version
-2. 所有新建对象显式2
+2. 按 frozen run config 条件化全部 AST 扫描所得构造点：00/01 不写2，获批11 V2 factory 显式2
 3. 批量读与跨期读调用门禁。
 - 必须保持：保持字段名/Redis key/业务公式不变
 - 禁止实现：不得引入未批准业务规则、默认值、异常白名单或不可逆数据操作。
@@ -403,7 +414,7 @@ def trunc_div_zero(numerator: int, denominator: int) -> int:
 - 目标符号：version与cents additive字段
 - 精确操作：
 1. 新增 `estimated_bonus_cents`
-2. v2 工厂写2
+2. 00/01 Legacy factory 不写2；获批11 V2 factory 写2并执行 version gate
 3. 保留 `estimated_bonus` 供旧读。
 - 必须保持：不在本步骤改Elite公式
 - 禁止实现：不得引入未批准业务规则、默认值、异常白名单或不可逆数据操作。
@@ -433,7 +444,7 @@ def trunc_div_zero(numerator: int, denominator: int) -> int:
 
 | 对象 | 旧格式/状态 | 新格式/状态 | 转换位置 | 版本识别 | 异常数据策略 |
 |---|---|---|---|---|---|
-| Redis UserStats/EliteBonusStats | 无version/legacy数值 | version=2 micro-units/cents additive字段 | 节点工厂/受控重建 | amount_encoding_version | legacy隔离；未知阻断 |
+| Redis UserStats/EliteBonusStats | 无version/legacy共享字段 | 00/01 保持 Legacy authoritative；获批11才产生完整 version=2 V2 record | 条件化节点工厂/后续受控重建 | amount_encoding_version + frozen config | Legacy path 不无条件 gate；V2 entry 阻断未知 |
 
 ### 8.2 迁移步骤
 
@@ -472,6 +483,14 @@ def trunc_div_zero(numerator: int, denominator: int) -> int:
 | TC-PVAM-01-05 | 边界 | int64乘法 | 接近INT64_MAX的units*ppm | 溢出前结果精确；越界抛OverflowError | STEP-01-01 | DEV | NOT_RUN |
 | TC-PVAM-01-06 | 静态 | 依赖/反模式 | AST全仓 | Common不导入User；新增代码无Decimal(str(float))/int(round(float)) | STEP-01-05 | DEV | NOT_RUN |
 
+| TC-FLAG-14 | 契约 | READ=false audit read | Legacy result + read-only V2 fixture | 审计读取不改变业务返回、version或写副作用 | STEP-01-02/05 | DEV | NOT_RUN |
+| TC-FLAG-15 | factory | 00 Legacy factory | AST发现的全部UserStats/Elite构造点 | 不stamping2 | STEP-01-03/04/05 | DEV | NOT_RUN |
+| TC-FLAG-16 | factory | 01共享-key Legacy factory | AST发现的全部生产构造点 | 不stamping2、不原地放大 | STEP-01-03/04/05 | DEV | NOT_RUN |
+| TC-FLAG-17 | 静态 | 精确共享字段 | DEC-019字段清单 | UserStats 13项与Elite 4项逐项覆盖 | STEP-01-05 | DEV | NOT_RUN |
+| TC-FLAG-18 | 静态/单元 | legacy float→cents | estimated_bonus float样本 | 不存在洗白路径 | STEP-01-04/05 | DEV | NOT_RUN |
+| TC-FLAG-19 | 单元 | cents blank/init | estimated_bonus_cents=0 | 只证明初始化，不声称bonus parity | STEP-01-04/05 | DEV | NOT_RUN |
+| TC-FLAG-20 | 单元 | test-only 11 | 直接构造测试snapshot | V2 factory写2但不能进入production admission | STEP-01-03/04/05 | DEV | NOT_RUN |
+| TC-FLAG-21 | 静态/单元 | test-only bypass | production AST/callgraph | production code无法启用测试旁路 | STEP-01-05 | DEV | NOT_RUN |
 受控检查方案用例映射：`TC-001, TC-002, TC-003, TC-008, TC-030, TC-031, TC-032`。`TC-000` 为 RETIRED，不执行、不计完成率。
 
 ### 9.2 开发环境自动验证
@@ -479,7 +498,7 @@ def trunc_div_zero(numerator: int, denominator: int) -> int:
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-01}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -562,7 +581,7 @@ bash uat/scripts/run_work_uat.sh --work WORK-PVAM-01 --run-id "$RUN_ID" --tc TC-
 3. 导出前后JSON和异常日志
 - 精确预期：
 - version=2 正常；legacy/3阻断且原值不变
-- 新记录全部显式 version=2
+- 00/01 下全部共享-key Legacy 新记录不 stamping2；仅 test-only/获批11 V2 factory 显式2
 - 无旧记录被自动放大
 - 必须回传：完整命令、exit code、stdout/stderr、JUnit/JSON、输入fixture SHA-256、代码commit、镜像、环境版本、执行起止时间、Redis/DB/Kafka/Dask前后证据。
 - 失败停止与清理：停止专用consumer/job；保留PEL/状态和证据；禁止在未分析前清理失败现场；按第11节回滚。
@@ -578,8 +597,8 @@ bash uat/scripts/run_work_uat.sh --work WORK-PVAM-01 --run-id "$RUN_ID" --tc TC-
 | 验收编号 | 来源TASK验收项 | 实现步骤 | 测试用例 | 所需证据 | 环境 | 通过条件 |
 |---|---|---|---|---|---|---|
 | AC-01 | `Common/PvAmount.py` 存在，import graph 无循环，公共层无业务模块 import | STEP-PVAM-01-01/05 | TC-002、TC-031 | EV-PVAM-01-01 | DEV | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
-| AC-02 | UserStats、EliteBonusStats 新建记录均显式写 version=2 | STEP-PVAM-01-03/04 | TC-003 | EV-PVAM-01-02 | DEV+UAT | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
-| AC-03 | 旧 JSON 缺 version 可反序列化，但进入 v2 计算入口时必定阻断 | STEP-PVAM-01-02/03/04 | TC-003 | EV-PVAM-01-03 | DEV+UAT | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
+| AC-02 | 只有真正进入获批 V2 domain 且全部共享金额字段满足 V2 编码合同的 UserStats/EliteBonusStats record 才显式写 version=2；00/01 共享-key Legacy record 不得 stamping 2 | STEP-PVAM-01-03/04 | TC-003、TC-FLAG-15/16/20/21 | EV-PVAM-01-02 | DEV+UAT | 来源AC全部断言满足；真实 factory AST 扫描全覆盖；命令exit code 0；证据齐全 |
+| AC-03 | 旧 JSON 缺 version 可反序列化；legacy/unknown version 仅在进入 v2 计算入口时必定阻断，READ=false 的 Legacy authoritative path 不得无条件 require version=2 | STEP-PVAM-01-02/03/04 | TC-003、TC-FLAG-14/15/16/20 | EV-PVAM-01-03 | DEV+UAT | 来源AC全部断言满足；00/01 与 V2 entry 分支均有反向测试；证据齐全 |
 | AC-04 | version=1、3、字符串2、bool 等非法值全部阻断 | STEP-PVAM-01-02/05 | TC-003 | EV-PVAM-01-04 | DEV | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
 | AC-05 | 外部/DB 边界 parser 与内部 `require_units_int` 职责分离 | STEP-PVAM-01-01/05 | TC-001、TC-002 | EV-PVAM-01-05 | DEV | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
 | AC-06 | `0.1` float、`True`、NaN、Infinity、指数文本均被相应用例拒绝 | STEP-PVAM-01-01/05 | TC-001、TC-002 | EV-PVAM-01-06 | DEV | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
@@ -653,8 +672,8 @@ bash uat/scripts/run_work_uat.sh --work WORK-PVAM-01 --run-id "$RUN_ID" --tc TC-
 | 编号 | 交付物/证据 | 生成步骤 | 位置/格式 | 验收人 | artifact_status |
 |---|---|---|---|---|---|
 | EV-PVAM-01-01 | AC-01验收证据：`Common/PvAmount.py` 存在，import graph 无循环，公共层无业务模块 import | STEP-PVAM-01-01/05 | evidence/WORK-PVAM-01/attempt-*/ac/AC-01/ | 待指派QA | PENDING |
-| EV-PVAM-01-02 | AC-02验收证据：UserStats、EliteBonusStats 新建记录均显式写 version=2 | STEP-PVAM-01-03/04 | evidence/WORK-PVAM-01/attempt-*/ac/AC-02/ | 待指派QA | PENDING |
-| EV-PVAM-01-03 | AC-03验收证据：旧 JSON 缺 version 可反序列化，但进入 v2 计算入口时必定阻断 | STEP-PVAM-01-02/03/04 | evidence/WORK-PVAM-01/attempt-*/ac/AC-03/ | 待指派QA | PENDING |
+| EV-PVAM-01-02 | AC-02验收证据：00/01共享-key Legacy record不写2；test-only/获批11完整V2 factory写2 | STEP-PVAM-01-03/04 | evidence/WORK-PVAM-01/attempt-*/ac/AC-02/ | 待指派QA | PENDING |
+| EV-PVAM-01-03 | AC-03验收证据：Legacy path不无条件gate；进入V2计算入口必阻断legacy/unknown | STEP-PVAM-01-02/03/04 | evidence/WORK-PVAM-01/attempt-*/ac/AC-03/ | 待指派QA | PENDING |
 | EV-PVAM-01-04 | AC-04验收证据：version=1、3、字符串2、bool 等非法值全部阻断 | STEP-PVAM-01-02/05 | evidence/WORK-PVAM-01/attempt-*/ac/AC-04/ | 待指派QA | PENDING |
 | EV-PVAM-01-05 | AC-05验收证据：外部/DB 边界 parser 与内部 `require_units_int` 职责分离 | STEP-PVAM-01-01/05 | evidence/WORK-PVAM-01/attempt-*/ac/AC-05/ | 待指派QA | PENDING |
 | EV-PVAM-01-06 | AC-06验收证据：`0.1` float、`True`、NaN、sNaN、±Infinity（字符串与 Decimal）、指数文本均被相应用例拒绝 | STEP-PVAM-01-01/05 | evidence/WORK-PVAM-01/attempt-*/ac/AC-06/ | 待指派QA | PENDING |
@@ -677,7 +696,7 @@ bash uat/scripts/run_work_uat.sh --work WORK-PVAM-01 --run-id "$RUN_ID" --tc TC-
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
@@ -769,3 +788,4 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | v1.3-r6 | 2026-08-06 | 五轮 F5 定点修订：规范 v3 追溯、parent provenance/DEV CLI、控制状态字段及单一事实源 | 五轮审计报告 + 当前文档修订指令 | AI Agent（编制） | DRAFT |
 | v1.3-r7 | 2026-08-06 | 六轮 S6：信任 registry 初版、归档哈希、临时目录与 Decimal finite 防护 | 六轮终局审计报告 | AI Agent（编制） | DRAFT |
 | v1.3-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根、四工件摘要、AC 来源保真及当前轮次引用 | 七轮终局审计报告 + B7 处置 | AI Agent（编制） | DRAFT |
+| v1.3-r10 | 2026-08-08 | 依据 DEC-019 条件化 AC-02/03、CHG-05～08、factory/version gate 与 TEST-ONLY 域；新增 TC-FLAG-14～21 | PVAM USER-DECISION FINAL | AI Agent（编制） | DRAFT |

@@ -13,6 +13,12 @@ from redis_om import NotFoundError
 import Model.User.UserLevel as UserLevel
 from Model.Config import SCHEDULE_ADDRESS
 from Model.User.UserStats import UserStats
+from Common.AmountModelAdapter import build_factory_amount_fields
+from Redishelper.PVAmountConfigProvider import (
+    PVAmountConfigProvider,
+    PVAmountRunConfig,
+    PVAmountRunSession,
+)
 
 # 引入 GlobalRecalculationService 用于联合状态检查
 from User.GlobalRecalculationService import GlobalRecalculationService
@@ -150,7 +156,12 @@ class PlacementIncrementalService(UserStatsService):
         except NotFoundError:
             return 0, 0
 
-    def _get_or_init_user_with_surplus(self, period: str, user_id: str) -> Tuple[UserStats, bool, bool]:
+    def _get_or_init_user_with_surplus(
+        self,
+        period: str,
+        user_id: str,
+        run_config: PVAmountRunConfig,
+    ) -> Tuple[UserStats, bool, bool]:
         """
         带跨期结转机制的节点获取。
         【返回】：(节点对象, 是否曾经存在, 内部是否对节点做了修正)。
@@ -200,7 +211,8 @@ class PlacementIncrementalService(UserStatsService):
                 placement_initialized=True,
                 placement_settled=False,
                 placement_revision=0,
-                settled_revision=0
+                settled_revision=0,
+                **build_factory_amount_fields(run_config.state),
             )
 
         return u, existed_before, changed
@@ -274,7 +286,13 @@ class PlacementIncrementalService(UserStatsService):
             logger.info("双轨增量 BV 为 0, 跳过处理: period=%s, user_id=%s, order_id=%s", period, user_id, order_id)
             return
 
+        # region 加载并冻结本次业务运行配置
         redis_conn = UserStats.db()
+        run_config = PVAmountRunSession.start(
+            PVAmountConfigProvider(redis_conn)
+        ).config
+        # endregion
+
         if redis_conn.exists(done_key):
             logger.warning("检测到双轨重复订单 %s，忽略本次请求。", order_id)
             return
@@ -319,7 +337,7 @@ class PlacementIncrementalService(UserStatsService):
                     # ---------------------------------------------------------
                     # Step A: 激活本人 (源节点) 的对碰合并状态
                     # ---------------------------------------------------------
-                    node_self, existed_self, dirty_self = self._get_or_init_user_with_surplus(period, user_id)
+                    node_self, existed_self, dirty_self = self._get_or_init_user_with_surplus(period, user_id, run_config)
                     processed_nodes[user_id] = node_self
 
                     old_t1, old_t2 = node_self.total_1l, node_self.total_2l
@@ -364,7 +382,7 @@ class PlacementIncrementalService(UserStatsService):
                             existed_anc = True
                             dirty_anc = False
                         else:
-                            anc_node, existed_anc, dirty_anc = self._get_or_init_user_with_surplus(period, anc_id)
+                            anc_node, existed_anc, dirty_anc = self._get_or_init_user_with_surplus(period, anc_id, run_config)
                             processed_nodes[anc_id] = anc_node
 
                         o_pv1, o_pv2 = anc_node.pv_1l, anc_node.pv_2l

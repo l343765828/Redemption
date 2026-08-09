@@ -8,4 +8,4 @@
 - 代码审计结论：`REJECTED`
 - DEC-013 / Gate C：`OPEN / OPEN`
 
-本套件仅定义已接受缺陷的修改任务与 `UAT_VERIFY/DEFERRED` 边界，不代表代码已经实施。
+本套件包含十份专项任务，仅定义已接受缺陷的修改任务与 `UAT_VERIFY/DEFERRED` 边界，不代表代码已经实施。

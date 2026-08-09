@@ -1,6 +1,6 @@
 # PVAM 标准 Patch 交付门禁（受信任前置注册表版）
 
-固定根基线：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`。每个 WORK 的 patch 只允许表示 `PARENT_COMMIT → WORK_COMMIT` 的直接差异。
+固定根基线：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`。每个 WORK 的 patch 只允许表示 `PARENT_COMMIT → WORK_COMMIT` 的直接差异。
 
 强制条件：
 1. parent provenance schema v2 必须绑定 `approved_commit_registry_sha256`；

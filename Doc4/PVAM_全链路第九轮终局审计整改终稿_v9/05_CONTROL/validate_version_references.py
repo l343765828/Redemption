@@ -306,12 +306,32 @@ def expected_controlled_token_occurrences(
     }
     rules: list[dict[str, object]] = [
         {
+            "path": CANONICAL_MAIN_FILES[0],
+            "token": "v1.15-r10",
+            "expected_count": 1,
+            "location": {
+                "kind": "revision_row",
+                "required_text": "DEC-019",
+                "version": "v1.15-r10",
+            },
+        },
+        {
             "path": CANONICAL_MAIN_FILES[2],
             "token": "v1.2-r8",
             "expected_count": 1,
             "location": {
                 **revision_location,
                 "version": "v1.2-r8",
+            },
+        },
+        {
+            "path": CANONICAL_MAIN_FILES[2],
+            "token": "v1.2-r10",
+            "expected_count": 1,
+            "location": {
+                "kind": "revision_row",
+                "required_text": "DEC-019",
+                "version": "v1.2-r10",
             },
         },
         {
@@ -343,19 +363,45 @@ def expected_controlled_token_occurrences(
                 "version": "v1.3-r9",
             },
         },
+        {
+            "path": CANONICAL_MAIN_FILES[3],
+            "token": "v1.3-r10",
+            "expected_count": 1,
+            "location": {
+                "kind": "revision_row",
+                "required_text": "DEC-019",
+                "version": "v1.3-r10",
+            },
+        },
     ]
     for path in works:
+        token = "v1.3-r10" if "WORK-PVAM-01C_" in path.name else "v1.3-r8"
+        required_text = "DEC-019" if token == "v1.3-r10" else "七轮 B7"
         rules.append(
             {
                 "path": path.relative_to(root).as_posix(),
-                "token": "v1.3-r8",
+                "token": token,
                 "expected_count": 1,
                 "location": {
-                    **revision_location,
-                    "version": "v1.3-r8",
+                    "kind": "revision_row",
+                    "required_text": required_text,
+                    "version": token,
                 },
             }
         )
+        if "WORK-PVAM-01_" in path.name:
+            rules.append(
+                {
+                    "path": path.relative_to(root).as_posix(),
+                    "token": "v1.3-r10",
+                    "expected_count": 1,
+                    "location": {
+                        "kind": "revision_row",
+                        "required_text": "DEC-019",
+                        "version": "v1.3-r10",
+                    },
+                }
+            )
     rules.append(
         {
             "path": "05_CONTROL/AUTHORIZATION_STATUS-PVAM-v2.md",
@@ -592,7 +638,7 @@ def validate_main_documents(root: Path, manifest: dict) -> tuple[list[Path], lis
 
     require_only_one_h1(
         plan,
-        "Redemption 项目检查方案（PV Amount Migration · 2475c6c4 基线）",
+        "Redemption 项目检查方案（PV Amount Migration · 3891f4b9 基线）",
         "PLAN",
     )
     require_field(
@@ -609,6 +655,7 @@ def validate_main_documents(root: Path, manifest: dict) -> tuple[list[Path], lis
         expected="v1.15",
         label="PLAN",
     )
+    require_revision(plan, version="v1.15-r10", required_text="DEC-019", label="PLAN")
 
     require_only_one_h1(report, "Redemption PV Amount Migration 复核报告 v1.5", "REPORT")
     require_field(
@@ -660,6 +707,7 @@ def validate_main_documents(root: Path, manifest: dict) -> tuple[list[Path], lis
         label="MODPLAN",
     )
     require_revision(mod, version="v1.2-r8", required_text="七轮 B7", label="MODPLAN")
+    require_revision(mod, version="v1.2-r10", required_text="DEC-019", label="MODPLAN")
 
     require_only_one_h1(
         work_total,
@@ -690,13 +738,21 @@ def validate_main_documents(root: Path, manifest: dict) -> tuple[list[Path], lis
     require_revision(
         work_total, version="v1.3-r8", required_text="七轮 B7", label="WORK total"
     )
-
-    tasks = sorted(root.glob(CANONICAL_TASK_GLOB))
-    works = sorted(
-        path for path in root.glob(CANONICAL_WORK_GLOB) if "完整套件" not in path.name
+    require_revision(
+        work_total, version="v1.3-r10", required_text="DEC-019", label="WORK total"
     )
-    if len(tasks) != 9 or len(works) != 9:
-        fail(f"expected 9 TASK and 9 WORK files, got {len(tasks)}/{len(works)}")
+
+    tasks = sorted(root.glob(CANONICAL_TASK_GLOB), key=lambda path: path.name.casefold())
+    works = sorted(
+        (
+            path
+            for path in root.glob(CANONICAL_WORK_GLOB)
+            if "完整套件" not in path.name
+        ),
+        key=lambda path: path.name.casefold(),
+    )
+    if len(tasks) != 10 or len(works) != 10:
+        fail(f"expected 10 TASK and 10 WORK files, got {len(tasks)}/{len(works)}")
 
     for path in tasks:
         text = read_markdown(path)
@@ -716,6 +772,10 @@ def validate_main_documents(root: Path, manifest: dict) -> tuple[list[Path], lis
             expected="MODPLAN-PVAM_v1.2",
             label=path.name,
         )
+        if task_id in {"TASK-PVAM-01", "TASK-PVAM-01C"}:
+            require_revision(
+                text, version="v1.2-r10", required_text="DEC-019", label=path.name
+            )
 
     for path in works:
         text = read_markdown(path)
@@ -735,14 +795,23 @@ def validate_main_documents(root: Path, manifest: dict) -> tuple[list[Path], lis
             expected="v1.3",
             label=path.name,
         )
-        require_revision(
-            text, version="v1.3-r8", required_text="七轮 B7", label=path.name
-        )
+        if work_id == "WORK-PVAM-01C":
+            require_revision(
+                text, version="v1.3-r10", required_text="DEC-019", label=path.name
+            )
+        else:
+            require_revision(
+                text, version="v1.3-r8", required_text="七轮 B7", label=path.name
+            )
+        if work_id == "WORK-PVAM-01":
+            require_revision(
+                text, version="v1.3-r10", required_text="DEC-019", label=path.name
+            )
 
     files = [plan_path, report_path, mod_path, work_total_path, *tasks, *works]
     for path in files:
         text = read_markdown(path)
-        if "2475c6c4..2475c6c4" in text:
+        if "3891f4b9..3891f4b9" in text:
             fail(f"self compare in {path}")
         for alias in manifest["forbidden_active_control_aliases"]:
             if alias in text:

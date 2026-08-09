@@ -6,7 +6,7 @@
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 只实施 `R-003、R-007` 中已 `ACCEPTED` 或由来源 TASK 明确批准的条件代码事项。任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-02-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-02-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -22,8 +22,8 @@
 | 复核闭环追踪号 | `REM-003、REM-007 / W-003、W-007 / V-003、V-007` |
 | 来源检查项 | `CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005` |
 | 关联决策 | `DEC-002、DEC-005、DEC-006、DEC-007、DEC-010` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
@@ -55,12 +55,12 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 | 修改任务书 | `TASK-PVAM-02` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005 | CONTROLLED |
 | 正式决策 | DEC-002、DEC-005、DEC-006、DEC-007、DEC-010 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-02` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
 - [ ] 前置关系满足：WORK-PVAM-01 达到 DEV_VERIFIED；WORK-PVAM-03 的配置 API 在奖金切换前可用。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
@@ -80,7 +80,7 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-02`；检查项 `CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-02`；检查项 `CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005` |
 
 ### 3.2 已确认代码事实
 
@@ -404,7 +404,7 @@ Normalized delivery必须冻结：`source_system/source_event_id/payload_hash/bu
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-02}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -607,7 +607,7 @@ SQL
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 

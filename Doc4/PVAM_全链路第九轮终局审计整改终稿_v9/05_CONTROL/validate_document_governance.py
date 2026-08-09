@@ -22,8 +22,8 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 AC_ID = re.compile(r"AC-[0-9]{2}")
-TASK_ID = re.compile(r"TASK-PVAM-(?:07A|07B|0[1-8])(?![0-9A-Z])")
-WORK_ID = re.compile(r"WORK-PVAM-(?:07A|07B|0[1-8])(?![0-9A-Z])")
+TASK_ID = re.compile(r"TASK-PVAM-(?:01C|07A|07B|0[1-8])(?![0-9A-Z])")
+WORK_ID = re.compile(r"WORK-PVAM-(?:01C|07A|07B|0[1-8])(?![0-9A-Z])")
 CORE_ISSUE_ID = re.compile(r"\bR-\d{3}(?:A|B)?\b")
 NON_CORE_ISSUE_ID = re.compile(
     r"\b(?:RISK|UV|OPT)-\d{3}\b|\bGAP-[A-Z0-9-]+\b|\bFIX-\d{3}\b"
@@ -337,8 +337,8 @@ def main() -> None:
             fail(f"superseded active alias remains: {name}")
 
     work_docs = sorted(p for p in work_dir.glob("WORK-PVAM-*.md") if "完整套件" not in p.name)
-    if len(work_docs) != 9:
-        fail(f"expected 9 WORK docs, got {len(work_docs)}")
+    if len(work_docs) != 10:
+        fail(f"expected 10 WORK docs, got {len(work_docs)}")
     for path in work_docs:
         text = read(path)
         if "| 文档版本 | `v1.3` |" not in text:
@@ -356,8 +356,8 @@ def main() -> None:
                 fail(f"{path.name}: missing canonical DEV token {token}")
 
     task_docs = sorted(mod_dir.glob("TASK-PVAM-*.md"))
-    if len(task_docs) != 9:
-        fail(f"expected 9 TASK docs, got {len(task_docs)}")
+    if len(task_docs) != 10:
+        fail(f"expected 10 TASK docs, got {len(task_docs)}")
     task_map = {path.name.split("_")[0].replace("TASK-", "WORK-"): path for path in task_docs}
     work_map = {path.name.split("_")[0]: path for path in work_docs}
     if set(task_map) != set(work_map):
@@ -401,10 +401,39 @@ def main() -> None:
                 f"missing_from_work={missing} extra_in_work={extra}"
             )
         total_ac += len(task_ac)
-    if total_ac != 100:
-        fail(f"expected 100 source AC rows, got {total_ac}")
+    if total_ac != 115:
+        fail(f"expected 115 source AC rows, got {total_ac}")
 
     validate_work01_ac06_detail(read(work_map["WORK-PVAM-01"]))
+
+    plan_text = read(root / "01_PLAN/Redemption_PV_Amount_Migration_d74_检查方案_v1.15.md")
+    task01_text = read(task_map["WORK-PVAM-01"])
+    work01_text = read(work_map["WORK-PVAM-01"])
+    task01c_text = read(task_map["WORK-PVAM-01C"])
+    work01c_text = read(work_map["WORK-PVAM-01C"])
+    semantic_tokens = {
+        "PLAN DEC-019": (plan_text, ["| DEC-019 |", "AR_CONFIG", "Redis", "V2_STATE_NOT_AUTHORIZED"]),
+        "TASK-01 conditional contract": (
+            task01_text,
+            ["V2_WRITE_NOT_AVAILABLE", "TC-FLAG-14～21", "pre_surplus_1l", "contrib_to_parent"],
+        ),
+        "WORK-01 conditional contract": (
+            work01_text,
+            ["TC-FLAG-14", "TC-FLAG-21", "READ=false", "factory AST"],
+        ),
+        "TASK-01C runtime contract": (
+            task01c_text,
+            ["PVAmountConfigProvider.load_run_config", "MANUAL_BOOTSTRAP", "STALE_CONFIG_VERSION"],
+        ),
+        "WORK-01C runtime contract": (
+            work01c_text,
+            ["Redishelper/PVAmountConfigProvider.py", "Redishelper/PVAmountConfigBootstrap.py", "TC-FLAG-23"],
+        ),
+    }
+    for label, (document, required_tokens) in semantic_tokens.items():
+        for token in required_tokens:
+            if token not in document:
+                fail(f"{label}: missing required token {token}")
 
     for script in sorted(control.glob("selftest_*.sh")):
         script_text = read(script)
@@ -461,6 +490,21 @@ def main() -> None:
         fail("scope schema_version must be 3")
     if "User/GlobalRecalculationService.py" not in scope["works"]["WORK-PVAM-02"]["exact"]:
         fail("WORK-02 allowlist missing GlobalRecalculationService.py")
+    work01c_scope = scope["works"].get("WORK-PVAM-01C")
+    if work01c_scope is None:
+        fail("WORK-01C allowlist is missing")
+    if work01c_scope.get("exact") != [
+        "Redishelper/PVAmountConfigProvider.py",
+        "Redishelper/PVAmountConfigBootstrap.py",
+    ]:
+        fail("WORK-01C exact production scope mismatch")
+    if work01c_scope.get("prefixes") != ["tests/pvam/WORK-PVAM-01C/"]:
+        fail("WORK-01C test prefix mismatch")
+    if scope["works"]["WORK-PVAM-01"].get("prerequisites") != ["WORK-PVAM-01C"]:
+        fail("WORK-01 must depend on WORK-01C Phase A")
+    if not (control / "work-test-commands/WORK-PVAM-01C.sh").is_file():
+        fail("WORK-01C test command is missing")
+
     work08_scope = scope["works"]["WORK-PVAM-08"]
     if "evidence/manifest.schema.json" not in work08_scope["exact"]:
         fail("WORK-08 allowlist missing evidence/manifest.schema.json")

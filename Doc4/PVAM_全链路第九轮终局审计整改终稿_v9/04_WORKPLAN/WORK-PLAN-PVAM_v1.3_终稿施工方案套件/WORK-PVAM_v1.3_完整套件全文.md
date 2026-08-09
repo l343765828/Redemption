@@ -7,7 +7,7 @@
 
 # WORK-PLAN-PVAM_v1.3 Redemption PV Amount Migration 施工总方案
 
-> 文档定位：基于 `MODPLAN-PVAM_v1.2` 与九份专项修改任务书定义施工顺序、统一技术合同、停工条件、DEV/UAT证据、发布和回滚。当前尚无可核验组织施工授权，本文件不得被解释为开工批准。
+> 文档定位：基于 `MODPLAN-PVAM_v1.2` 与十份专项修改任务书定义施工顺序、统一技术合同、停工条件、DEV/UAT证据、发布和回滚。当前尚无可核验组织施工授权，本文件不得被解释为开工批准。
 
 ## 0. 使用规则
 
@@ -28,9 +28,9 @@
 | 检查方案 | `PLAN-PVAM-v1.15` |
 | 七轮审查 | `B7-01～B7-06` 独立核验与第八轮定点修订；S6/F5 为历史来源 |
 | 九轮治理修补 | `P0-TRACE-CHAIN-09-01`、`P1-WORK-INDEX-09-02`、`P2-DELIVERY-NAME-09-03` 定点闭环；不改变文档业务版本 |
-| 项目代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| 修改方案套件SHA-256 | `5016812126ac48835f6c54c3a2e7dcdad5623cf8d528bc8d911fd45a37a96876`（对象：`MODPLAN-PVAM_v1.2_终稿修改方案套件.zip`，随本包提供） |
-| SQL业务基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，排除Skill列明废弃/副本 |
+| 项目代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| 修改方案套件SHA-256 | `b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898`（对象：`MODPLAN-PVAM_v1.2_终稿修改方案套件.zip`，随本包提供） |
+| SQL业务基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，排除Skill列明废弃/副本 |
 | 编制人 | AI Agent（施工方案编制） |
 | 复核人 | 待组织指派（AI Agent 仅完成文档自检，不代签组织审批） |
 | 批准人 | 待组织授权人签署 |
@@ -67,16 +67,16 @@
 | 检查方案 | PLAN-PVAM-v1.15 | CHK/TC/判据 | CONTROLLED_DRAFT | 授权状态见 `AUTHORIZATION_STATUS-PVAM-v2.md` |
 | 复核报告 | REPORT-PVAM-v1.5 | R-001~013、RISK、UV | FINAL / 代码结论 REJECTED | 总体 REJECTED 不弱化 |
 | 修改总方案 | MODPLAN-PVAM_v1.2 | 范围/状态/依赖 | DRAFT（待组织授权） | 逻辑8组，07拆A/B |
-| 专项修改任务书 | TASK-01~06、07A、07B、08 | 目标/排除/AC | DRAFT（待组织授权） | 九份 |
+| 专项修改任务书 | TASK-01、01C、02~06、07A、07B、08 | 目标/排除/AC | DRAFT（待组织授权） | 十份 |
 | 正式决策 | DEC-001~018相关项 | 业务/架构裁决 | 按上游CLOSED/OPEN状态 | DEC-013仍是UAT门禁 |
-| 代码与SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 施工对象 | FROZEN | Python/SQL与097cae32一致 |
+| 代码与SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 施工对象 | FROZEN | Python/SQL与097cae32一致 |
 | 施工模板 | 两份Redemption模板 | 文档结构/状态/证据 | CONTROLLED | 本套件完整套用 |
 
 ### 2.2 开工准入门槛
 
 - [x] R-001～R-013 已在修改方案中处置为 `ACCEPTED`。
 - [ ] 已取得可核验组织批准人、角色、批准原文/签名、时间、范围和允许 Wave。
-- [x] 代码基线完整SHA固定为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`。
+- [x] 代码基线完整SHA固定为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`。
 - [x] `AUDIT-WORKPLAN-PVAM-v1.1` 唯一条件 G-1 已闭合：07A 统一 `RecalcProcessResult` 并实现 `should_ack`。
 - [ ] 当前工作副本、有效SQL blob、项目Skill和MODPLAN套件SHA由执行脚本复验。
 - [ ] 每个WORK由实施/复核签署；feature flag、分支、回滚提交点就绪。
@@ -97,7 +97,7 @@
 
 ### 3.2 总体完成定义（DoD）
 
-- [ ] 九份WORK全部达到 `VERIFIED`，或仅保留经正式批准且不含P0/P1的偏离。
+- [ ] 十份WORK全部达到 `VERIFIED`，或仅保留经正式批准且不含P0/P1的偏离。
 - [ ] R-001～R-013均有代码diff、测试、EV及对应CHK关闭证据。
 - [ ] 所有金额字段内部为version=2 int64 micro-units，最终金额为integer cents/明确Decimal string，无生产float链。
 - [ ] 同一normalized event三stage的identity/revision/hash/delta一致且幂等。
@@ -113,7 +113,8 @@
 
 | 顺序 | 施工任务 | 来源修改任务 | 来源问题 | 关联决策 | 内容摘要 | 前置任务 | 可否并行 | 状态 |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `WORK-PVAM-01` | `TASK-PVAM-01` | R-001、R-002 | DEC-002、DEC-008、DEC-014 | 金额编码公共层与基础模型适配器 | 无 | 否 | BLOCKED |
+| 1A | `WORK-PVAM-01C` | `TASK-PVAM-01C` | GAP-PVAM-FLAG-CONTRACT | DEC-019 | Redis flag Provider、原子 MANUAL_BOOTSTRAP、run-freeze 与 admission | 无（Phase A）；组合 factory 测试在 WORK-01 后执行 | 是 | BLOCKED |
+| 1B | `WORK-PVAM-01` | `TASK-PVAM-01` | R-001、R-002 | DEC-002、DEC-008、DEC-014、DEC-019 | 金额编码公共层与基础模型适配器及条件化 factory/version gate | WORK-PVAM-01C Phase A DEV_VERIFIED | 否 | BLOCKED |
 | 2 | `WORK-PVAM-02` | `TASK-PVAM-02` | R-003、R-007 | DEC-002、DEC-005、DEC-006、DEC-007、DEC-010 | 订单/退款入口金额放大与边界转换 | WORK-PVAM-01达到DEV_VERIFIED | 条件 | BLOCKED |
 | 3 | `WORK-PVAM-03` | `TASK-PVAM-03` | R-004 | DEC-001、DEC-002、DEC-003、DEC-009、DEC-014 | 配置解析、ppm 与硬编码清理 | WORK-PVAM-01 DEV_VERIFIED | 条件 | BLOCKED |
 | 4 | `WORK-PVAM-04` | `TASK-PVAM-04` | R-005、R-006 | DEC-004、DEC-016、DEC-018 | monthActivePV 唯一取值与 Active 同源现算 | WORK-PVAM-01、WORK-PVAM-03 DEV_VERIFIED；真实供给链UAT仍BLOCKED | 否 | BLOCKED |
@@ -123,7 +124,7 @@
 | 8 | `WORK-PVAM-07B` | `TASK-PVAM-07B` | R-012B（parent_issue=R-012）、R-013 | DEC-007、DEC-010 | 事件路由、正式 Handler 与 Stream 保留护栏 | WORK-PVAM-06、WORK-PVAM-07A DEV_VERIFIED | 否 | BLOCKED |
 | 9 | `WORK-PVAM-08` | `TASK-PVAM-08` | RISK-001、RISK-002、UV-001～UV-005、OPT-001、OPT-002、GAP-DEC004-2B | DEC-004、DEC-009、DEC-010、DEC-012、DEC-013、DEC-017、DEC-018 | 风险、UAT 准入与机器可读证据包 | 阶段A可与所有DEV任务并行；阶段B依赖DEC-013及WORK-01～07B DEV_VERIFIED | 是 | BLOCKED |
 
-说明：逻辑上仍为 `WORK-PVAM-01～08` 八组；`WORK-PVAM-07` 为降低P0 ACK风险拆成 `07A/07B`，因此交付九份专项文件。
+说明：原 `WORK-PVAM-01～08` 八组保持不变；DEC-019 另增独立配置组 `WORK-PVAM-01C`，且 `WORK-PVAM-07` 仍拆为 `07A/07B`，因此当前交付十份专项文件。
 
 ### 4.2 纳入范围
 
@@ -136,7 +137,7 @@
 ### 4.3 明确排除范围
 
 - PB、SFB、GPB、CRB算法；Team Bonus units-int生产服务建设。
-- `GAP-DEC004-2B` AR_CONFIG→Delta→Redis生产写入/失效producer。
+- `GAP-DEC004-2B` AR_CONFIG→Delta→Redis生产写入/失效producer；DEC-019 只批准 MANUAL_BOOTSTRAP，不批准自动同步。
 - RISK/UV自身的代码修复；仅验证、取证和阻断。
 - 业务系统MariaDB writer、正式读切换和跨Redis/DB原子保证。
 - `_bak/_final/copy`、9个废弃SQL、`GraphService.run_bfs`、demo/print脚本作为生产证明。
@@ -152,7 +153,7 @@
 | 施工任务 | 依赖对象 | 依赖类型 | 依赖满足条件 | 未满足时处理 |
 |---|---|---|---|---|
 | WORK-08A | 固定基线/材料 | 治理 | 先交付证据schema、原生命令包装与callgraph工具 | BLOCK外部部分，不阻止无关DEV；但各WORK引用其脚本前必须先完成08A |
-| WORK-01 | 代码基线 | 代码 | HEAD精确、TASK批准 | BLOCK |
+| WORK-01C | 代码基线/Redis helper | 配置接口 | HEAD精确、TASK批准；Phase A Provider/bootstrap 可独立DEV | BLOCK |
 | WORK-07A | 现有consumer | 代码 | 独立hotfix审批 | 可与01并行 |
 | WORK-02 | WORK-01 | 接口 | 公共units/version DEV通过 | 不得开工 |
 | WORK-03 | WORK-01 | 接口 | 公共ppm API可用 | 不得开工 |
@@ -167,7 +168,7 @@
 | 批次 | 任务 | 开始条件 | 批次完成条件 | 失败影响 |
 |---|---|---|---|---|
 | Wave 0 | WORK-08 阶段A | 施工方案批准 | 基线/manifest/脚本DEV通过 | 缺外部材料只阻断对应UAT |
-| Wave 1 | WORK-01 + WORK-07A | 各自批准 | 公共层与ACK hotfix DEV_VERIFIED | 01失败阻断金额链；07A独立 |
+| Wave 1A | WORK-01C Phase A + WORK-07A | 各自批准 | Provider/bootstrap与ACK hotfix DEV_VERIFIED | 01C失败阻断WORK-01；07A独立 |
 | Wave 2 | WORK-02 + WORK-03 | WORK-01通过 | 边界/period/config DEV_VERIFIED | 阻断04/05 |
 | Wave 3 | WORK-04 | 01/03通过 | Active读侧与消费者DEV通过 | 真实2B仍BLOCKED |
 | Wave 4 | WORK-05 | 01/02/03通过 | Elite atomic/batch DEV通过 | 阻断06 |
@@ -190,14 +191,15 @@
 
 - 依赖方向：`Common → Model adapters / User / Placement / Bonus`；Common禁止反向导入业务层。
 - I/O、纯计算、权威提交、发布/receipt、consumer/retention分层。
-- Redis是本仓权威状态；关系库正式writer和读切换属于业务系统。
+- Redis是本仓权威状态且是 PV amount flag 唯一 runtime Provider；AR_CONFIG 仍为业务 Source of Truth；关系库正式writer和读切换属于业务系统。
 - GPU/Dask仅消费已经规范化的int64列；禁止金额隐式提升为float。
 
 ### 6.2 数据契约
 
 | 对象 | 字段/接口 | 单位与类型 | 空值/默认值 | 兼容规则 | 责任任务 |
 |---|---|---|---|---|---|
-| UserStats/EliteBonusStats | amount_encoding_version | Optional[int]；新域必须2 | 缺失=legacy unknown | 普通计算阻断 | WORK-01 |
+| UserStats/EliteBonusStats | amount_encoding_version | Optional[int]；完整V2域必须2 | 缺失=legacy unknown | 00/01 Legacy path不无条件gate且不stamping2；获批11 V2 entry阻断 | WORK-01 |
+| PV amount flag | `PVAmountRunConfig` | frozen bool/bool/non-negative config_version | 无默认 | Redis atomic snapshot；00/01允许、10拒绝、未批准11拒绝；run途中不refresh | WORK-01C/01 |
 | PV/BV/GPV/1L/2L/结余 | 金额字段 | int64 micro-units | 业务零=0，不用None洗白 | 两处边界转换 | WORK-01/02 |
 | 费率 | *_rate_ppm | signed int64 ppm | 由键矩阵决定缺失/0 | raw+canonical checksum | WORK-03 |
 | 最终奖金 | *_cents | int64 cents | 0明确 | E/PE/SE/LB/TB截断；EAB最终HALF_UP | WORK-01/02 |
@@ -228,11 +230,14 @@
 
 | 施工任务 | 文件/对象 | 变更类型 | 目标符号/表/配置 | 预期行为 | 对应测试 |
 |---|---|---|---|---|---|
+| WORK-PVAM-01C | `Redishelper/PVAmountConfigProvider.py` | 新增 | run config/provider/admission | Redis唯一runtime Provider、fail-loud、run-freeze | TC-FLAG-01～11; TC-FLAG-13 |
+| WORK-PVAM-01C | `Redishelper/PVAmountConfigBootstrap.py` | 新增 | MANUAL_BOOTSTRAP/Lua CAS | 原子发布01、stale/lost-update保护 | TC-FLAG-12; TC-FLAG-22; TC-FLAG-23 |
+| WORK-PVAM-01C | `tests/pvam/WORK-PVAM-01C/` | 新增 | provider/bootstrap tests | fake DEV与真实Redis UAT分层 | TC-FLAG-01～13; TC-FLAG-22; TC-FLAG-23 |
 | WORK-PVAM-01 | `Common/PvAmount.py` | 新增 | 模块级常量与纯函数 | 唯一公共金额 API | TC-PVAM-01-01; TC-PVAM-01-02 |
 | WORK-PVAM-01 | `Common/AmountModelAdapter.py` | 新增 | `AmountRecordState`、`classify_amount_record` | 普通计算只能接收 NEW | TC-PVAM-01-01; TC-PVAM-01-02 |
-| WORK-PVAM-01 | `Model/User/UserStats.py` | 修改 | `UserStats.amount_encoding_version` | 新记录显式2，旧记录保持None | TC-PVAM-01-01; TC-PVAM-01-02 |
-| WORK-PVAM-01 | `Model/User/EliteBonusStats.py` | 修改 | version、`estimated_bonus_cents` | v2 不写 float | TC-PVAM-01-01; TC-PVAM-01-02 |
-| WORK-PVAM-01 | `User/UserStatsService.py` | 修改 | `_get_or_init_user` | 单位可审计 | TC-PVAM-01-01; TC-PVAM-01-02 |
+| WORK-PVAM-01 | `Model/User/UserStats.py` | 修改 | `UserStats.amount_encoding_version` | 仅获批 V2 domain record 显式2；00/01共享-key Legacy record不写2 | TC-PVAM-01-01; TC-PVAM-01-02 |
+| WORK-PVAM-01 | `Model/User/EliteBonusStats.py` | 修改 | version、`estimated_bonus_cents` | 仅V2 blank/init允许cents=0；禁止legacy float→cents与00/01 stamping2 | TC-PVAM-01-01; TC-PVAM-01-02 |
+| WORK-PVAM-01 | `User/UserStatsService.py` | 修改 | `_get_or_init_user` | factory按冻结run config条件化且单位可审计 | TC-PVAM-01-01; TC-PVAM-01-02 |
 | WORK-PVAM-01 | `User/GlobalRecalculationService.py` | 修改 | `_new_zero_user_stats`、`_mget_users_with_exists` | 全量不混算 | TC-PVAM-01-01; TC-PVAM-01-02 |
 | WORK-PVAM-01 | `User/PlacementIncrementalService.py` / `User/PlacementRecalculationService.py` | 修改 | 节点构造与批量读取 | placement全字段同单位 | TC-PVAM-01-01; TC-PVAM-01-02 |
 | WORK-PVAM-01 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | 修改 | `_build_blank_node` / `_new_blank_stats` 等 | Elite状态可判编码 | TC-PVAM-01-01; TC-PVAM-01-02 |
@@ -340,7 +345,7 @@
 |---|---|---|---|---|
 | 基线/patch/语法 | `05_CONTROL/check_baseline_preflight.sh` + `05_CONTROL/validate_parent_provenance.py` + `05_CONTROL/validate_work_patch.sh` + `05_CONTROL/validate_work_dev.sh` | root baseline、parent provenance、PARENT_COMMIT/PARENT_TREE、WORK commit/tree、scope、patch SHA 与 changed-file `py_compile` 全部一致 | EV-BASE/patch/dev | WORK-08/全部 |
 | pytest收集 | `python -m pytest --collect-only -q` | 目标测试真实收集 | JUnit/collect | WORK-08 |
-| 公共合同/单元 | 各WORK第9.2节命令 | 全部通过，无未解释skip | JUnit/stdout | WORK-01~07B |
+| 公共合同/单元 | 各WORK第9.2节命令 | 全部通过，无未解释skip | JUnit/stdout | WORK-01C、01~07B |
 | AST/mutation/callgraph | WORK-08工具 | 反模式0、关键mutation被捕获 | JSON/HTML | 全部 |
 | CPU/替身 | repository/Redis fake | 只证明纯逻辑与调用，不冒充UAT | manifest | 对应WORK |
 
@@ -348,7 +353,8 @@
 
 | 验证包 | 前置条件 | 执行脚本/步骤 | 预期结果 | 必须回传证据 | 状态 |
 |---|---|---|---|---|---|
-| ENV-01 | 专用 Redis DB/前缀；固定commit；WORK-08 manifest已生成 | 见 `WORK-PVAM-01_金额编码公共层与基础模型适配器.md` §9.3 | version=2 正常；legacy/3阻断且原值不变; 新记录全部显式 version=2; 无旧记录被自动放大 | 命令/exit/log/DB/Redis/Kafka/Dask/manifest SHA | PENDING_TEST_ENV |
+| ENV-01C | 隔离 Redis；AR_CONFIG 批准值已确认；不得使用生产 key | 见 `WORK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md` §9.2 | 原子加载/发布01；00/01/10/11 admission、stale/concurrent CAS、run-freeze全部符合DEC-019；fake证据不冒充本行 | 命令/exit/log/Redis前后snapshot/config_version/checksum/manifest SHA | PENDING_TEST_ENV |
+| ENV-01 | 专用 Redis DB/前缀；固定commit；WORK-08 manifest已生成 | 见 `WORK-PVAM-01_金额编码公共层与基础模型适配器.md` §9.3 | 00/01共享-key Legacy record不写2；获批/test-only V2 factory写2；Legacy path不无条件gate；无旧记录被放大或float→cents | 命令/exit/log/DB/Redis/Kafka/Dask/manifest SHA | PENDING_TEST_ENV |
 | ENV-02 | Kafka/Redis/Dask隔离环境；AR_PERIOD只读；专用topic/group/period | 见 `WORK-PVAM-02_订单退款金额边界与期间解析.md` §9.3 | 同一事件三stage delta/hash一致; 整单退款只冲销一次且归期由批准时间决定; 所有金额列int64；差分为0或已批准标签 | 命令/exit/log/DB/Redis/Kafka/Dask/manifest SHA | PENDING_TEST_ENV |
 | ENV-03 | 脱敏AR_CONFIG快照；DB/SQL oracle可用；fixture有checksum | 见 `WORK-PVAM-03_配置解析ppm与硬编码清理.md` §9.3 | PE/Elite无硬编码兜底; 负费率按合同计算；SE exact raw成立; TB missing/0/capping=0与SQL一致 | 命令/exit/log/DB/Redis/Kafka/Dask/manifest SHA | PENDING_TEST_ENV |
 | ENV-04 | WORK-08批准fixture；Redis/Delta隔离；真实2B状态标DEFERRED | 见 `WORK-PVAM-04_monthActivePV与Active同源现算.md` §9.3 | 当前run所有消费者Active一致; 最终缺失时整run失败且无奖金发布; fixture证据不关闭2B生产缺口 | 命令/exit/log/DB/Redis/Kafka/Dask/manifest SHA | PENDING_TEST_ENV |
@@ -362,13 +368,13 @@
 
 #### Traceability Manifest v3
 
-- 基线：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- 基线：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 统计域：核心缺陷 13 项；R-012 拆为两个施工子项，但不增加核心缺陷总数。
 
 | CHK | R/parent | DEC | TASK | WORK | REM/W/V | STEP | TC | EV |
 |---|---|---|---|---|---|---:|---:|---:|
-| CHK-DATA-001、CHK-DATA-003、CHK-EVT-002 | R-001 | DEC-002、DEC-008、DEC-014 | TASK-PVAM-01 | WORK-PVAM-01 | REM-001/W-001/V-001 | 5 | 6 | 15 |
-| CHK-ARCH-003 | R-002 | DEC-002、DEC-008、DEC-014 | TASK-PVAM-01 | WORK-PVAM-01 | REM-002/W-002/V-002 | 5 | 6 | 15 |
+| CHK-DATA-001、CHK-DATA-003、CHK-EVT-002 | R-001 | DEC-002、DEC-008、DEC-014、DEC-019 | TASK-PVAM-01 | WORK-PVAM-01 | REM-001/W-001/V-001 | 5 | 14 | 15 |
+| CHK-ARCH-003 | R-002 | DEC-002、DEC-008、DEC-014 | TASK-PVAM-01 | WORK-PVAM-01 | REM-002/W-002/V-002 | 5 | 14 | 15 |
 | CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011 | R-003 | DEC-002、DEC-005、DEC-006、DEC-007、DEC-010 | TASK-PVAM-02 | WORK-PVAM-02 | REM-003/W-003/V-003 | 7 | 8 | 17 |
 | CHK-DATA-004、CHK-BIZ-007、CHK-BIZ-008 | R-004 | DEC-001、DEC-002、DEC-003、DEC-009、DEC-014 | TASK-PVAM-03 | WORK-PVAM-03 | REM-004/W-004/V-004 | 6 | 7 | 15 |
 | CHK-DATA-006、CHK-BIZ-007 | R-005 | DEC-004、DEC-016、DEC-018 | TASK-PVAM-04 | WORK-PVAM-04 | REM-005/W-005/V-005 | 5 | 8 | 16 |
@@ -381,6 +387,7 @@
 | CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-001、CHK-TEST-003 | R-012A（parent=R-012） | DEC-010 | TASK-PVAM-07A | WORK-PVAM-07A | REM-012A/W-012A/V-012A | 4 | 7 | 13 |
 | CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-003 | R-012B（parent=R-012） | DEC-007、DEC-010 | TASK-PVAM-07B | WORK-PVAM-07B | REM-012B/W-012B/V-012B | 6 | 9 | 15 |
 | CHK-EVT-007 | R-013 | DEC-007、DEC-010 | TASK-PVAM-07B | WORK-PVAM-07B | REM-013/W-013/V-013 | 6 | 9 | 15 |
+| CHK-ARCH-001、CHK-ARCH-003、CHK-DATA-003、CHK-EVT-003、CHK-TEST-003、CHK-TEST-004 | GAP-PVAM-FLAG-CONTRACT | DEC-019 | TASK-PVAM-01C | WORK-PVAM-01C | REM-014/W-014/V-014 | 4 | 15 | 5 |
 
 ## 10. 发布、切换与回滚总策略
 
@@ -408,6 +415,7 @@
 
 | 对象 | 可否独立回滚 | 回滚步骤所在任务 | 数据恢复点 | 回滚后验证 |
 |---|---|---|---|---|
+| WORK-PVAM-01C config Provider/bootstrap | 是 | WORK-PVAM-01C §11 | 保留versioned snapshot；发布更高version合法00/01 | TC-FLAG-01/12/22/23 |
 | WORK-PVAM-01代码/flag | 是 | WORK-PVAM-01 §11 | 最后committed旧状态/保留v2审计 | TC-PVAM-01-01 |
 | WORK-PVAM-02代码/flag | 是 | WORK-PVAM-02 §11 | 最后committed旧状态/保留v2审计 | TC-PVAM-02-01 |
 | WORK-PVAM-03代码/flag | 是 | WORK-PVAM-03 §11 | 最后committed旧状态/保留v2审计 | TC-PVAM-03-01 |
@@ -422,7 +430,7 @@
 
 | 编号 | 交付物 | 责任任务 | 格式/位置 | 完成条件 | artifact_status |
 |---|---|---|---|---|---|
-| D-01 | 生产代码修改 | WORK-01~07B | commit/diff | 全部CHG完成且复核 | PENDING |
+| D-01 | 生产代码修改 | WORK-01C、01~07B | commit/diff | 全部CHG完成且复核 | PENDING |
 | D-02 | 单元/契约/mutation测试 | 全部 | JUnit/JSON/log | DEV全通过 | PENDING |
 | D-03 | 迁移/回滚/安全脚本 | WORK-08+各WORK | uat/scripts | dry-run/幂等/回滚验证 | PENDING |
 | D-04 | UAT执行包 | WORK-08 | evidence/attempt-* | TC-001~032状态完整 | PENDING |
@@ -471,6 +479,7 @@
 | v1.3-r7 | 2026-08-06 | 六轮 S6：duplicate-shadow、registry 初版、归档哈希、临时目录与 Decimal finite 防护 | 六轮终局审计报告 | AI Agent | DRAFT |
 | v1.3-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根和四类工件实哈希、独立临时目录、AC 来源保真、当前轮次/版本引用 | 七轮终局审计报告 + B7 处置 | AI Agent | DRAFT |
 | v1.3-r9 | 2026-08-06 | 九轮 P0-TRACE-CHAIN-09-01 / P1-WORK-INDEX-09-02：跨层权威等价与 §4.1 索引全量同步 | 九轮终局审计报告 + 定点修补 | AI Agent | DRAFT |
+| v1.3-r10 | 2026-08-08 | 接入 DEC-019、GAP/TASK/WORK-PVAM-01C；条件化 WORK-01，更新 scope/test/traceability/version/hash 治理链 | PVAM USER-DECISION FINAL | AI Agent | DRAFT |
 
 
 ## 附录 A：推荐目录结构
@@ -479,6 +488,7 @@
 04_施工方案/
 ├── WORK-PLAN-PVAM_v1.3_施工总方案.md
 ├── WORK-PVAM-01_金额编码公共层与基础模型适配器.md
+├── WORK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md
 ├── WORK-PVAM-02_订单退款金额边界与期间解析.md
 ├── WORK-PVAM-03_配置解析ppm与硬编码清理.md
 ├── WORK-PVAM-04_monthActivePV与Active同源现算.md
@@ -493,7 +503,7 @@
 └── README.md
 ```
 
-拆分原则：逻辑上保持 `WORK-PVAM-01～08` 八组；`WORK-PVAM-07` 因紧急 ACK fail-closed 与最终 schema/retention 可独立施工、验证和回滚而物理拆分为 07A/07B。不得将 RISK/UV/DEFERRED 项转成未获批准的生产代码修改。
+拆分原则：原 `WORK-PVAM-01～08` 八组保持；DEC-019 新增独立配置卡 01C，07 仍物理拆分 07A/07B。01C 不扩张 WORK-01 production allowlist，不得把 RISK/UV/DEFERRED 项转成未获批准修改。
 
 ## 附录 B：追溯编号约定与本轮绑定
 
@@ -514,6 +524,7 @@
 
 | WORK | R / RISK / UV | REM | W | V / UAT |
 |---|---|---|---|---|
+| WORK-01C | GAP-PVAM-FLAG-CONTRACT | REM-014 | W-014 | V-014 |
 | WORK-01 | R-001、R-002 | REM-001、REM-002 | W-001、W-002 | V-001、V-002 |
 | WORK-02 | R-003、R-007 | REM-003、REM-007 | W-003、W-007 | V-003、V-007 |
 | WORK-03 | R-004 | REM-004 | W-004 | V-004 |
@@ -537,12 +548,11 @@
 ## 附录 D：Patch与Rollback阶段边界
 
 1. 施工方案负责规定patch生成和验收方法，不在代码尚未实现时伪造标准patch。
-2. 每个代码WORK完成前必须交付可在`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`干净树通过`git apply --check`的真实patch。
+2. 每个代码WORK完成前必须交付可在`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`干净树通过`git apply --check`的真实patch。
 3. 每个部署WORK在切换前必须有签名的`ROLLBACK-MANIFEST-PVAM-v1`，包含部署系统、workload/release/config、前后镜像、精确命令、健康检查和数据恢复动作。
 4. 缺少外部部署信息时状态为`BLOCKED_EXTERNAL_EVIDENCE`，而不是由文档编制者猜测命令。
 
 <!-- END WORK-PLAN-PVAM_v1.3_施工总方案.md -->
-
 
 ---
 
@@ -556,7 +566,7 @@
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 只实施 `R-001、R-002` 中已 `ACCEPTED` 或由来源 TASK 明确批准的条件代码事项。任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-01-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-01-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -571,15 +581,15 @@
 | 来源问题 | `R-001、R-002` |
 | 复核闭环追踪号 | `REM-001、REM-002 / W-001、W-002 / V-001、V-002` |
 | 来源检查项 | `CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002` |
-| 关联决策 | `DEC-002、DEC-008、DEC-014` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 关联决策 | `DEC-002、DEC-008、DEC-014、DEC-019` |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
 | 当前状态 | `BLOCKED` |
 | 文档治理状态 | `DRAFT`（`PENDING_ORGANIZATIONAL_APPROVAL`） |
-| 前置任务 | 无 |
+| 前置任务 | `WORK-PVAM-01C` Phase A Provider/bootstrap 接口 DEV_VERIFIED |
 | 功能开关 | `PV_AMOUNT_V2_READ / PV_AMOUNT_V2_WRITE` |
 
 ### 1.1 一对一追溯摘要
@@ -587,7 +597,7 @@
 ```text
 CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
   └─ R-001、R-002
-       └─ DEC-002、DEC-008、DEC-014
+       └─ DEC-002、DEC-008、DEC-014、DEC-019
             └─ TASK-PVAM-01 (DRAFT / PENDING_ORGANIZATIONAL_APPROVAL)
                  └─ WORK-PVAM-01
                       ├─ STEP-PVAM-01-01 / STEP-PVAM-01-02 / STEP-PVAM-01-03 / STEP-PVAM-01-04 / STEP-PVAM-01-05
@@ -604,18 +614,18 @@ CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
 | 复核报告 | `Redemption_PV_Amount_Migration_d74_复核报告_v1.5` | R-001、R-002 的代码事实与严重级别 | CONFIRMED |
 | 修改任务书 | `TASK-PVAM-01` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002 | CONTROLLED |
-| 正式决策 | DEC-002、DEC-008、DEC-014 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 正式决策 | DEC-002、DEC-008、DEC-014、DEC-019 | int64、Redis authority、Final 合同与 flag runtime 条件化语义 | CLOSED / 按上游登记 |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-01` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
-- [ ] 前置关系满足：无。
+- [ ] 前置关系满足：WORK-PVAM-01C Phase A Provider/bootstrap 接口已 DEV_VERIFIED。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
 - [ ] DEV测试依赖已安装；UAT项具备WORK-08生成的环境/数据/schema manifest。
-- [ ] 功能开关默认关闭，回滚路径已演练。
+- [ ] Redis 已由 MANUAL_BOOTSTRAP 原子发布当前批准01；缺失配置必须 fail-loud；回滚通过更高 config_version 的合法00/01 snapshot。
 
 未满足任一关键项时，本任务状态为 `BLOCKED`；不得用假设替代。
 
@@ -625,12 +635,12 @@ CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
 
 | 项目 | 内容 |
 |---|---|
-| 预期行为 | 新增最低层公共金额合同，并把所有持久化金额模型的新记录显式标记为 version=2；旧/未知编码只能被隔离读取，不得直接进入 v2 计算域。 |
+| 预期行为 | 新增最低层公共金额合同与 additive version 字段；只有真正进入获批 V2 domain 且全部共享金额字段满足 V2 合同的记录才写2。00/01 共享-key Legacy record 不写2；legacy/unknown 只在 V2 calculation entry 阻断。 |
 | 当前行为 | `Model/User/UserStats.py::UserStats` 的 `pv/gpv/gpv_real/gpv_unreal/contrib` 及 1L/2L/结余字段均为 `Optional[int]`，基线没有 `amount_encoding_version`。；`Model/User/EliteBonusStats.py::EliteBonusStats` 没有编码版本，且 `estimated_bonus: Optional[float] = 0.0`。；`Redishelper/BaseRedisModel.py::BaseRedisModel` 仅绑定 Redis OM 连接，没有金额版本后置校验。；固定提交中 `Common/PvAmount.py` 不存在；金额缩放、ppm、cents、截断与溢出校验分散在奖金服务。 |
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 / P1 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-01`；检查项 `CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-01`；检查项 `CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002` |
 
 ### 3.2 已确认代码事实
 
@@ -641,7 +651,7 @@ CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
 
 ### 3.3 本任务目标
 
-新增最低层公共金额合同，并把所有持久化金额模型的新记录显式标记为 version=2；旧/未知编码只能被隔离读取，不得直接进入 v2 计算域。
+新增最低层公共金额合同与 additive version 字段；按 DEC-019 接收同一 frozen run config，条件化全部真实 factory/version gate；当前01的共享-key Legacy record 不写2，获批11 V2 domain 才显式写2。
 
 ### 3.4 完成定义
 
@@ -678,8 +688,8 @@ CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
 | 消费者 | 依赖内容 | 预期影响 | 是否同步修改 | 对应步骤/测试 |
 |---|---|---|---|---|
 | UserStats/Global | 金额字段和版本 | 读写需同步修改 | 是 | STEP-PVAM-01-03/TC-003 |
-| Placement | 1L/2L/结余 | 新节点写 v2，旧记录阻断 | 是 | STEP-PVAM-01-03/TC-003 |
-| Elite | pv_pcs/gpv/bonus | 新节点写 v2，奖金逐步迁移为 cents | 是 | STEP-PVAM-01-04/TC-003 |
+| Placement | UserStats 精确 1L/2L/结余共享字段 | 00/01 Legacy factory 不写2；V2 entry 才 gate/stamping | 是 | STEP-PVAM-01-03/TC-003 |
+| Elite | pv_pcs/gpv/gpv_real/contrib_to_parent + legacy estimated_bonus | 00/01 不写2且不做 float→cents；V2 blank cents=0 不代表 parity | 是 | STEP-PVAM-01-04/TC-003 |
 | UserPeriodHighestRank | 无金额字段 | 保持不变 | 否 | TC-003 |
 
 ## 5. 施工设计
@@ -723,12 +733,23 @@ CHK-ARCH-003、CHK-DATA-001、CHK-DATA-003、CHK-EVT-002
 | CHG-02 | `Common/AmountModelAdapter.py` | `AmountRecordState`、`classify_amount_record` | 新增 | 不存在 | 隔离 NEW/LEGACY_UNKNOWN/INCOMPATIBLE | 普通计算只能接收 NEW | 不得自动乘 scale |
 | CHG-03 | `Model/User/UserStats.py` | `UserStats.amount_encoding_version` | 修改 | 无字段 | 增加 `Optional[int]=None` 与 units 注释 | 新记录显式2，旧记录保持None | 不得默认2 |
 | CHG-04 | `Model/User/EliteBonusStats.py` | version、`estimated_bonus_cents` | 修改 | 无version；bonus float | additive 增加 version 与 integer cents；旧 float 只读兼容 | v2 不写 float | 不得删除旧字段 |
-| CHG-05 | `User/UserStatsService.py` | `_get_or_init_user` | 修改 | 新节点无version | 显式 version=2；已存在记录校验 | 单位可审计 | 不得转换旧值 |
-| CHG-06 | `User/GlobalRecalculationService.py` | `_new_zero_user_stats`、`_mget_users_with_exists` | 修改 | 无version校验 | 新节点写2；批量读阻断旧/未知 | 全量不混算 | 不得把缺失补2 |
-| CHG-07 | `User/PlacementIncrementalService.py` / `User/PlacementRecalculationService.py` | 节点构造与批量读取 | 修改 | 无version | 新节点写2；跨期/批量读取校验 | placement全字段同单位 | 不得读取legacy结余 |
-| CHG-08 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | `_build_blank_node` / `_new_blank_stats` 等 | 修改 | 无version | 新节点写2；现存节点校验 | Elite状态可判编码 | 不得自动重建 |
+| CHG-05 | `User/UserStatsService.py` | `_get_or_init_user` 及 public run/batch 入口 | 修改 | 新节点无version | 每次 run/batch 加载一次 immutable config；00/01 factory 不写2；获批11 V2 factory 写2并 gate | Legacy/V2 作用域可审计 | 不得 refresh、fallback 或转换旧值 |
+| CHG-06 | `User/GlobalRecalculationService.py` | `settle_period`、`_new_zero_user_stats`、`_mget_users_with_exists` | 修改 | 无 run config/version scope | settle 前加载一次并冻结；00/01 不写2且不无条件 gate；获批11 V2 entry 才写2/阻断旧未知 | 当前 run 不见中途 flag 变化 | 不得把缺失补2 |
+| CHG-07 | `User/PlacementIncrementalService.py` / `User/PlacementRecalculationService.py` | public run/batch、节点构造与批量读取 | 修改 | 无 run config/version scope | 每个 batch/run 冻结一次；00/01 Legacy 结余照旧且不写2；获批11 V2 entry 才 gate/stamping | placement 全字段域一致 | 不得在01重解释 legacy 结余 |
+| CHG-08 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | public run/batch、`_build_blank_node` / `_new_blank_stats` 等全部真实构造点 | 修改 | 无 run config/version scope | 每个 batch/run 冻结一次；00/01 不写2且禁止 legacy float→cents；获批11 V2 blank 写2且 cents=0 仅为 init | Elite 状态可判编码 | 不得自动重建或声称 bonus parity |
 | CHG-09 | `User/Test/test_pv_amount_common.py` / `User/Test/test_amount_model_version.py` | pytest 用例 | 新增 | 不存在 | 覆盖类型、边界、序列化、mutation | 可自动验证 | 不得依赖GPU |
 
+### 6.0A DEC-019 条件化合同
+
+- Provider：只从 `PVAmountConfigProvider.load_run_config()` 获取 Redis snapshot；所有 production entry 使用同一 immutable run config，禁止直接 Redis flag GET、env/default/fallback 或途中 refresh。
+- 00：Legacy authoritative，factory 不写2。
+- 01：当前批准状态；UserStats/EliteBonusStats 仍为共享 key + Legacy authoritative，全部 production factory 为 `V2_WRITE_NOT_AVAILABLE`，不得写2、不得原地放大、不得 legacy float→cents。
+- 10：production admission `INVALID_STATE`。
+- 11：只有正式 approval 才可 production admission；当前无 approval 必须 `V2_STATE_NOT_AUTHORIZED`。
+- TEST-ONLY 11：测试可直接构造 snapshot 调用 private factory/domain，但不能进入 production admission。
+- UserStats 静态字段必须精确覆盖 `pv/gpv/gpv_real/gpv_unreal/contrib/pv_1l/pv_2l/pre_surplus_1l/pre_surplus_2l/total_1l/total_2l/remain_surplus_1l/remain_surplus_2l`。
+- EliteBonusStats 静态字段必须精确覆盖 `pv_pcs/gpv/gpv_real/contrib_to_parent`；`estimated_bonus_cents=0` 只表示 blank/init。
+- factory 测试通过 AST 发现全部真实 `UserStats(...)` / `EliteBonusStats(...)` 构造点，不使用预写函数数量作为覆盖证明。
 ### 6.1 固定基线锚点复验
 
 | 文件与符号 | 基线事实 | 施工动作 |
@@ -936,7 +957,7 @@ def trunc_div_zero(numerator: int, denominator: int) -> int:
 - 目标符号：字段与节点工厂
 - 精确操作：
 1. additive 增加 version
-2. 所有新建对象显式2
+2. 按 frozen run config 条件化全部 AST 扫描所得构造点：00/01 不写2，获批11 V2 factory 显式2
 3. 批量读与跨期读调用门禁。
 - 必须保持：保持字段名/Redis key/业务公式不变
 - 禁止实现：不得引入未批准业务规则、默认值、异常白名单或不可逆数据操作。
@@ -953,7 +974,7 @@ def trunc_div_zero(numerator: int, denominator: int) -> int:
 - 目标符号：version与cents additive字段
 - 精确操作：
 1. 新增 `estimated_bonus_cents`
-2. v2 工厂写2
+2. 00/01 Legacy factory 不写2；获批11 V2 factory 写2并执行 version gate
 3. 保留 `estimated_bonus` 供旧读。
 - 必须保持：不在本步骤改Elite公式
 - 禁止实现：不得引入未批准业务规则、默认值、异常白名单或不可逆数据操作。
@@ -983,7 +1004,7 @@ def trunc_div_zero(numerator: int, denominator: int) -> int:
 
 | 对象 | 旧格式/状态 | 新格式/状态 | 转换位置 | 版本识别 | 异常数据策略 |
 |---|---|---|---|---|---|
-| Redis UserStats/EliteBonusStats | 无version/legacy数值 | version=2 micro-units/cents additive字段 | 节点工厂/受控重建 | amount_encoding_version | legacy隔离；未知阻断 |
+| Redis UserStats/EliteBonusStats | 无version/legacy共享字段 | 00/01 保持 Legacy authoritative；获批11才产生完整 version=2 V2 record | 条件化节点工厂/后续受控重建 | amount_encoding_version + frozen config | Legacy path 不无条件 gate；V2 entry 阻断未知 |
 
 ### 8.2 迁移步骤
 
@@ -1022,6 +1043,14 @@ def trunc_div_zero(numerator: int, denominator: int) -> int:
 | TC-PVAM-01-05 | 边界 | int64乘法 | 接近INT64_MAX的units*ppm | 溢出前结果精确；越界抛OverflowError | STEP-01-01 | DEV | NOT_RUN |
 | TC-PVAM-01-06 | 静态 | 依赖/反模式 | AST全仓 | Common不导入User；新增代码无Decimal(str(float))/int(round(float)) | STEP-01-05 | DEV | NOT_RUN |
 
+| TC-FLAG-14 | 契约 | READ=false audit read | Legacy result + read-only V2 fixture | 审计读取不改变业务返回、version或写副作用 | STEP-01-02/05 | DEV | NOT_RUN |
+| TC-FLAG-15 | factory | 00 Legacy factory | AST发现的全部UserStats/Elite构造点 | 不stamping2 | STEP-01-03/04/05 | DEV | NOT_RUN |
+| TC-FLAG-16 | factory | 01共享-key Legacy factory | AST发现的全部生产构造点 | 不stamping2、不原地放大 | STEP-01-03/04/05 | DEV | NOT_RUN |
+| TC-FLAG-17 | 静态 | 精确共享字段 | DEC-019字段清单 | UserStats 13项与Elite 4项逐项覆盖 | STEP-01-05 | DEV | NOT_RUN |
+| TC-FLAG-18 | 静态/单元 | legacy float→cents | estimated_bonus float样本 | 不存在洗白路径 | STEP-01-04/05 | DEV | NOT_RUN |
+| TC-FLAG-19 | 单元 | cents blank/init | estimated_bonus_cents=0 | 只证明初始化，不声称bonus parity | STEP-01-04/05 | DEV | NOT_RUN |
+| TC-FLAG-20 | 单元 | test-only 11 | 直接构造测试snapshot | V2 factory写2但不能进入production admission | STEP-01-03/04/05 | DEV | NOT_RUN |
+| TC-FLAG-21 | 静态/单元 | test-only bypass | production AST/callgraph | production code无法启用测试旁路 | STEP-01-05 | DEV | NOT_RUN |
 受控检查方案用例映射：`TC-001, TC-002, TC-003, TC-008, TC-030, TC-031, TC-032`。`TC-000` 为 RETIRED，不执行、不计完成率。
 
 ### 9.2 开发环境自动验证
@@ -1029,7 +1058,7 @@ def trunc_div_zero(numerator: int, denominator: int) -> int:
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-01}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -1112,7 +1141,7 @@ bash uat/scripts/run_work_uat.sh --work WORK-PVAM-01 --run-id "$RUN_ID" --tc TC-
 3. 导出前后JSON和异常日志
 - 精确预期：
 - version=2 正常；legacy/3阻断且原值不变
-- 新记录全部显式 version=2
+- 00/01 下全部共享-key Legacy 新记录不 stamping2；仅 test-only/获批11 V2 factory 显式2
 - 无旧记录被自动放大
 - 必须回传：完整命令、exit code、stdout/stderr、JUnit/JSON、输入fixture SHA-256、代码commit、镜像、环境版本、执行起止时间、Redis/DB/Kafka/Dask前后证据。
 - 失败停止与清理：停止专用consumer/job；保留PEL/状态和证据；禁止在未分析前清理失败现场；按第11节回滚。
@@ -1128,8 +1157,8 @@ bash uat/scripts/run_work_uat.sh --work WORK-PVAM-01 --run-id "$RUN_ID" --tc TC-
 | 验收编号 | 来源TASK验收项 | 实现步骤 | 测试用例 | 所需证据 | 环境 | 通过条件 |
 |---|---|---|---|---|---|---|
 | AC-01 | `Common/PvAmount.py` 存在，import graph 无循环，公共层无业务模块 import | STEP-PVAM-01-01/05 | TC-002、TC-031 | EV-PVAM-01-01 | DEV | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
-| AC-02 | UserStats、EliteBonusStats 新建记录均显式写 version=2 | STEP-PVAM-01-03/04 | TC-003 | EV-PVAM-01-02 | DEV+UAT | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
-| AC-03 | 旧 JSON 缺 version 可反序列化，但进入 v2 计算入口时必定阻断 | STEP-PVAM-01-02/03/04 | TC-003 | EV-PVAM-01-03 | DEV+UAT | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
+| AC-02 | 只有真正进入获批 V2 domain 且全部共享金额字段满足 V2 编码合同的 UserStats/EliteBonusStats record 才显式写 version=2；00/01 共享-key Legacy record 不得 stamping 2 | STEP-PVAM-01-03/04 | TC-003、TC-FLAG-15/16/20/21 | EV-PVAM-01-02 | DEV+UAT | 来源AC全部断言满足；真实 factory AST 扫描全覆盖；命令exit code 0；证据齐全 |
+| AC-03 | 旧 JSON 缺 version 可反序列化；legacy/unknown version 仅在进入 v2 计算入口时必定阻断，READ=false 的 Legacy authoritative path 不得无条件 require version=2 | STEP-PVAM-01-02/03/04 | TC-003、TC-FLAG-14/15/16/20 | EV-PVAM-01-03 | DEV+UAT | 来源AC全部断言满足；00/01 与 V2 entry 分支均有反向测试；证据齐全 |
 | AC-04 | version=1、3、字符串2、bool 等非法值全部阻断 | STEP-PVAM-01-02/05 | TC-003 | EV-PVAM-01-04 | DEV | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
 | AC-05 | 外部/DB 边界 parser 与内部 `require_units_int` 职责分离 | STEP-PVAM-01-01/05 | TC-001、TC-002 | EV-PVAM-01-05 | DEV | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
 | AC-06 | `0.1` float、`True`、NaN、Infinity、指数文本均被相应用例拒绝 | STEP-PVAM-01-01/05 | TC-001、TC-002 | EV-PVAM-01-06 | DEV | 来源AC全部断言满足；命令exit code 0；原始证据与SHA-256齐全 |
@@ -1203,8 +1232,8 @@ bash uat/scripts/run_work_uat.sh --work WORK-PVAM-01 --run-id "$RUN_ID" --tc TC-
 | 编号 | 交付物/证据 | 生成步骤 | 位置/格式 | 验收人 | artifact_status |
 |---|---|---|---|---|---|
 | EV-PVAM-01-01 | AC-01验收证据：`Common/PvAmount.py` 存在，import graph 无循环，公共层无业务模块 import | STEP-PVAM-01-01/05 | evidence/WORK-PVAM-01/attempt-*/ac/AC-01/ | 待指派QA | PENDING |
-| EV-PVAM-01-02 | AC-02验收证据：UserStats、EliteBonusStats 新建记录均显式写 version=2 | STEP-PVAM-01-03/04 | evidence/WORK-PVAM-01/attempt-*/ac/AC-02/ | 待指派QA | PENDING |
-| EV-PVAM-01-03 | AC-03验收证据：旧 JSON 缺 version 可反序列化，但进入 v2 计算入口时必定阻断 | STEP-PVAM-01-02/03/04 | evidence/WORK-PVAM-01/attempt-*/ac/AC-03/ | 待指派QA | PENDING |
+| EV-PVAM-01-02 | AC-02验收证据：00/01共享-key Legacy record不写2；test-only/获批11完整V2 factory写2 | STEP-PVAM-01-03/04 | evidence/WORK-PVAM-01/attempt-*/ac/AC-02/ | 待指派QA | PENDING |
+| EV-PVAM-01-03 | AC-03验收证据：Legacy path不无条件gate；进入V2计算入口必阻断legacy/unknown | STEP-PVAM-01-02/03/04 | evidence/WORK-PVAM-01/attempt-*/ac/AC-03/ | 待指派QA | PENDING |
 | EV-PVAM-01-04 | AC-04验收证据：version=1、3、字符串2、bool 等非法值全部阻断 | STEP-PVAM-01-02/05 | evidence/WORK-PVAM-01/attempt-*/ac/AC-04/ | 待指派QA | PENDING |
 | EV-PVAM-01-05 | AC-05验收证据：外部/DB 边界 parser 与内部 `require_units_int` 职责分离 | STEP-PVAM-01-01/05 | evidence/WORK-PVAM-01/attempt-*/ac/AC-05/ | 待指派QA | PENDING |
 | EV-PVAM-01-06 | AC-06验收证据：`0.1` float、`True`、NaN、sNaN、±Infinity（字符串与 Decimal）、指数文本均被相应用例拒绝 | STEP-PVAM-01-01/05 | evidence/WORK-PVAM-01/attempt-*/ac/AC-06/ | 待指派QA | PENDING |
@@ -1227,7 +1256,7 @@ bash uat/scripts/run_work_uat.sh --work WORK-PVAM-01 --run-id "$RUN_ID" --tc TC-
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
@@ -1319,9 +1348,248 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | v1.3-r6 | 2026-08-06 | 五轮 F5 定点修订：规范 v3 追溯、parent provenance/DEV CLI、控制状态字段及单一事实源 | 五轮审计报告 + 当前文档修订指令 | AI Agent（编制） | DRAFT |
 | v1.3-r7 | 2026-08-06 | 六轮 S6：信任 registry 初版、归档哈希、临时目录与 Decimal finite 防护 | 六轮终局审计报告 | AI Agent（编制） | DRAFT |
 | v1.3-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根、四工件摘要、AC 来源保真及当前轮次引用 | 七轮终局审计报告 + B7 处置 | AI Agent（编制） | DRAFT |
+| v1.3-r10 | 2026-08-08 | 依据 DEC-019 条件化 AC-02/03、CHG-05～08、factory/version gate 与 TEST-ONLY 域；新增 TC-FLAG-14～21 | PVAM USER-DECISION FINAL | AI Agent（编制） | DRAFT |
 
 <!-- END WORK-PVAM-01_金额编码公共层与基础模型适配器.md -->
 
+---
+
+<!-- BEGIN WORK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md -->
+
+# WORK-PVAM-01C Flag Runtime Contract 与 Redis 原子配置施工任务书
+
+> 本文档来源于待组织批准的 `TASK-PVAM-01C`；技术合同已由 DEC-019 固化，但组织施工授权、真实 UAT 与 Gate C 仍保持独立。
+
+## 0. 填写与执行规则
+
+1. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`。
+2. 治理 validator 未全部 0 退出前，禁止编辑本卡 production 文件。
+3. 只允许修改 §6 与 `WORK_SCOPE_ALLOWLIST.json` 登记的路径。
+4. fake/stub 只形成 DEV 证据，真实 Redis UAT 继续由 WORK-PVAM-08/DEC-013 控制。
+
+## 1. 文档信息与追溯关系
+
+| 项目 | 内容 |
+|---|---|
+| 施工任务编号 | `WORK-PVAM-01C` |
+| 来源修改任务 | `TASK-PVAM-01C` |
+| 来源检查项 | `CHK-ARCH-001、CHK-ARCH-003、CHK-DATA-003、CHK-EVT-003、CHK-TEST-003、CHK-TEST-004` |
+| 来源问题 | `GAP-PVAM-FLAG-CONTRACT` |
+| 关联决策 | `DEC-019` |
+| 复核闭环追踪号 | `REM-014 / W-014 / V-014` |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| 文档版本 | `v1.3` |
+| 文档状态 | `DRAFT` |
+| 实施状态 | `BLOCKED` |
+| 验证状态 | `NOT_RUN / PENDING_TEST_ENV` |
+
+## 2. 施工目标与完成定义
+
+- 在 `Redishelper` 建立唯一 Provider 和 MANUAL_BOOTSTRAP，不在 Common 或业务 Service 内复制配置 I/O。
+- Provider 单次 Lua 原子读取 active pointer 与 versioned snapshot，严格解析 immutable run config。
+- production admission 明确实现 00/01/10/11；当前不存在 11 production approval。
+- run session 在开始时加载一次并冻结；无 refresh、无 stale cache。
+- Bootstrap 使用 Lua/CAS 完成 strictly monotonic version 判断、snapshot 写入和 pointer 切换，并 read-after-write verify。
+
+完成必须同时满足：TC-FLAG-01～13、22、23 在相应 DEV/UAT 边界有真实结果；不存在 fallback；scope 与治理 validator 通过。TC-FLAG-14～21 由条件化后的 WORK-PVAM-01 承接。
+
+## 3. 当前事实与复用决定
+
+| 检查对象 | 事实 | 决定 |
+|---|---|---|
+| `Redishelper/BaseRedisModel.py` | 已有项目 Redis 连接 | Provider 延迟复用该连接，并允许测试注入 fake client |
+| ConfigService/revision/CAS | 未发现适用实现 | 本卡只为 PV amount flag 定义 versioned snapshot，不建立第二套通用配置框架 |
+| run context | 未发现统一实现 | 在 Provider 文件内提供 frozen run session/admission；后续 WORK-PVAM-01 入口传递同一 config |
+| Redis transaction helpers | pipeline/lock 存在，但无配置 CAS | 使用 Redis Lua 单原子边界，避免 GET→SET TOCTOU |
+
+## 4. Redis 合同
+
+### 4.1 Key 与 schema
+
+| Key | 类型 | 内容 |
+|---|---|---|
+| `pvam:amount_config:active` | string | `config_version:checksum` |
+| `pvam:amount_config:snapshot:<config_version>` | hash | READ、WRITE、config_version、load_mode、source、checksum |
+
+canonical payload 至少为：
+
+```json
+{
+  "PV_AMOUNT_V2_READ": "false",
+  "PV_AMOUNT_V2_WRITE": "true",
+  "config_version": "1",
+  "load_mode": "MANUAL_BOOTSTRAP",
+  "source": "AR_CONFIG"
+}
+```
+
+### 4.2 原子读取与发布
+
+- load Lua 在一个 Redis 执行边界内读取 pointer 与对应 hash；pointer/version/checksum 任一不一致即 fail-loud。
+- publish Lua 在同一执行边界校验 active version、创建不可变 snapshot、切 pointer；`new_version <= active_version` 为 `STALE_CONFIG_VERSION`。
+- 第一次发布只允许 active 不存在的 explicit initial-create；version 仍必须是非负整数。
+- Provider/Bootstrap 不接受 env、常量默认、AR_CONFIG 直查或 cached stale fallback。
+
+### 4.3 State admission 与 run-freeze
+
+| 状态 | production admission |
+|---|---|
+| 00 | 允许，Legacy authoritative |
+| 01 | 允许，当前批准配置；Legacy authoritative |
+| 10 | `INVALID_STATE` |
+| 11 | 当前 `V2_STATE_NOT_AUTHORIZED` |
+
+`PVAmountRunSession.start(provider)` 是 production admission 边界；返回对象及其 config 均 immutable，不公开 refresh。运行期间 Provider 变化只影响下一次 start。
+
+## 5. 分阶段依赖
+
+- Phase A：本卡 Provider/bootstrap 与 TC-FLAG-01～13/22/23，无前置 production WORK。
+- WORK-PVAM-01：在 Phase A 接口可用后，条件化 AC-02/AC-03 与 CHG-05～08，接入同一 run config。
+- Phase B：在组合树执行 TC-FLAG-14～21 和全量 factory 扫描；这不是新的 production scope。
+
+## 6. 文件与符号级变更清单
+
+| 变更编号 | 文件 | 符号 | 类型 | 合同 |
+|---|---|---|---|---|
+| CHG-01C-01 | `Redishelper/PVAmountConfigProvider.py` | `PVAmountRunConfig`、`PVAmountConfigProvider.load_run_config` | 新增 | immutable、atomic load、strict parse、fail-loud |
+| CHG-01C-02 | `Redishelper/PVAmountConfigProvider.py` | `PVAmountRunSession.start`、production admission | 新增 | 00/01允许、10拒绝、未批准11拒绝、run-freeze |
+| CHG-01C-03 | `Redishelper/PVAmountConfigBootstrap.py` | `publish_manual_bootstrap`、CLI | 新增 | 原子发布01、stale protection、read-after-write、失败非零 |
+| CHG-01C-04 | `tests/pvam/WORK-PVAM-01C/` | provider/bootstrap tests | 新增 | fake/in-memory DEV；真实 Redis 不伪造 |
+
+禁止修改：`Common/PvAmount.py`、现有业务 Service、共享 Redis model 字段、奖金公式、AR_CONFIG→Delta producer。
+
+## 7. 可执行施工步骤
+
+### STEP-PVAM-01C-01：实现 snapshot 解析与 Provider
+
+- 新建 frozen dataclass、错误类型、canonical bool/version/checksum 校验。
+- 单次 Lua 读取 pointer + hash；Redis 异常统一 fail-loud，保留 cause。
+- 禁止任何 fallback 或直接 AR_CONFIG/env 读取。
+
+### STEP-PVAM-01C-02：实现 admission 与 run-freeze
+
+- 实现 00/01/10/11 状态机。
+- `PVAmountRunSession.start` 只调用 Provider 一次；session 无 refresh。
+- 当前 production admission 不提供 test-only 或 11 approval bypass。
+
+### STEP-PVAM-01C-03：实现 MANUAL_BOOTSTRAP
+
+- CLI 接受显式 `config_version`，固定当前批准 READ=false/WRITE=true。
+- Lua/CAS 原子发布 versioned snapshot + pointer；stale/conflict 失败。
+- Provider read-after-write verify；任一失败非零退出。
+
+### STEP-PVAM-01C-04：补齐 DEV/UAT 分层测试
+
+- fake client 覆盖结构、异常、状态、冻结、stale、并发。
+- AST 扫描 production consumer 无直接 flag GET/env/default。
+- 隔离 Redis 未提供时，相关真实环境项保持 PENDING_TEST_ENV。
+
+## 8. 数据与回滚
+
+- Snapshot append-only；不删除已发布 version。
+- 回滚通过发布更高 version 的合法 00/01 snapshot，不倒拨 config_version。
+- 不允许部分字段更新或直接改 active snapshot。
+- 任何需要新 V2 carrier 的行为以 `V2_CARRIER_NOT_APPROVED` 停工。
+
+## 9. 测试设计
+
+### 9.1 测试用例总表
+
+| 测试编号 | 场景 | 精确预期 | 环境 | 状态 |
+|---|---|---|---|---|
+| TC-FLAG-01 | 合法01 load | immutable config 为 false/true/version | DEV+UAT | NOT_RUN |
+| TC-FLAG-02 | snapshot 缺失 | fail-loud | DEV | NOT_RUN |
+| TC-FLAG-03 | READ 缺失 | fail-loud | DEV | NOT_RUN |
+| TC-FLAG-04 | WRITE 缺失 | fail-loud | DEV | NOT_RUN |
+| TC-FLAG-05 | version 缺失 | fail-loud | DEV | NOT_RUN |
+| TC-FLAG-06 | 非法bool | fail-loud | DEV | NOT_RUN |
+| TC-FLAG-07 | 状态10 | `INVALID_STATE` | DEV | NOT_RUN |
+| TC-FLAG-08 | Provider exception | 无 AR_CONFIG/env/default fallback | DEV | NOT_RUN |
+| TC-FLAG-09 | run中途01→11 | 当前 run 保持01 | DEV | NOT_RUN |
+| TC-FLAG-10 | 下一 run 读未批准11 | `V2_STATE_NOT_AUTHORIZED` | DEV | NOT_RUN |
+| TC-FLAG-11 | pointer/snapshot 跨version | fail-loud | DEV | NOT_RUN |
+| TC-FLAG-12 | bootstrap发布01 | 单一原子提交并校验 | DEV+UAT | NOT_RUN |
+| TC-FLAG-13 | consumer静态扫描 | 无直接 Redis flag GET | DEV | NOT_RUN |
+| TC-FLAG-22 | stale publish | N/N-1 均失败 | DEV+UAT | NOT_RUN |
+| TC-FLAG-23 | 并发 publish | 至多一个成功且 active 为较新合法 version | DEV+UAT | NOT_RUN |
+
+受控检查方案用例映射：`TC-003, TC-024, TC-031, TC-032`。`TC-FLAG` 为本决策局部测试编号。
+
+### 9.2 开发环境自动验证
+
+```bash
+set -euo pipefail
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
+: "${WORK_COMMIT_SHA:?set WORK-PVAM-01C implementation commit}"
+: "${PARENT_COMMIT_SHA:?set controlled parent}"
+: "${PARENT_TREE_SHA:?set controlled parent tree}"
+: "${PARENT_PROVENANCE_JSON:?set parent provenance}"
+bash 05_CONTROL/check_baseline_preflight.sh --repo "$PWD" --base "$BASE_SHA" --work-id WORK-PVAM-01C
+bash 05_CONTROL/validate_work_dev.sh \
+  --repo "$PWD" --base "$BASE_SHA" \
+  --parent-commit "$PARENT_COMMIT_SHA" \
+  --parent-tree "$PARENT_TREE_SHA" \
+  --parent-provenance "$PARENT_PROVENANCE_JSON" \
+  --approved-registry "$APPROVED_COMMIT_REGISTRY_JSON" \
+  --work-commit "$WORK_COMMIT_SHA" --work-id WORK-PVAM-01C \
+  --scope "$PVAM_CONTROL_ROOT/WORK_SCOPE_ALLOWLIST.json" \
+  --test-command-file "$PVAM_CONTROL_ROOT/work-test-commands/WORK-PVAM-01C.sh" \
+  --out evidence/WORK-PVAM-01C/dev
+```
+
+## 10. 验收标准映射
+
+| 验收编号 | 来源TASK验收项 | 实现步骤 | 测试用例 | 所需证据 | 环境 | 通过条件 |
+|---|---|---|---|---|---|---|
+| AC-01 | 合法 01 snapshot 原子加载成功并返回 immutable run config | STEP-PVAM-01C-01 | TC-FLAG-01 | EV-PVAM-01C-01 | DEV+UAT | 精确值、原子读取与不可变性成立 |
+| AC-02 | active snapshot 缺失时 fail-loud | STEP-PVAM-01C-01 | TC-FLAG-02 | EV-PVAM-01C-01 | DEV | 无返回 config |
+| AC-03 | READ 缺失时 fail-loud | STEP-PVAM-01C-01 | TC-FLAG-03 | EV-PVAM-01C-01 | DEV | 无 fallback |
+| AC-04 | WRITE 缺失时 fail-loud | STEP-PVAM-01C-01 | TC-FLAG-04 | EV-PVAM-01C-01 | DEV | 无 fallback |
+| AC-05 | config_version 缺失时 fail-loud | STEP-PVAM-01C-01 | TC-FLAG-05 | EV-PVAM-01C-01 | DEV | 无默认 version |
+| AC-06 | 非 canonical bool 时 fail-loud | STEP-PVAM-01C-01 | TC-FLAG-06 | EV-PVAM-01C-01 | DEV | 非法值拒绝 |
+| AC-07 | 状态 10 在 production admission 抛 `INVALID_STATE` | STEP-PVAM-01C-02 | TC-FLAG-07 | EV-PVAM-01C-02 | DEV | 不自动修正 |
+| AC-08 | Provider 异常时不存在 AR_CONFIG/env/default fallback | STEP-PVAM-01C-01 | TC-FLAG-08 | EV-PVAM-01C-02 | DEV | 原异常链可审计 |
+| AC-09 | run 加载 01 后 Redis 变 11，当前 run 仍固定 01 | STEP-PVAM-01C-02 | TC-FLAG-09 | EV-PVAM-01C-02 | DEV | Provider 仅调用一次 |
+| AC-10 | 下一 production run 加载 11 且无正式 approval 时抛 `V2_STATE_NOT_AUTHORIZED` | STEP-PVAM-01C-02 | TC-FLAG-10 | EV-PVAM-01C-02 | DEV | test-only 不旁路 |
+| AC-11 | active pointer 与 snapshot 跨 version 或 checksum 不一致时 fail-loud | STEP-PVAM-01C-01 | TC-FLAG-11 | EV-PVAM-01C-01 | DEV | 无部分 snapshot |
+| AC-12 | bootstrap 以单一原子操作发布完整 01 并 read-after-write verify | STEP-PVAM-01C-03 | TC-FLAG-12 | EV-PVAM-01C-03 | DEV+UAT | 失败非零 |
+| AC-13 | production consumer 无直接 Redis flag GET | STEP-PVAM-01C-04 | TC-FLAG-13 | EV-PVAM-01C-04 | DEV | AST 扫描零命中 |
+| AC-14 | 当前 version=N 时发布 N 或 N-1 均抛 `STALE_CONFIG_VERSION` | STEP-PVAM-01C-03 | TC-FLAG-22 | EV-PVAM-01C-03 | DEV+UAT | active 不变 |
+| AC-15 | 两个并发 bootstrap 至多一个成功，active version 为较新合法版本且无 lost update | STEP-PVAM-01C-03/04 | TC-FLAG-23 | EV-PVAM-01C-03 | DEV+UAT | CAS 结果确定 |
+
+## 11. 风险、停工与回滚
+
+- Redis client 不支持 Lua/EVAL 或无法证明 server-side atomicity：停工。
+- 发现适用的既有统一 config revision/CAS：回到治理卡评估复用，禁止并存竞争版本机制。
+- 需要独立 V2 carrier/keyspace：`V2_CARRIER_NOT_APPROVED`。
+- 真实 Redis 不可用：DEV 可继续，UAT 保持 `PENDING_TEST_ENV`。
+
+## 12. 交付物与完成证据
+
+| 证据编号 | 内容 | 状态 |
+|---|---|---|
+| EV-PVAM-01C-01 | snapshot schema、atomic load 与 fail-loud 测试 | PENDING |
+| EV-PVAM-01C-02 | 00/01/10/11 admission 与 run-freeze 测试 | PENDING |
+| EV-PVAM-01C-03 | bootstrap stale/CAS/concurrency 测试 | PENDING |
+| EV-PVAM-01C-04 | direct GET/fallback/static scan 与 DEV 报告 | PENDING |
+| EV-PVAM-01C-P01 | scope、patch、parent provenance、命令/exit/SHA 包 | PENDING |
+
+## 13. 执行记录
+
+| 项目 | 当前状态 |
+|---|---|
+| 实际修改 | 待执行 |
+| DEV | NOT_RUN |
+| 真实 Redis UAT | PENDING_TEST_ENV |
+| Gate C | OPEN |
+
+## 14. 版本记录
+
+| 版本 | 日期 | 变更内容 | 变更原因/来源 | 编制人 | 批准状态 |
+|---|---|---|---|---|---|
+| v1.3-r10 | 2026-08-08 | 新建 flag runtime Provider、atomic bootstrap、admission 与 run-freeze 施工卡 | `DEC-019 / TASK-PVAM-01C` | AI Agent（编制） | DRAFT |
+
+<!-- END WORK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md -->
 
 ---
 
@@ -1335,7 +1603,7 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 只实施 `R-003、R-007` 中已 `ACCEPTED` 或由来源 TASK 明确批准的条件代码事项。任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-02-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-02-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -1351,8 +1619,8 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | 复核闭环追踪号 | `REM-003、REM-007 / W-003、W-007 / V-003、V-007` |
 | 来源检查项 | `CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005` |
 | 关联决策 | `DEC-002、DEC-005、DEC-006、DEC-007、DEC-010` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
@@ -1384,12 +1652,12 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 | 修改任务书 | `TASK-PVAM-02` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005 | CONTROLLED |
 | 正式决策 | DEC-002、DEC-005、DEC-006、DEC-007、DEC-010 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-02` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
 - [ ] 前置关系满足：WORK-PVAM-01 达到 DEV_VERIFIED；WORK-PVAM-03 的配置 API 在奖金切换前可用。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
@@ -1409,7 +1677,7 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-02`；检查项 `CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-02`；检查项 `CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005` |
 
 ### 3.2 已确认代码事实
 
@@ -1733,7 +2001,7 @@ Normalized delivery必须冻结：`source_system/source_event_id/payload_hash/bu
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-02}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -1936,7 +2204,7 @@ SQL
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
@@ -2035,7 +2303,6 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 <!-- END WORK-PVAM-02_订单退款金额边界与期间解析.md -->
 
-
 ---
 
 <!-- BEGIN WORK-PVAM-03_配置解析ppm与硬编码清理.md -->
@@ -2048,7 +2315,7 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 只实施 `R-004` 中已 `ACCEPTED` 或由来源 TASK 明确批准的条件代码事项。任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-03-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-03-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -2064,8 +2331,8 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | 复核闭环追踪号 | `REM-004 / W-004 / V-004` |
 | 来源检查项 | `CHK-DATA-004、CHK-BIZ-007、CHK-BIZ-008` |
 | 关联决策 | `DEC-001、DEC-002、DEC-003、DEC-009、DEC-014` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
@@ -2097,12 +2364,12 @@ CHK-DATA-004、CHK-BIZ-007、CHK-BIZ-008
 | 修改任务书 | `TASK-PVAM-03` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-DATA-004、CHK-BIZ-007、CHK-BIZ-008 | CONTROLLED |
 | 正式决策 | DEC-001、DEC-002、DEC-003、DEC-009、DEC-014 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-03` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
 - [ ] 前置关系满足：WORK-PVAM-01 DEV_VERIFIED。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
@@ -2122,7 +2389,7 @@ CHK-DATA-004、CHK-BIZ-007、CHK-BIZ-008
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-03`；检查项 `CHK-DATA-004、CHK-BIZ-007、CHK-BIZ-008` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-03`；检查项 `CHK-DATA-004、CHK-BIZ-007、CHK-BIZ-008` |
 
 ### 3.2 已确认代码事实
 
@@ -2422,7 +2689,7 @@ class ConfigRequirement:
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-03}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -2612,7 +2879,7 @@ SQL
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
@@ -2709,7 +2976,6 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 <!-- END WORK-PVAM-03_配置解析ppm与硬编码清理.md -->
 
-
 ---
 
 <!-- BEGIN WORK-PVAM-04_monthActivePV与Active同源现算.md -->
@@ -2722,7 +2988,7 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 只实施 `R-005、R-006` 中已 `ACCEPTED` 或由来源 TASK 明确批准的条件代码事项。任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-04-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-04-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -2738,8 +3004,8 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | 复核闭环追踪号 | `REM-005、REM-006 / W-005、W-006 / V-005、V-006` |
 | 来源检查项 | `CHK-DATA-006、CHK-BIZ-007、CHK-BIZ-008、CHK-BIZ-009、CHK-BIZ-011` |
 | 关联决策 | `DEC-004、DEC-016、DEC-018` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
@@ -2771,12 +3037,12 @@ CHK-DATA-006、CHK-BIZ-007、CHK-BIZ-008、CHK-BIZ-009、CHK-BIZ-011
 | 修改任务书 | `TASK-PVAM-04` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-DATA-006、CHK-BIZ-007、CHK-BIZ-008、CHK-BIZ-009、CHK-BIZ-011 | CONTROLLED |
 | 正式决策 | DEC-004、DEC-016、DEC-018 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-04` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
 - [ ] 前置关系满足：WORK-PVAM-01、WORK-PVAM-03 DEV_VERIFIED；真实供给链UAT仍BLOCKED。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
@@ -2796,7 +3062,7 @@ CHK-DATA-006、CHK-BIZ-007、CHK-BIZ-008、CHK-BIZ-009、CHK-BIZ-011
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 / P1 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-04`；检查项 `CHK-DATA-006、CHK-BIZ-007、CHK-BIZ-008、CHK-BIZ-009、CHK-BIZ-011` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-04`；检查项 `CHK-DATA-006、CHK-BIZ-007、CHK-BIZ-008、CHK-BIZ-009、CHK-BIZ-011` |
 
 ### 3.2 已确认代码事实
 
@@ -3107,7 +3373,7 @@ UAT可由DBA受控注入Redis/Delta fixture验证读取顺序，但证据必须�
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-04}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -3301,7 +3567,7 @@ SQL
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
@@ -3398,7 +3664,6 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 <!-- END WORK-PVAM-04_monthActivePV与Active同源现算.md -->
 
-
 ---
 
 <!-- BEGIN WORK-PVAM-05_Elite_SOURCE原子提交与发布批次.md -->
@@ -3411,7 +3676,7 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 只实施 `R-008、R-011` 中已 `ACCEPTED` 或由来源 TASK 明确批准的条件代码事项。任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-05-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-05-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -3427,8 +3692,8 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | 复核闭环追踪号 | `REM-008、REM-011 / W-008、W-011 / V-008、V-011` |
 | 来源检查项 | `CHK-BIZ-005、CHK-BIZ-006、CHK-EVT-005、CHK-PUB-001` |
 | 关联决策 | `DEC-007、DEC-008、DEC-011、DEC-017` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
@@ -3460,12 +3725,12 @@ CHK-BIZ-005、CHK-BIZ-006、CHK-EVT-005、CHK-PUB-001
 | 修改任务书 | `TASK-PVAM-05` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-BIZ-005、CHK-BIZ-006、CHK-EVT-005、CHK-PUB-001 | CONTROLLED |
 | 正式决策 | DEC-007、DEC-008、DEC-011、DEC-017 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-05` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
 - [ ] 前置关系满足：WORK-PVAM-01、02、03 DEV_VERIFIED。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
@@ -3485,7 +3750,7 @@ CHK-BIZ-005、CHK-BIZ-006、CHK-EVT-005、CHK-PUB-001
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-05`；检查项 `CHK-BIZ-005、CHK-BIZ-006、CHK-EVT-005、CHK-PUB-001` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-05`；检查项 `CHK-BIZ-005、CHK-BIZ-006、CHK-EVT-005、CHK-PUB-001` |
 
 ### 3.2 已确认代码事实
 
@@ -3782,7 +4047,7 @@ for attempt in range(max_retries):
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-05}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -3982,7 +4247,7 @@ SQL
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
@@ -4080,7 +4345,6 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 <!-- END WORK-PVAM-05_Elite_SOURCE原子提交与发布批次.md -->
 
-
 ---
 
 <!-- BEGIN WORK-PVAM-06_结算状态机统一Guard与Topology接线.md -->
@@ -4093,7 +4357,7 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 当前只实施 `R-009、R-010` 的受控范围。`TOPO-WIRE-01` 仅可由 WORK-08 外部证据触发，并须先更新受控追溯边；任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-06-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-06-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -4109,8 +4373,8 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | 复核闭环追踪号 | `REM-009、REM-010 / W-009、W-010 / V-009、V-010`；RISK-001/TOPO-WIRE-01 无预登记 REM/W/V，由 WORK-08 AC-05 取证触发 |
 | 来源检查项 | `CHK-BIZ-006、CHK-ARCH-002、CHK-EVT-003、CHK-PUB-001` |
 | 关联决策 | `DEC-007、DEC-008、DEC-010、DEC-012` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
@@ -4142,12 +4406,12 @@ CHK-BIZ-006、CHK-ARCH-002、CHK-EVT-003、CHK-PUB-001
 | 修改任务书 | `TASK-PVAM-06` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-BIZ-006、CHK-ARCH-002、CHK-EVT-003、CHK-PUB-001 | CONTROLLED |
 | 正式决策 | DEC-007、DEC-008、DEC-010、DEC-012 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-06` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
 - [ ] 前置关系满足：WORK-PVAM-01、WORK-PVAM-02、WORK-PVAM-05 DEV_VERIFIED；WORK-08A调用图证据可并行。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
@@ -4167,7 +4431,7 @@ CHK-BIZ-006、CHK-ARCH-002、CHK-EVT-003、CHK-PUB-001
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-06`；检查项 `CHK-BIZ-006、CHK-ARCH-002、CHK-EVT-003、CHK-PUB-001` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-06`；检查项 `CHK-BIZ-006、CHK-ARCH-002、CHK-EVT-003、CHK-PUB-001` |
 
 ### 3.2 已确认代码事实
 
@@ -4461,7 +4725,7 @@ BATCH_READY -> PUBLISHING_EXTERNAL -> PUBLISHED
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-06}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -4657,7 +4921,7 @@ SQL
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
@@ -4756,7 +5020,6 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 <!-- END WORK-PVAM-06_结算状态机统一Guard与Topology接线.md -->
 
-
 ---
 
 <!-- BEGIN WORK-PVAM-07A_Consumer_ACK紧急修复.md -->
@@ -4769,7 +5032,7 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 只实施 `R-012A`（parent=`R-012`，紧急子集） 中已 `ACCEPTED` 或由来源 TASK 明确批准的条件代码事项。任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-07A-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-07A-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -4785,8 +5048,8 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | 复核闭环追踪号 | `REM-012A / W-012A / V-012A`（R-012 紧急子集） |
 | 来源检查项 | `CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-001、CHK-TEST-003` |
 | 关联决策 | `DEC-010` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
@@ -4818,12 +5081,12 @@ CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-001、CHK-TEST-003
 | 修改任务书 | `TASK-PVAM-07A` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-001、CHK-TEST-003 | CONTROLLED |
 | 正式决策 | DEC-010 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-07A` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
 - [ ] 前置关系满足：无金额域依赖；可与WORK-01并行。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
@@ -4843,7 +5106,7 @@ CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-001、CHK-TEST-003
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-07A`；检查项 `CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-001、CHK-TEST-003` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-07A`；检查项 `CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-001、CHK-TEST-003` |
 
 ### 3.2 已确认代码事实
 
@@ -5155,7 +5418,7 @@ ACKABLE = frozenset(
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-07A}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -5334,7 +5597,7 @@ bash uat/scripts/run_work_uat.sh --work WORK-PVAM-07A --run-id "$RUN_ID" --tc TC
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
@@ -5429,7 +5692,6 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 <!-- END WORK-PVAM-07A_Consumer_ACK紧急修复.md -->
 
-
 ---
 
 <!-- BEGIN WORK-PVAM-07B_事件路由与Stream保留.md -->
@@ -5442,7 +5704,7 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 只实施 `R-012B`（parent=`R-012`，最终路由）、`R-013` 中已 `ACCEPTED` 或由来源 TASK 明确批准的条件代码事项。任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-07B-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-07B-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -5458,8 +5720,8 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | 复核闭环追踪号 | `REM-012B、REM-013 / W-012B、W-013 / V-012B、V-013` |
 | 来源检查项 | `CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-003` |
 | 关联决策 | `DEC-007、DEC-010` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
@@ -5491,12 +5753,12 @@ CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-003
 | 修改任务书 | `TASK-PVAM-07B` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-003 | CONTROLLED |
 | 正式决策 | DEC-007、DEC-010 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-07B` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
 - [ ] 前置关系满足：WORK-PVAM-06、WORK-PVAM-07A DEV_VERIFIED。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
@@ -5516,7 +5778,7 @@ CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-003
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-07B`；检查项 `CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-003` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-07B`；检查项 `CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-003` |
 
 ### 3.2 已确认代码事实
 
@@ -5806,7 +6068,7 @@ Ghost/deleted-ID不得ACK：先查权威event registry/outbox ledger恢复payloa
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-07B}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -6003,7 +6265,7 @@ bash uat/scripts/run_work_uat.sh --work WORK-PVAM-07B --run-id "$RUN_ID" --tc TC
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
@@ -6102,7 +6364,6 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 <!-- END WORK-PVAM-07B_事件路由与Stream保留.md -->
 
-
 ---
 
 <!-- BEGIN WORK-PVAM-08_UAT准入与证据治理.md -->
@@ -6115,7 +6376,7 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 本任务不修改业务计算代码；RISK/UV 仅生成验证、证据与阻断动作，OPT-001/002 仅生成已批准的测试/治理工具。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-08-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-08-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -6131,8 +6392,8 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | 复核闭环追踪号 | RISK/UV/OPT 无预登记 REM/W/V；`UV-002 → UAT-011`；由 AC-11 生成机器可读追踪 manifest |
 | 来源检查项 | `CHK-ARCH-001、CHK-DATA-006、CHK-DATA-007、CHK-BIZ-002、CHK-BIZ-007、CHK-BIZ-008、CHK-BIZ-009、CHK-BIZ-011、CHK-EVT-003～007、CHK-PUB-001、CHK-PUB-002、CHK-TEST-001～004` |
 | 关联决策 | `DEC-004、DEC-009、DEC-010、DEC-012、DEC-013、DEC-017、DEC-018` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
@@ -6164,12 +6425,12 @@ CHK-ARCH-001、CHK-DATA-006、CHK-DATA-007、CHK-BIZ-002、CHK-BIZ-007、CHK-BIZ
 | 修改任务书 | `TASK-PVAM-08` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-ARCH-001、CHK-DATA-006、CHK-DATA-007、CHK-BIZ-002、CHK-BIZ-007、CHK-BIZ-008、CHK-BIZ-009、CHK-BIZ-011、CHK-EVT-003～007、CHK-PUB-001、CHK-PUB-002、CHK-TEST-001～004 | CONTROLLED |
 | 正式决策 | DEC-004、DEC-009、DEC-010、DEC-012、DEC-013、DEC-017、DEC-018 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-08` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
 - [ ] 前置关系满足：阶段A可与所有DEV任务并行；阶段B依赖DEC-013及WORK-01～07B DEV_VERIFIED。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
@@ -6189,7 +6450,7 @@ CHK-ARCH-001、CHK-DATA-006、CHK-DATA-007、CHK-BIZ-002、CHK-BIZ-007、CHK-BIZ
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 / P1 / 优化 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-08`；检查项 `CHK-ARCH-001、CHK-DATA-006、CHK-DATA-007、CHK-BIZ-002、CHK-BIZ-007、CHK-BIZ-008、CHK-BIZ-009、CHK-BIZ-011、CHK-EVT-003～007、CHK-PUB-001、CHK-PUB-002、CHK-TEST-001～004` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-08`；检查项 `CHK-ARCH-001、CHK-DATA-006、CHK-DATA-007、CHK-BIZ-002、CHK-BIZ-007、CHK-BIZ-008、CHK-BIZ-009、CHK-BIZ-011、CHK-EVT-003～007、CHK-PUB-001、CHK-PUB-002、CHK-TEST-001～004` |
 
 ### 3.2 已确认代码事实
 
@@ -6482,7 +6743,7 @@ redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" -n "$REDIS_DB" INFO server
 |---|---|---|---|---|---|---|---|
 | TC-PVAM-08-01 | schema | 证据状态枚举 | validation_status ∈ {NOT_RUN, PASS, FAIL, PENDING_TEST_ENV, BLOCKED} | schema全部接受且要求reason/links | STEP-08-01 | DEV | NOT_RUN |
 | TC-PVAM-08-02 | 治理 | 缺schema/DEC批准 | 空manifest | 受影响TC自动标BLOCKED，不推定 | STEP-08-02 | DEV | NOT_RUN |
-| TC-PVAM-08-03 | CLI | 基线不匹配 | 工作树HEAD非2475c6c4 | 脚本退出非0且未执行测试 | STEP-08-03 | DEV | NOT_RUN |
+| TC-PVAM-08-03 | CLI | 基线不匹配 | 工作树HEAD非3891f4b9 | 脚本退出非0且未执行测试 | STEP-08-03 | DEV | NOT_RUN |
 | TC-PVAM-08-04 | 差分 | 固定PE样例 | SQL/Python同输入 | 输出字段级0差异和原始中间文件 | STEP-08-04 | DEV+UAT | NOT_RUN |
 | TC-PVAM-08-05 | 安全 | Stream probe默认 | 无`--apply-trim` | 只读，无XTRIM | STEP-08-04 | DEV | NOT_RUN |
 | TC-PVAM-08-06 | 调用图 | Topology符号 | 源码测试引用+部署archive | 分类production/test/demo；不把测试升级为production | STEP-08-05 | DEV+UAT | NOT_RUN |
@@ -6497,7 +6758,7 @@ redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" -n "$REDIS_DB" INFO server
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-08}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -6698,7 +6959,7 @@ SQL
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
