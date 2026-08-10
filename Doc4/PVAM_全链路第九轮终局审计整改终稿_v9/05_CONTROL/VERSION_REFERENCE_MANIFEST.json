@@ -259,11 +259,11 @@
                                             },
                             "workplan_zip":  {
                                                  "path":  "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件.zip",
-                                                 "sha256":  "e77d0ca1930c5975f9b524260f055089a4d9805861ad13bef82c7be799aeed78"
+                                                 "sha256":  "9fcdfc7a510189c7af07cbbcdec73338d30a04337a7791c69845798864156aaf"
                                              },
                             "approved_commit_registry":  {
                                                              "path":  "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
-                                                             "sha256":  "ca9e7c98b59e161871c746163aebe343fe6e2f87598c3fe88036f73a3a22f82f",
+                                                             "sha256":  "d4ab1ca9303cbf0da11e26ecfc9731ef1e356fd12fe9989c5a6068c9394ff513",
                                                              "schema_version":  2
                                                          }
                         }

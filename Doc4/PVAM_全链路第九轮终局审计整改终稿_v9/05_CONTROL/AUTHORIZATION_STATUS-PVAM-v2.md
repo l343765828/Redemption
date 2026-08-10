@@ -28,3 +28,18 @@ E8-01～E8-06 的包内文档治理与控制门禁修补已纳入受控终稿；
 - allowed wave：`tree 3284a9309c4fa450a6e3c40befb591f9854b2074 及其正式 patch/dev 证据登记`
 - approval record：`evidence/WORK-PVAM-01C/attempt-20260810-130319/approval/approval_record.json`
 - approval record SHA-256：`2be55003a01a8f6dfcaf2c206bff8b05aeec46e8aa42dfe7b56aa68f185f4486`
+
+## WORK-PVAM-01 范围授权登记
+
+- approval：`APPROVED`
+- commit：`9c1382600fa60e2d488113aef289bcc2331f8f45`
+- tree：`8cfa5f0738dc7cb50cf9b739fca9b4a20b609af9`
+- approver：`343765828@qq.com`
+- role：`技术负责人`
+- authority basis：`CHG-20260810-001`
+- approved at：`2026-08-10T14:49:08Z`
+- approval scope：`WORK-PVAM-01`
+- allowed wave：`允许`
+- approval record：`evidence/WORK-PVAM-01/attempt-20260810-143426/approval/approval_record.json`
+- approval record SHA-256：`bf3b1db1c4b6a3da40cde52e609d956b818312f2b8296e47893cf61b1c782136`
+- UAT：`PENDING_TEST_ENV`，继续由 `WORK-PVAM-08 / DEC-013` 管理

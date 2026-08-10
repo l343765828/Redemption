@@ -1,0 +1,2738 @@
+diff --git a/Common/AmountModelAdapter.py b/Common/AmountModelAdapter.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..579cd864d89fa03ca7a2897162dc157e09cc35f4
+--- /dev/null
++++ b/Common/AmountModelAdapter.py
+@@ -0,0 +1,82 @@
++from __future__ import annotations
++
++from collections.abc import Mapping
++from enum import Enum
++
++from Common.PvAmount import AMOUNT_ENCODING_VERSION_V2
++
++
++# =====================================================================
++# 金额记录版本状态
++# =====================================================================
++# region 状态枚举
++class AmountRecordState(str, Enum):
++    """区分新编码、未知 legacy 与不兼容记录。"""
++    NEW = "NEW"
++    LEGACY_UNKNOWN = "LEGACY_UNKNOWN"
++    INCOMPATIBLE = "INCOMPATIBLE"
++# endregion
++
++
++# =====================================================================
++# 金额记录只读分类器
++# =====================================================================
++def classify_amount_record(record: object) -> AmountRecordState:
++    """仅分类，不修改、缩放、重建或升级原始记录。"""
++    # region 从 Mapping、模型属性或直接值中提取版本
++    if isinstance(record, Mapping):
++        version = record.get("amount_encoding_version")
++    elif hasattr(record, "amount_encoding_version"):
++        version = getattr(record, "amount_encoding_version")
++    else:
++        version = record
++
++    # endregion
++
++    # region 按版本值返回状态，不对 legacy 记录执行隐式升级
++    if version is None:
++        return AmountRecordState.LEGACY_UNKNOWN
++    if (
++        isinstance(version, bool)
++        or not isinstance(version, int)
++    ):
++        return AmountRecordState.INCOMPATIBLE
++    if version == AMOUNT_ENCODING_VERSION_V2:
++        return AmountRecordState.NEW
++    return AmountRecordState.INCOMPATIBLE
++    # endregion
++
++# =====================================================================
++# V2 金额域守卫与工厂字段
++# =====================================================================
++# region V2 计算入口守卫
++def require_v2_amount_record(record: object) -> None:
++    """仅在 V2 计算入口阻断 legacy/unknown 或不兼容记录。"""
++    state = classify_amount_record(record)
++    if state is not AmountRecordState.NEW:
++        raise ValueError(f"V2_AMOUNT_RECORD_REQUIRED:{state.value}")
++# endregion
++
++
++# region 按冻结运行态构造新增金额字段
++def build_factory_amount_fields(
++    run_state: str,
++    *,
++    include_bonus_cents: bool = False,
++) -> dict[str, int | None]:
++    """为新记录生成条件化字段；不读取配置，也不改写 legacy 金额。"""
++    if run_state in {"00", "01"}:
++        fields: dict[str, int | None] = {"amount_encoding_version": None}
++        if include_bonus_cents:
++            fields["estimated_bonus_cents"] = None
++        return fields
++    if run_state == "10":
++        raise ValueError("INVALID_STATE")
++    if run_state == "11":
++        fields = {"amount_encoding_version": AMOUNT_ENCODING_VERSION_V2}
++        if include_bonus_cents:
++            fields["estimated_bonus"] = None
++            fields["estimated_bonus_cents"] = 0
++        return fields
++    raise ValueError("INVALID_STATE")
++# endregion
+diff --git a/Common/PvAmount.py b/Common/PvAmount.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e1e424956cb8ec31603d813e9b5d008cf670873a
+--- /dev/null
++++ b/Common/PvAmount.py
+@@ -0,0 +1,441 @@
++from __future__ import annotations
++
++import re
++from decimal import Decimal, InvalidOperation
++from numbers import Integral
++from typing import Final
++
++# =====================================================================
++# PVAM 固定精度金额公共常量
++# =====================================================================
++# region 金额、费率及奖金分的缩放倍率
++PV_SCALE: Final[int] = 1_000_000
++RATE_PPM_SCALE: Final[int] = 1_000_000
++BONUS_CENT_SCALE: Final[int] = 100
++AMOUNT_ENCODING_VERSION_V2: Final[int] = 2
++# endregion
++
++# region legacy 隔离版本
++# 仅供隔离 legacy adapter 返回；不得写入模型或事件。
++LEGACY_ADAPTER_VERSION: Final[int] = 0
++# endregion
++
++# region signed int64 边界
++INT64_MIN: Final[int] = -(2**63)
++INT64_MAX: Final[int] = 2**63 - 1
++# endregion
++
++# region 规范十进制格式及舍入模式
++_CANONICAL_DECIMAL = re.compile(
++    r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$"
++)
++
++_ROUNDING_MODE_TRUNCATE: Final[str] = "TRUNCATE"
++_ROUNDING_MODE_HALF_UP: Final[str] = "ROUND_HALF_UP"
++# endregion
++
++
++# =====================================================================
++# 基础整数与金额精度校验
++# =====================================================================
++def require_int64(value: object, *, field_name: str) -> int:
++    if isinstance(value, bool) or not isinstance(value, Integral):
++        raise TypeError(
++            f"{field_name} must be an integer, "
++            f"got {type(value).__name__}"
++        )
++
++    result = int(value)
++
++    if result < INT64_MIN or result > INT64_MAX:
++        raise OverflowError(
++            f"{field_name} is outside signed int64"
++        )
++
++    return result
++
++
++def require_units_int(
++    value: object,
++    field_name: str = "amount_units",
++) -> int:
++    return require_int64(
++        value,
++        field_name=field_name,
++    )
++
++
++# =====================================================================
++# 十进制精度转换
++# =====================================================================
++def _require_max_decimals(
++    max_decimals: int,
++) -> int:
++    if (
++        isinstance(max_decimals, bool)
++        or not isinstance(max_decimals, int)
++        or max_decimals < 0
++    ):
++        raise ValueError(
++            "max_decimals must be a non-negative integer"
++        )
++
++    return max_decimals
++
++
++def _decimal_to_units(
++    value: Decimal,
++    *,
++    max_decimals: int,
++    field_name: str,
++) -> int:
++
++    max_decimals = _require_max_decimals(
++        max_decimals
++    )
++
++    decimal_places = max(
++        0,
++        -value.as_tuple().exponent,
++    )
++
++    if decimal_places > max_decimals:
++        raise ValueError(
++            f"{field_name} has "
++            f"{decimal_places} decimal places; "
++            f"maximum is {max_decimals}"
++        )
++
++    scaled = value * PV_SCALE
++
++    if scaled != scaled.to_integral_value():
++        raise ValueError(
++            f"{field_name} has precision "
++            f"finer than micro-units"
++        )
++
++    return require_int64(
++        int(scaled),
++        field_name=field_name,
++    )
++
++
++# =====================================================================
++# 外部输入与数据库金额解析
++# =====================================================================
++def parse_external_decimal_to_units(
++    raw: str,
++    *,
++    max_decimals: int = 2,
++) -> int:
++
++    if (
++        not isinstance(raw, str)
++        or not _CANONICAL_DECIMAL.fullmatch(raw)
++    ):
++        raise TypeError(
++            "external amount must be "
++            "a canonical decimal string"
++        )
++
++    try:
++        value = Decimal(raw)
++    except InvalidOperation as exc:
++        raise ValueError(
++            "external amount is not a decimal"
++        ) from exc
++
++    return _decimal_to_units(
++        value,
++        max_decimals=max_decimals,
++        field_name="external_amount",
++    )
++
++
++def parse_db_amount_to_units(
++    raw: Decimal | str,
++    *,
++    max_decimals: int = 2,
++) -> int:
++    """解析 DB 金额边界；默认两位是来源精度策略，不是内部 scale 上限。
++
++    已批准的更高精度来源必须显式传入 ``max_decimals``；``PV_SCALE`` 只定义
++    内部 micro-units 分辨率，不能反向放宽外部数据库字段的精度合同。
++    """
++
++    if isinstance(raw, Decimal):
++        value = raw
++
++    elif (
++        isinstance(raw, str)
++        and _CANONICAL_DECIMAL.fullmatch(raw)
++    ):
++        try:
++            value = Decimal(raw)
++        except InvalidOperation as exc:
++            raise ValueError(
++                "DB amount is not a decimal"
++            ) from exc
++
++    else:
++        raise TypeError(
++            "DB amount must be Decimal "
++            "or canonical decimal string"
++        )
++
++    if not value.is_finite():
++        raise ValueError(
++            "DB amount must be finite"
++        )
++
++    return _decimal_to_units(
++        value,
++        max_decimals=max_decimals,
++        field_name="db_amount",
++    )
++
++
++# =====================================================================
++# 金额编码版本校验
++# =====================================================================
++def require_amount_version(
++    value: object,
++    *,
++    allow_legacy: bool = False,
++) -> int:
++
++    if value is None:
++        if allow_legacy:
++            return LEGACY_ADAPTER_VERSION
++
++        raise ValueError(
++            "amount_encoding_version "
++            "is missing/legacy"
++        )
++
++    if (
++        isinstance(value, bool)
++        or not isinstance(value, Integral)
++    ):
++        raise TypeError(
++            "amount_encoding_version "
++            "must be an integer"
++        )
++
++    normalized = int(value)
++
++    if normalized != AMOUNT_ENCODING_VERSION_V2:
++        raise ValueError(
++            "unsupported "
++            f"amount_encoding_version={normalized}"
++        )
++
++    return normalized
++
++
++# =====================================================================
++# 整数截断与规范化输出
++# =====================================================================
++def trunc_div_zero(
++    numerator: int,
++    denominator: int,
++) -> int:
++    """整数除法向零截断；支持任意非零分母。"""
++
++    if denominator == 0:
++        raise ZeroDivisionError(
++            "denominator must not be zero"
++        )
++
++    quotient = (
++        abs(numerator)
++        // abs(denominator)
++    )
++
++    return (
++        -quotient
++        if (numerator < 0)
++        ^ (denominator < 0)
++        else quotient
++    )
++
++
++def units_to_decimal_string(units: int) -> str:
++    normalized = require_units_int(units)
++    sign = "-" if normalized < 0 else ""
++    whole, remainder = divmod(abs(normalized), PV_SCALE)
++
++    if remainder == 0:
++        return f"{sign}{whole}"
++
++    fraction = f"{remainder:06d}".rstrip("0")
++    return f"{sign}{whole}.{fraction}"
++
++
++# =====================================================================
++# PPM 费率解析与 int64 安全算术
++# =====================================================================
++def parse_percent_to_ppm(raw: Decimal | str) -> int:
++    """把百分数值转换为 ppm：15 表示 15%，0.15 表示 0.15%。
++
++    本函数不接受“已除以 100 的比例值”语义；normalized fraction 必须由调用方
++    在其获批边界显式处理，不能把 0.15（15% fraction）误传到这里。
++    """
++    if isinstance(raw, Decimal):
++        value = raw
++    elif isinstance(raw, str) and _CANONICAL_DECIMAL.fullmatch(raw):
++        try:
++            value = Decimal(raw)
++        except InvalidOperation as exc:
++            raise ValueError("percent is not a decimal") from exc
++    else:
++        raise TypeError(
++            "percent must be Decimal or canonical decimal string"
++        )
++
++    if not value.is_finite():
++        raise ValueError("percent must be finite")
++    if abs(value) > Decimal(100):
++        raise ValueError("percent magnitude must not exceed 100")
++
++    scaled = value * (RATE_PPM_SCALE // 100)
++    if scaled != scaled.to_integral_value():
++        raise ValueError("percent has precision finer than ppm")
++
++    return require_int64(int(scaled), field_name="rate_ppm")
++
++
++def checked_add_int64(*values: int) -> int:
++    total = 0
++    for index, value in enumerate(values):
++        normalized = require_int64(
++            value,
++            field_name=f"addend[{index}]",
++        )
++        total = require_int64(
++            total + normalized,
++            field_name="int64_sum",
++        )
++    return total
++
++
++def checked_mul_int64(a: int, b: int) -> int:
++    left = require_int64(a, field_name="multiplicand")
++    right = require_int64(b, field_name="multiplier")
++    return require_int64(
++        left * right,
++        field_name="int64_product",
++    )
++
++
++def _require_rate_ppm(ppm: int) -> int:
++    normalized = require_int64(ppm, field_name="rate_ppm")
++    if abs(normalized) > RATE_PPM_SCALE:
++        raise ValueError("rate_ppm magnitude must not exceed 100 percent")
++    return normalized
++
++
++# =====================================================================
++# DEV-PVAM-002：无大乘积的 divmod 分解
++# =====================================================================
++def _decomposed_nonnegative_mul_div(
++    value: int,
++    multiplier: int,
++    denominator: int,
++    *,
++    field_name: str,
++) -> tuple[int, int]:
++    """Return quotient/remainder without materializing value * multiplier."""
++    # region 按分母拆分并逐步执行 int64 检查
++    # USER-DECISION-PVAM-01-INT64 要求合法输入域内不得产生超 int64 的已落域中间量。
++
++    quotient, remainder = divmod(value, denominator)
++    term_1 = checked_mul_int64(quotient, multiplier)
++    remainder_product = checked_mul_int64(remainder, multiplier)
++    term_2, final_remainder = divmod(remainder_product, denominator)
++    magnitude = checked_add_int64(term_1, term_2)
++    return (
++        require_int64(magnitude, field_name=field_name),
++        require_int64(final_remainder, field_name=f"{field_name}_remainder"),
++    )
++    # endregion
++
++
++# =====================================================================
++# 金额乘费率公共接口
++# =====================================================================
++# region divmod 计算、向零截断及最终 int64 落域
++def mul_units_by_ppm(units: int, ppm: int) -> int:
++    """按 ppm 计算金额并向零截断，全程不物化 units × ppm。"""
++    normalized_units = require_units_int(units)
++    normalized_ppm = _require_rate_ppm(ppm)
++    sign = -1 if (normalized_units < 0) ^ (normalized_ppm < 0) else 1
++    magnitude, _ = _decomposed_nonnegative_mul_div(
++        abs(normalized_units),
++        abs(normalized_ppm),
++        RATE_PPM_SCALE,
++        field_name="units_mul_ppm_magnitude",
++    )
++    return require_int64(
++        sign * magnitude,
++        field_name="units_mul_ppm",
++    )
++# endregion
++
++
++# =====================================================================
++# 金额与费率换算为奖金分
++# =====================================================================
++# region TRUNCATE 与最终一次 ROUND_HALF_UP
++def units_ppm_to_bonus_cents(
++    units: int,
++    ppm: int,
++    rounding_mode: str,
++) -> int:
++    """按指定舍入模式将金额和 ppm 费率一次换算为奖金分。"""
++    normalized_units = require_units_int(units)
++    normalized_ppm = _require_rate_ppm(ppm)
++    if rounding_mode not in {
++        _ROUNDING_MODE_TRUNCATE,
++        _ROUNDING_MODE_HALF_UP,
++    }:
++        raise ValueError(f"unsupported rounding_mode={rounding_mode!r}")
++
++    sign = -1 if (normalized_units < 0) ^ (normalized_ppm < 0) else 1
++    units_per_cent = PV_SCALE // BONUS_CENT_SCALE
++    denominator = checked_mul_int64(RATE_PPM_SCALE, units_per_cent)
++    magnitude, remainder = _decomposed_nonnegative_mul_div(
++        abs(normalized_units),
++        abs(normalized_ppm),
++        denominator,
++        field_name="bonus_cents_magnitude",
++    )
++
++    if rounding_mode == _ROUNDING_MODE_HALF_UP:
++        doubled_remainder = checked_mul_int64(remainder, 2)
++        if doubled_remainder >= denominator:
++            magnitude = checked_add_int64(magnitude, 1)
++
++    return require_int64(
++        sign * magnitude,
++        field_name="bonus_cents",
++    )
++# endregion
++
++
++# =====================================================================
++# DataFrame 整数金额列边界校验
++# =====================================================================
++# region 逐列检查存在性与整数 dtype
++def assert_integer_amount_dtype(df, columns, df_name: str) -> None:
++    """进入 numpy/cuDF int64 边界前，拒绝浮点或缺失金额列。"""
++    for column in columns:
++        if column not in df.columns:
++            raise KeyError(f"{df_name}.{column} is missing")
++
++        dtype = df[column].dtype
++        if getattr(dtype, "kind", None) not in {"i", "u"}:
++            raise TypeError(
++                f"{df_name}.{column} must use an integer dtype, got {dtype}"
++            )
++# endregion
+diff --git a/Model/User/EliteBonusStats.py b/Model/User/EliteBonusStats.py
+index ccaa18d9e039bb2116f9081061d5cc01bda420ba..e1a0f069411ee6997905e9f3c4c2e2445d1422f2 100644
+--- a/Model/User/EliteBonusStats.py
++++ b/Model/User/EliteBonusStats.py
+@@ -20,6 +20,10 @@ class EliteBonusStats(BaseRedisModel, index=True):
+     user_id: str
+     period_num: int = Field(index=True)  # 索引必须有,期末快照走 find 查询
+ 
++    # region PVAM 金额编码版本（legacy/unknown 默认不写 2）
++    amount_encoding_version: Optional[int] = None
++    # endregion
++
+     # ---- 基础业绩(财务口径) ----
+     pv_pcs: Optional[int] = 0    # 个人消费(本期累计,可被退单负向调整)
+     gpv: Optional[int] = 0       # 原始累计 GPV,含下线临时上贡(用于路径 A 阈值判定)
+@@ -39,6 +43,9 @@ class EliteBonusStats(BaseRedisModel, index=True):
+ 
+     # ---- 奖金预估(实时跳动,期末快照固化) ----
+     estimated_bonus: Optional[float] = 0.0
++    # region PVAM additive V2 空白载体（不由 legacy float 折算）
++    estimated_bonus_cents: Optional[int] = None
++    # endregion
+ 
+     class Meta:
+         global_key_prefix = "elite_bonus_stats"
+diff --git a/Model/User/UserStats.py b/Model/User/UserStats.py
+index 224b9e8265859f26334945e98e992b5f2a62b8ae..301c29826ad728eb1f69cc26f5571287e25b6122 100644
+--- a/Model/User/UserStats.py
++++ b/Model/User/UserStats.py
+@@ -8,6 +8,9 @@ class UserStats(BaseRedisModel, index=True):
+     id: str
+     period: str = Field(index=True)
+     user_id: Optional[str] = None
++    # region PVAM 金额编码版本（legacy/unknown 默认不写 2）
++    amount_encoding_version: Optional[int] = None
++    # endregion
+     pv: Optional[int] = 0
+     gpv: Optional[int] = 0
+     # PE/SE 晋级口径下拆分后的真实业绩：
+diff --git a/User/EliteBonusService.py b/User/EliteBonusService.py
+index 00b95fa0c947f6e437b935c9224613488685dc1c..6eb33b64afa5df5101fddac321e4e8d2eaa0b579 100644
+--- a/User/EliteBonusService.py
++++ b/User/EliteBonusService.py
+@@ -32,6 +32,13 @@ import logging
+ from dask.distributed import Client
+ from redis_om import NotFoundError
+ from Model.User.EliteBonusStats import EliteBonusStats
++from Common.AmountModelAdapter import build_factory_amount_fields
++from Redishelper.PVAmountConfigProvider import (
++    PVAmountConfigProvider,
++    PVAmountRunConfig,
++    PVAmountRunSession,
++    admit_production_run_config,
++)
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -233,6 +240,12 @@ class EliteBonusService:
+         并发: 源用户 + BFS 路径上每个祖先都加锁。树结构保证锁顺序单调,无环路死锁。
+         异常: 锁等待超时 / Dask 失败 → 上抛,由调用方决定重试或入死信。
+         """
++        # region 加载并冻结本次业务运行配置
++        run_config = PVAmountRunSession.start(
++            PVAmountConfigProvider(self.redis_conn)
++        ).config
++        # endregion
++
+         acquired_locks: List[Any] = []
+         try:
+ 
+@@ -248,7 +261,7 @@ class EliteBonusService:
+             # endregion
+ 
+             # region 从redis中获取源用户
+-            current_user = self._get_or_create_node(user_id)
++            current_user = self._get_or_create_node(user_id, run_config)
+             # endregion
+ 
+             # region 边界保护: 防退单 / 重复退单导致 pv 穿透到负
+@@ -284,6 +297,7 @@ class EliteBonusService:
+                     processed_nodes=processed_nodes,
+                     models_to_save=models_to_save,
+                     acquired_locks=acquired_locks,
++                    run_config=run_config,
+                 )
+ 
+             # ---- 统一原子化写入 ----
+@@ -305,12 +319,24 @@ class EliteBonusService:
+         processed_nodes: Dict[str, EliteBonusStats],
+         models_to_save: List[EliteBonusStats],
+         acquired_locks: List[Any],
++        run_config: PVAmountRunConfig,
+     ) -> None:
+         """沿祖先链 BFS 冒泡,逐层加锁、读、改、加入待写"""
+         # region 通过图获取该用户所有层级的祖先
+         actor = self.dask_client.get_dataset("graph_actor").result()
+         df_bfs = actor.get_allparent(user_id).result()
+-        pdf = df_bfs.sort_values("level", ascending=True)
++        required_columns = {"ancestor", "predecessor", "level"}
++        missing_columns = required_columns - set(df_bfs.columns)
++        if missing_columns:
++            raise RuntimeError(
++                f"get_allparent 缺少必要列: {missing_columns}"
++            )
++
++        # graph_actor 对上级节点使用 ancestor；服务内部沿用 descendant 作为祖先节点键。
++        pdf = df_bfs.rename(columns={"ancestor": "descendant"}).sort_values(
++            "level",
++            ascending=True,
++        )
+         ancestors_info = pdf[["descendant", "predecessor", "level"]].astype(str).to_dict("records")
+ 
+         delta_update = initial_delta
+@@ -336,7 +362,7 @@ class EliteBonusService:
+             # endregion
+ 
+             # region 计算父级的gpv
+-            ancestor = self._get_or_create_node(ancestor_id)
++            ancestor = self._get_or_create_node(ancestor_id, run_config)
+             ancestor.gpv = (ancestor.gpv or 0) + delta_update
+             # endregion
+ 
+@@ -346,7 +372,7 @@ class EliteBonusService:
+                 try:
+                     leg_node = EliteBonusStats.get(f"{self.period_num}:{leg_id}")
+                 except NotFoundError:
+-                    leg_node = self._build_blank_node(leg_id)
++                    leg_node = self._build_blank_node(leg_id, run_config)
+             # endregion
+ 
+             # region 维护"已合格直属下线"集合
+@@ -376,18 +402,22 @@ class EliteBonusService:
+     # 节点工厂
+     # =================================================================
+ 
+-    def _get_or_create_node(self, user_id: str) -> EliteBonusStats:
++    def _get_or_create_node(self, user_id: str, run_config: PVAmountRunConfig) -> EliteBonusStats:
+         node_id = f"{self.period_num}:{user_id}"
+         try:
+             return EliteBonusStats.get(node_id)
+         except NotFoundError:
+-            return self._build_blank_node(user_id)
++            return self._build_blank_node(user_id, run_config)
+ 
+-    def _build_blank_node(self, user_id: str) -> EliteBonusStats:
++    def _build_blank_node(self, user_id: str, run_config: PVAmountRunConfig) -> EliteBonusStats:
+         return EliteBonusStats(
+             id=f"{self.period_num}:{user_id}",
+             user_id=user_id,
+             period_num=self.period_num,
++            **build_factory_amount_fields(
++                run_config.state,
++                include_bonus_cents=True,
++            ),
+         )
+ 
+     def _batch_save(self, models: List[EliteBonusStats]) -> None:
+@@ -404,6 +434,18 @@ class EliteBonusService:
+     # =================================================================
+ 
+     def snapshot_period_to_db(self, db_executor: DbExecutor) -> Dict[str, int]:
++        # region 独立快照 run 加载并冻结一次 production 配置
++        run_config = PVAmountRunSession.start(
++            PVAmountConfigProvider(self.redis_conn)
++        ).config
++        return self._snapshot_period_to_db(db_executor, run_config)
++        # endregion
++
++    def _snapshot_period_to_db(
++        self,
++        db_executor: DbExecutor,
++        run_config: PVAmountRunConfig,
++    ) -> Dict[str, int]:
+         """
+         本期结束后调用一次,把所有 estimated_bonus > 0 的节点固化到 AR_CALC_BONUS_E,
+         把 eb_source 链路固化到 AR_CALC_BONUS_E_SOURCE。
+@@ -416,6 +458,10 @@ class EliteBonusService:
+         ⚠️ 性能提示: 期内总用户数百万级时,find().all() 应改为分页;
+           此处实现为一次性拉全量,适合中等量级(10w 以下)。
+         """
++        # region 只接受已通过 production admission 的冻结配置
++        admit_production_run_config(run_config)
++        # endregion
++
+         # ---- 1. 拉本期所有合格记录 ----
+         all_records = list(
+             EliteBonusStats.find(
+diff --git a/User/GlobalEliteBonusRecalculationService.py b/User/GlobalEliteBonusRecalculationService.py
+index 0830fd871bddc4b419060ad414304c9c1d5df0fa..7e351492d37f68a7b04e0e3ee945b788c99b55f0 100644
+--- a/User/GlobalEliteBonusRecalculationService.py
++++ b/User/GlobalEliteBonusRecalculationService.py
+@@ -9,6 +9,12 @@ from dask.distributed import Client
+ from redis_om import NotFoundError
+ 
+ from Model.User.EliteBonusStats import EliteBonusStats
++from Common.AmountModelAdapter import build_factory_amount_fields
++from Redishelper.PVAmountConfigProvider import (
++    PVAmountConfigProvider,
++    PVAmountRunConfig,
++    PVAmountRunSession,
++)
+ from User.UserStatsService import SCHEDULE_ADDRESS
+ 
+ logger = logging.getLogger(__name__)
+@@ -102,7 +108,13 @@ class GlobalEliteBonusRecalculationService:
+     def settle_period(self, period: str) -> None:
+         """单期全量 Elite Bonus 结算重算主入口"""
+         period = str(period)
++        # region 加载并冻结本次业务运行配置
+         redis_conn = EliteBonusStats.db()
++        run_config = PVAmountRunSession.start(
++            PVAmountConfigProvider(redis_conn)
++        ).config
++        # endregion
++
+         run_id = str(uuid.uuid4())
+         status_key = self._status_key(period)
+ 
+@@ -168,6 +180,7 @@ class GlobalEliteBonusRecalculationService:
+                         period=period,
+                         run_id=run_id,
+                         redis_conn=redis_conn,
++                        run_config=run_config,
+                         lock=lock
+                     )
+ 
+@@ -189,7 +202,7 @@ class GlobalEliteBonusRecalculationService:
+             if self.db_executor is not None:
+                 logger.info("开始期末快照落库 AR_CALC_BONUS_E / AR_CALC_BONUS_E_SOURCE ...")
+                 self._refresh_global_lock(lock)
+-                persist_stats = self._persist_to_db(period)
++                persist_stats = self._persist_to_db(period, run_config)
+                 persisted = True
+                 logger.info(
+                     "落库完成 bonus_rows=%s source_rows=%s",
+@@ -231,12 +244,21 @@ class GlobalEliteBonusRecalculationService:
+             except Exception:
+                 pass
+ 
+-    def _process_parent_batch(self, graph_actor, parent_ids: List[str], period: str, run_id: str, redis_conn, lock) -> None:
++    def _process_parent_batch(
++        self,
++        graph_actor,
++        parent_ids: List[str],
++        period: str,
++        run_id: str,
++        redis_conn,
++        run_config: PVAmountRunConfig,
++        lock,
++    ) -> None:
+         """批处理同层父节点，自下而上进行 GPV 归集、路径判定、奖金算定与业绩吸收流转。"""
+         if not parent_ids:
+             return
+ 
+-        parent_lookup = self._mget_stats_with_exists(parent_ids, period, redis_conn)
++        parent_lookup = self._mget_stats_with_exists(parent_ids, period, redis_conn, run_config)
+         models_to_save: List[EliteBonusStats] = []
+         pipe = redis_conn.pipeline(transaction=True)
+         consumed_child_keys: List[str] = []
+@@ -277,7 +299,7 @@ class GlobalEliteBonusRecalculationService:
+                 if not child_ids:
+                     break
+ 
+-                child_lookup = self._mget_stats_with_exists(child_ids, period, redis_conn)
++                child_lookup = self._mget_stats_with_exists(child_ids, period, redis_conn, run_config)
+ 
+                 for cid in child_ids:
+                     c_node, _ = child_lookup[cid]
+@@ -369,7 +391,13 @@ class GlobalEliteBonusRecalculationService:
+             })
+             pipe.expire(redis_key, self.SOURCE_TTL_SECONDS)
+ 
+-    def _mget_stats_with_exists(self, user_ids: Iterable[str], period: str, redis_conn) -> Dict[str, Tuple[EliteBonusStats, bool]]:
++    def _mget_stats_with_exists(
++        self,
++        user_ids: Iterable[str],
++        period: str,
++        redis_conn,
++        run_config: PVAmountRunConfig,
++    ) -> Dict[str, Tuple[EliteBonusStats, bool]]:
+         out: Dict[str, Tuple[EliteBonusStats, bool]] = {}
+         uid_list = [str(uid) for uid in user_ids]
+         if not uid_list:
+@@ -382,13 +410,13 @@ class GlobalEliteBonusRecalculationService:
+                 raise RuntimeError("MGET 结果集返回空指针")
+         except Exception as e:
+             logger.warning("JSON.MGET 发生阻断，平滑降级至单键兜底模式: %s", e)
+-            return self._fallback_single_get(uid_list, period)
++            return self._fallback_single_get(uid_list, period, run_config)
+ 
+         for uid, raw_data in zip(uid_list, raw_results):
+             expected_pk = f"{period}:{uid}"
+ 
+             if raw_data is None:
+-                out[uid] = (self._new_blank_stats(uid, period), False)
++                out[uid] = (self._new_blank_stats(uid, period, run_config), False)
+                 continue
+ 
+             try:
+@@ -412,27 +440,36 @@ class GlobalEliteBonusRecalculationService:
+ 
+         return out
+ 
+-    def _fallback_single_get(self, uid_list: List[str], period: str) -> Dict[str, Tuple[EliteBonusStats, bool]]:
++    def _fallback_single_get(
++        self,
++        uid_list: List[str],
++        period: str,
++        run_config: PVAmountRunConfig,
++    ) -> Dict[str, Tuple[EliteBonusStats, bool]]:
+         out = {}
+         for uid in uid_list:
+             try:
+                 node = EliteBonusStats.get(f"{period}:{uid}")
+                 out[uid] = (node, True)
+             except NotFoundError:
+-                out[uid] = (self._new_blank_stats(uid, period), False)
++                out[uid] = (self._new_blank_stats(uid, period, run_config), False)
+         return out
+ 
+-    def _new_blank_stats(self, uid: str, period: str) -> EliteBonusStats:
++    def _new_blank_stats(self, uid: str, period: str, run_config: PVAmountRunConfig) -> EliteBonusStats:
+         return EliteBonusStats(
+             pk=f"{period}:{uid}", id=f"{period}:{uid}", user_id=uid, period_num=int(period),
+-            pv_pcs=0, gpv=0, gpv_real=0, contrib_to_parent=0, estimated_bonus=0.0
++            pv_pcs=0, gpv=0, gpv_real=0, contrib_to_parent=0,
++            **build_factory_amount_fields(
++                run_config.state,
++                include_bonus_cents=True,
++            ),
+         )
+ 
+     # ==========================================
+     # 正式产出落库 (复用增量 snapshot，保证两套实现口径一致)
+     # ==========================================
+ 
+-    def _persist_to_db(self, period: str) -> Dict[str, int]:
++    def _persist_to_db(self, period: str, run_config: PVAmountRunConfig) -> Dict[str, int]:
+         """
+         把本期 Redis 结果固化到关系库 AR_CALC_BONUS_E / AR_CALC_BONUS_E_SOURCE。
+ 
+@@ -458,7 +495,7 @@ class GlobalEliteBonusRecalculationService:
+             elite_rate_loader=lambda: locked_rate,
+             user_info_resolver=self.user_info_resolver,
+         )
+-        return snapshot_svc.snapshot_period_to_db(self.db_executor)
++        return snapshot_svc._snapshot_period_to_db(self.db_executor, run_config)
+ 
+     # ==========================================
+     # 环境清理与纯净度保障 (含大表锁续期)
+diff --git a/User/GlobalRecalculationService.py b/User/GlobalRecalculationService.py
+index 6974cd1cd2394d49b04488c224e792152bc285c6..723cdb1ad495c7560c4b2a866706c4ceb33c68b0 100644
+--- a/User/GlobalRecalculationService.py
++++ b/User/GlobalRecalculationService.py
+@@ -11,6 +11,12 @@ from redis_om import NotFoundError
+ 
+ import Model.User.UserLevel as UserLevel
+ from Model.User.UserStats import UserStats
++from Common.AmountModelAdapter import build_factory_amount_fields
++from Redishelper.PVAmountConfigProvider import (
++    PVAmountConfigProvider,
++    PVAmountRunConfig,
++    PVAmountRunSession,
++)
+ from Model.User.UserPeriodHighestRank import UserPeriodHighestRank
+ from User.UserStatsService import (
+     UserStatsService,
+@@ -142,8 +148,14 @@ class GlobalRecalculationService(UserStatsService):
+         # 强制转换为字符串，确保下游 Redis 键名与 payload 口径 100% 统一
+         period = str(period)
+ 
+-        # region 上redis锁
++        # region 加载并冻结本次业务运行配置
+         redis_conn = UserStats.db()
++        run_config = PVAmountRunSession.start(
++            PVAmountConfigProvider(redis_conn)
++        ).config
++        # endregion
++
++        # region 上redis锁
+         run_id = str(uuid.uuid4())
+         status_key = self._status_key(period)
+ 
+@@ -252,6 +264,7 @@ class GlobalRecalculationService(UserStatsService):
+                         run_id=run_id,
+                         redis_conn=redis_conn,
+                         write_zero_nodes=write_zero_nodes,
++                        run_config=run_config,
+                         lock=lock
+                     )
+                     # endregion
+@@ -338,6 +351,7 @@ class GlobalRecalculationService(UserStatsService):
+             run_id: str,
+             redis_conn,
+             write_zero_nodes: bool,
++            run_config: PVAmountRunConfig,
+             lock
+     ) -> None:
+         """
+@@ -356,7 +370,7 @@ class GlobalRecalculationService(UserStatsService):
+         # endregion
+ 
+         # region 从redis获取parent_ids的所有实体
+-        parent_lookup = self._mget_users_with_exists(parent_ids, period)
++        parent_lookup = self._mget_users_with_exists(parent_ids, period, run_config)
+         models_to_save: List[UserStats] = []
+         outbox_events: List[Dict[str, Any]] = []
+         honor_records: List[UserPeriodHighestRank] = []
+@@ -404,7 +418,7 @@ class GlobalRecalculationService(UserStatsService):
+                 # endregion
+ 
+                 # region 获取子节点实体list
+-                child_lookup = self._mget_users_with_exists(child_ids, period)
++                child_lookup = self._mget_users_with_exists(child_ids, period, run_config)
+                 # endregion
+ 
+                 for cid in child_ids:
+@@ -613,7 +627,8 @@ class GlobalRecalculationService(UserStatsService):
+     def _mget_users_with_exists(
+             self,
+             user_ids: Iterable[str],
+-            period: str
++            period: str,
++            run_config: PVAmountRunConfig,
+     ) -> Dict[str, Tuple[UserStats, bool]]:
+         """
+         批量读取 UserStats，并返回 Redis 中是否原本存在。
+@@ -646,7 +661,7 @@ class GlobalRecalculationService(UserStatsService):
+                     self._normalize_qualified_legs(node)
+                     fallback_out[uid] = (node, True)
+                 except NotFoundError:
+-                    node = self._new_zero_user_stats(uid, period)
++                    node = self._new_zero_user_stats(uid, period, run_config)
+                     self._normalize_qualified_legs(node)
+                     fallback_out[uid] = (node, False)
+ 
+@@ -687,7 +702,7 @@ class GlobalRecalculationService(UserStatsService):
+ 
+             # region raw_data为空时 初始化对象 并跳过当前循环
+             if raw_data is None:
+-                node = self._new_zero_user_stats(uid, period)
++                node = self._new_zero_user_stats(uid, period, run_config)
+                 self._normalize_qualified_legs(node)
+                 out[uid] = (node, False)
+                 continue
+@@ -752,7 +767,7 @@ class GlobalRecalculationService(UserStatsService):
+ 
+         return out
+ 
+-    def _new_zero_user_stats(self, uid: str, period: str) -> UserStats:
++    def _new_zero_user_stats(self, uid: str, period: str, run_config: PVAmountRunConfig) -> UserStats:
+         """构造 Redis 中不存在用户的零值 UserStats。"""
+         uid = str(uid)
+         return UserStats(
+@@ -769,6 +784,7 @@ class GlobalRecalculationService(UserStatsService):
+             virtual_width=0,
+             rank=UserLevel.NOTHING,
+             qualified_legs=set(),
++            **build_factory_amount_fields(run_config.state),
+         )
+ 
+     @staticmethod
+@@ -935,7 +951,12 @@ class GlobalRecalculationService(UserStatsService):
+ # 2. 预置 Redis 中的基础个人业绩 (PV)
+ # ==========================================
+ def inject_mock_pv_data(period: str):
++    # region 加载并冻结本次造数运行配置
+     redis_conn = UserStats.db()
++    run_config = PVAmountRunSession.start(
++        PVAmountConfigProvider(redis_conn)
++    ).config
++    # endregion
+     stats_prefix = UserStats.make_key("")
+     for key in redis_conn.scan_iter(f"{stats_prefix}*"):
+         redis_conn.delete(key)
+@@ -947,13 +968,16 @@ def inject_mock_pv_data(period: str):
+     # 造数必须带有 period 和正确的 pk
+     UserStats(pk=f"{period}:13", period=period, id="13", user_id="13",
+               pv=1000, gpv=1000, gpv_real=1000, gpv_unreal=0, is_elite=False,
+-              rank=UserLevel.NOTHING).save()
++              rank=UserLevel.NOTHING,
++              **build_factory_amount_fields(run_config.state)).save()
+     UserStats(pk=f"{period}:9", period=period, id="9", user_id="9",
+               pv=800, gpv=800, gpv_real=800, gpv_unreal=0, is_elite=False,
+-              rank=UserLevel.NOTHING).save()
++              rank=UserLevel.NOTHING,
++              **build_factory_amount_fields(run_config.state)).save()
+     UserStats(pk=f"{period}:10", period=period, id="10", user_id="10",
+               pv=2000, gpv=2000, gpv_real=1000, gpv_unreal=1000, is_elite=False,
+-              rank=UserLevel.NOTHING).save()
++              rank=UserLevel.NOTHING,
++              **build_factory_amount_fields(run_config.state)).save()
+     print("Redis 测试基础 PV 数据注入完成。")
+ 
+ 
+diff --git a/User/PlacementIncrementalService.py b/User/PlacementIncrementalService.py
+index 1fbc87daefe553cf8a32eb6801e56ca53574e4ff..6c1a5d3c53418c98517f9f9b78c1e97d15624dc4 100644
+--- a/User/PlacementIncrementalService.py
++++ b/User/PlacementIncrementalService.py
+@@ -13,6 +13,12 @@ from redis_om import NotFoundError
+ import Model.User.UserLevel as UserLevel
+ from Model.Config import SCHEDULE_ADDRESS
+ from Model.User.UserStats import UserStats
++from Common.AmountModelAdapter import build_factory_amount_fields
++from Redishelper.PVAmountConfigProvider import (
++    PVAmountConfigProvider,
++    PVAmountRunConfig,
++    PVAmountRunSession,
++)
+ 
+ # 引入 GlobalRecalculationService 用于联合状态检查
+ from User.GlobalRecalculationService import GlobalRecalculationService
+@@ -150,7 +156,12 @@ class PlacementIncrementalService(UserStatsService):
+         except NotFoundError:
+             return 0, 0
+ 
+-    def _get_or_init_user_with_surplus(self, period: str, user_id: str) -> Tuple[UserStats, bool, bool]:
++    def _get_or_init_user_with_surplus(
++        self,
++        period: str,
++        user_id: str,
++        run_config: PVAmountRunConfig,
++    ) -> Tuple[UserStats, bool, bool]:
+         """
+         带跨期结转机制的节点获取。
+         【返回】：(节点对象, 是否曾经存在, 内部是否对节点做了修正)。
+@@ -200,7 +211,8 @@ class PlacementIncrementalService(UserStatsService):
+                 placement_initialized=True,
+                 placement_settled=False,
+                 placement_revision=0,
+-                settled_revision=0
++                settled_revision=0,
++                **build_factory_amount_fields(run_config.state),
+             )
+ 
+         return u, existed_before, changed
+@@ -274,10 +286,18 @@ class PlacementIncrementalService(UserStatsService):
+             logger.info("双轨增量 BV 为 0, 跳过处理: period=%s, user_id=%s, order_id=%s", period, user_id, order_id)
+             return
+ 
++        # region 幂等验证（已完成订单不创建新的业务 run）
+         redis_conn = UserStats.db()
+         if redis_conn.exists(done_key):
+             logger.warning("检测到双轨重复订单 %s，忽略本次请求。", order_id)
+             return
++        # endregion
++
++        # region 加载并冻结本次业务运行配置
++        run_config = PVAmountRunSession.start(
++            PVAmountConfigProvider(redis_conn)
++        ).config
++        # endregion
+ 
+         order_lock = None
+         try:
+@@ -319,7 +339,7 @@ class PlacementIncrementalService(UserStatsService):
+                     # ---------------------------------------------------------
+                     # Step A: 激活本人 (源节点) 的对碰合并状态
+                     # ---------------------------------------------------------
+-                    node_self, existed_self, dirty_self = self._get_or_init_user_with_surplus(period, user_id)
++                    node_self, existed_self, dirty_self = self._get_or_init_user_with_surplus(period, user_id, run_config)
+                     processed_nodes[user_id] = node_self
+ 
+                     old_t1, old_t2 = node_self.total_1l, node_self.total_2l
+@@ -364,7 +384,7 @@ class PlacementIncrementalService(UserStatsService):
+                             existed_anc = True
+                             dirty_anc = False
+                         else:
+-                            anc_node, existed_anc, dirty_anc = self._get_or_init_user_with_surplus(period, anc_id)
++                            anc_node, existed_anc, dirty_anc = self._get_or_init_user_with_surplus(period, anc_id, run_config)
+                             processed_nodes[anc_id] = anc_node
+ 
+                         o_pv1, o_pv2 = anc_node.pv_1l, anc_node.pv_2l
+diff --git a/User/PlacementRecalculationService.py b/User/PlacementRecalculationService.py
+index 616c93f38d1f50a7b6709172676566a60d7e1f56..327c0f6b75c52ffba7f46223940d671165aff07b 100644
+--- a/User/PlacementRecalculationService.py
++++ b/User/PlacementRecalculationService.py
+@@ -13,6 +13,12 @@ from dask.distributed import Client, wait as dask_wait
+ 
+ import Model.User.UserLevel as UserLevel
+ from Model.User.UserStats import UserStats
++from Common.AmountModelAdapter import build_factory_amount_fields
++from Redishelper.PVAmountConfigProvider import (
++    PVAmountConfigProvider,
++    PVAmountRunConfig,
++    PVAmountRunSession,
++)
+ from User.UserStatsService import UserStatsService
+ from Model.Config import SCHEDULE_ADDRESS
+ 
+@@ -62,7 +68,12 @@ class PlacementRecalculationService(UserStatsService):
+         period = str(period)
+         run_id = str(uuid.uuid4())
+         status_key = self._status_key(period)
++        # region 加载并冻结本次业务运行配置
+         redis_conn = UserStats.db()
++        run_config = PVAmountRunSession.start(
++            PVAmountConfigProvider(redis_conn)
++        ).config
++        # endregion
+ 
+         prev_period = self._get_prev_period(period)
+         if prev_period:
+@@ -136,6 +147,7 @@ class PlacementRecalculationService(UserStatsService):
+                 period=period,
+                 run_id=run_id,
+                 write_zero_nodes=write_zero_nodes,
++                run_config=run_config,
+                 lock=lock
+             )
+ 
+@@ -274,7 +286,12 @@ class PlacementRecalculationService(UserStatsService):
+                 out[uid]["2l"] = int(round(float(raw_data.get("remain_surplus_2l") or 0.0)))
+         return out
+ 
+-    def _mget_users_with_exists(self, user_ids: List[str], period: str) -> Dict[str, Tuple[UserStats, bool]]:
++    def _mget_users_with_exists(
++        self,
++        user_ids: List[str],
++        period: str,
++        run_config: PVAmountRunConfig,
++    ) -> Dict[str, Tuple[UserStats, bool]]:
+         out: Dict[str, Tuple[UserStats, bool]] = {}
+         if not user_ids: return out
+ 
+@@ -295,7 +312,7 @@ class PlacementRecalculationService(UserStatsService):
+ 
+         for uid, raw_data in zip(user_ids, raw_results):
+             if raw_data is None:
+-                out[uid] = (self._new_zero_user_stats(uid, period), False)
++                out[uid] = (self._new_zero_user_stats(uid, period, run_config), False)
+                 continue
+ 
+             actual_id = raw_data.get("id")
+@@ -328,14 +345,15 @@ class PlacementRecalculationService(UserStatsService):
+ 
+         return out
+ 
+-    def _new_zero_user_stats(self, uid: str, period: str) -> UserStats:
++    def _new_zero_user_stats(self, uid: str, period: str, run_config: PVAmountRunConfig) -> UserStats:
+         return UserStats(
+             pk=f"{period}:{uid}", period=period, id=uid, user_id=uid,
+             pv=0, gpv=0, gpv_real=0, gpv_unreal=0, contrib=0,
+             is_elite=False, virtual_width=0, rank=UserLevel.NOTHING, qualified_legs=set(),
+             pv_1l=0, pv_2l=0,
+             pre_surplus_1l=0, pre_surplus_2l=0, total_1l=0, total_2l=0,
+-            remain_surplus_1l=0, remain_surplus_2l=0
++            remain_surplus_1l=0, remain_surplus_2l=0,
++            **build_factory_amount_fields(run_config.state),
+         )
+ 
+     # =====================================================================
+@@ -473,6 +491,7 @@ class PlacementRecalculationService(UserStatsService):
+             period: str,
+             run_id: str,
+             write_zero_nodes: bool,
++            run_config: PVAmountRunConfig,
+             lock
+     ) -> None:
+         prev_period = self._get_prev_period(period)
+@@ -481,7 +500,7 @@ class PlacementRecalculationService(UserStatsService):
+             self._refresh_lock(lock)
+             batch_ids = target_list[i: i + self.PARENT_PAGE_SIZE]
+ 
+-            user_lookup = self._mget_users_with_exists(batch_ids, period)
++            user_lookup = self._mget_users_with_exists(batch_ids, period, run_config)
+             prev_surplus_lookup = self._mget_prev_surplus(batch_ids, prev_period)
+ 
+             models_to_save: List[UserStats] = []
+diff --git a/User/Test/test_amount_model_version.py b/User/Test/test_amount_model_version.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..7bae36e8ebe2cb71d3e55b64bbd377b9ebe53d7d
+--- /dev/null
++++ b/User/Test/test_amount_model_version.py
+@@ -0,0 +1,88 @@
++"""WORK-PVAM-01 金额记录版本分类与 V2 入口守卫 tests。"""
++
++from pathlib import Path
++from types import SimpleNamespace
++import sys
++import unittest
++
++PROJECT_ROOT = Path(__file__).resolve().parents[2]
++if str(PROJECT_ROOT) not in sys.path:
++    sys.path.insert(0, str(PROJECT_ROOT))
++
++from Common.AmountModelAdapter import (
++    AmountRecordState,
++    classify_amount_record,
++    require_v2_amount_record,
++)
++
++
++class AmountModelVersionTests(unittest.TestCase):
++
++    # region 新编码、未知 legacy 与不兼容记录
++
++    def test_classify_amount_record_new_and_legacy(self):
++        cases = [
++            ({"amount_encoding_version": 2}, AmountRecordState.NEW),
++            ({}, AmountRecordState.LEGACY_UNKNOWN),
++            ({"amount_encoding_version": None}, AmountRecordState.LEGACY_UNKNOWN),
++            (SimpleNamespace(amount_encoding_version=2), AmountRecordState.NEW),
++            (
++                SimpleNamespace(amount_encoding_version=None),
++                AmountRecordState.LEGACY_UNKNOWN,
++            ),
++            (2, AmountRecordState.NEW),
++            (None, AmountRecordState.LEGACY_UNKNOWN),
++        ]
++        for record, expected in cases:
++            with self.subTest(record=record):
++                self.assertIs(expected, classify_amount_record(record))
++
++    def test_classify_amount_record_incompatible(self):
++        records = [
++            {"amount_encoding_version": 1},
++            {"amount_encoding_version": 3},
++            {"amount_encoding_version": "2"},
++            {"amount_encoding_version": True},
++            SimpleNamespace(amount_encoding_version=3),
++        ]
++        for record in records:
++            with self.subTest(record=record):
++                self.assertIs(
++                    AmountRecordState.INCOMPATIBLE,
++                    classify_amount_record(record),
++                )
++
++    def test_classification_never_mutates_legacy_mapping(self):
++        record = {"pv": 100}
++        before = dict(record)
++        self.assertIs(
++            AmountRecordState.LEGACY_UNKNOWN,
++            classify_amount_record(record),
++        )
++        self.assertEqual(before, record)
++
++    # endregion
++
++    # region AC-03：守卫只在 V2 计算入口调用
++
++    def test_v2_entry_accepts_only_explicit_version_2(self):
++        require_v2_amount_record({"amount_encoding_version": 2})
++
++        for record in [
++            {},
++            {"amount_encoding_version": None},
++            {"amount_encoding_version": 1},
++            {"amount_encoding_version": "2"},
++        ]:
++            with self.subTest(record=record):
++                with self.assertRaisesRegex(
++                    ValueError,
++                    "V2_AMOUNT_RECORD_REQUIRED",
++                ):
++                    require_v2_amount_record(record)
++
++    # endregion
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)
+diff --git a/User/Test/test_pv_amount_common.py b/User/Test/test_pv_amount_common.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..0325435eb83302ac3636c3d56bb1a80aac82ac6b
+--- /dev/null
++++ b/User/Test/test_pv_amount_common.py
+@@ -0,0 +1,313 @@
++"""WORK-PVAM-01 金额公共层 DEV tests（标准库 unittest）。"""
++
++from __future__ import annotations
++
++import ast
++import importlib.util
++import inspect
++import unittest
++from decimal import Decimal
++from pathlib import Path
++import sys
++from unittest.mock import patch
++
++PROJECT_ROOT = Path(__file__).resolve().parents[2]
++if str(PROJECT_ROOT) not in sys.path:
++    sys.path.insert(0, str(PROJECT_ROOT))
++
++import Common.PvAmount as pv_amount
++from Common.PvAmount import (
++    INT64_MAX,
++    INT64_MIN,
++    RATE_PPM_SCALE,
++    assert_integer_amount_dtype,
++    checked_add_int64,
++    checked_mul_int64,
++    mul_units_by_ppm,
++    parse_db_amount_to_units,
++    parse_external_decimal_to_units,
++    parse_percent_to_ppm,
++    require_amount_version,
++    require_units_int,
++    trunc_div_zero,
++    units_ppm_to_bonus_cents,
++    units_to_decimal_string,
++)
++
++
++# region DataFrame dtype 最小替身
++
++
++class _DType:
++    def __init__(self, name, kind):
++        self.name = name
++        self.kind = kind
++
++    def __str__(self):
++        return self.name
++
++
++class _Column:
++    def __init__(self, dtype):
++        self.dtype = dtype
++
++
++class _Frame:
++    def __init__(self, dtypes):
++        self._columns = {name: _Column(dtype) for name, dtype in dtypes.items()}
++        self.columns = list(self._columns)
++
++    def __getitem__(self, column):
++        return self._columns[column]
++
++
++# endregion
++
++
++class PvAmountCommonTests(unittest.TestCase):
++
++    # region 外部输入、数据库边界与规范输出
++
++    def test_external_decimal_to_units(self):
++        cases = [
++            ("1500.99", 1_500_990_000),
++            ("30.00", 30_000_000),
++            ("-100.25", -100_250_000),
++        ]
++        for raw, expected in cases:
++            with self.subTest(raw=raw):
++                self.assertEqual(expected, parse_external_decimal_to_units(raw))
++
++    def test_external_decimal_rejects_noncanonical_or_non_string(self):
++        for raw in [0.1, True, "1e2", "NaN", "sNaN", "Infinity", "+1.00", "01.00"]:
++            with self.subTest(raw=raw):
++                with self.assertRaises(TypeError):
++                    parse_external_decimal_to_units(raw)
++
++    def test_db_decimal_must_be_finite(self):
++        for raw in [
++            Decimal("NaN"),
++            Decimal("sNaN"),
++            Decimal("Infinity"),
++            Decimal("-Infinity"),
++        ]:
++            with self.subTest(raw=raw):
++                with self.assertRaisesRegex(ValueError, "DB amount must be finite"):
++                    parse_db_amount_to_units(raw)
++
++    def test_decimal_precision_has_two_independent_gates(self):
++        with self.assertRaisesRegex(ValueError, "maximum is 2"):
++            parse_db_amount_to_units("1.234")
++        self.assertEqual(
++            100_000_000,
++            parse_db_amount_to_units(Decimal("100.000000"), max_decimals=6),
++        )
++        with self.assertRaisesRegex(ValueError, "finer than micro-units"):
++            parse_db_amount_to_units(Decimal("1.2345678"), max_decimals=7)
++
++    def test_units_to_decimal_string(self):
++        cases = [
++            (0, "0"),
++            (30_000_000, "30"),
++            (1_500_990_000, "1500.99"),
++            (-100_250_000, "-100.25"),
++            (1, "0.000001"),
++        ]
++        for units, expected in cases:
++            with self.subTest(units=units):
++                self.assertEqual(expected, units_to_decimal_string(units))
++
++    # endregion
++
++    # region 金额版本与向零截断
++
++    def test_amount_version_accepts_only_explicit_new_or_opt_in_legacy(self):
++        cases = [(2, False, 2), (None, True, 0)]
++        for value, allow_legacy, expected in cases:
++            with self.subTest(value=value, allow_legacy=allow_legacy):
++                self.assertEqual(
++                    expected,
++                    require_amount_version(value, allow_legacy=allow_legacy),
++                )
++
++    def test_amount_version_rejects_missing_or_unsupported(self):
++        for value in [None, 1, 3]:
++            with self.subTest(value=value):
++                with self.assertRaises(ValueError):
++                    require_amount_version(value)
++
++    def test_amount_version_rejects_non_integral_or_bool(self):
++        for value in ["2", True, 2.0]:
++            with self.subTest(value=value):
++                with self.assertRaises(TypeError):
++                    require_amount_version(value)
++
++    def test_trunc_div_zero_quadrants(self):
++        cases = [
++            (7, 2, 3),
++            (-7, 2, -3),
++            (7, -2, -3),
++            (-7, -2, 3),
++            (1, 3, 0),
++            (-1, 3, 0),
++        ]
++        for numerator, denominator, expected in cases:
++            with self.subTest(numerator=numerator, denominator=denominator):
++                self.assertEqual(expected, trunc_div_zero(numerator, denominator))
++
++    def test_trunc_div_zero_rejects_zero_denominator(self):
++        with self.assertRaises(ZeroDivisionError):
++            trunc_div_zero(1, 0)
++
++    # endregion
++
++    # region checked int64 与 DEV-PVAM-002 divmod 极值
++
++    def test_checked_int64_arithmetic_boundaries(self):
++        self.assertEqual(INT64_MAX, checked_add_int64(INT64_MAX, 0))
++        self.assertEqual(INT64_MIN, checked_add_int64(INT64_MIN, 0))
++        self.assertEqual(INT64_MAX, checked_mul_int64(INT64_MAX, 1))
++        with self.assertRaises(OverflowError):
++            checked_add_int64(INT64_MAX, 1)
++        with self.assertRaises(OverflowError):
++            checked_add_int64(INT64_MIN, -1)
++        with self.assertRaises(OverflowError):
++            checked_mul_int64(INT64_MAX, 2)
++
++    def test_dev_pvam_002_extremes_match_oracle_and_all_landed_values_are_int64(self):
++        original_require_int64 = pv_amount.require_int64
++        for units in [INT64_MAX, -INT64_MAX]:
++            for ppm in [0, 1, 297_000, 1_000_000]:
++                with self.subTest(units=units, ppm=ppm):
++                    landed_values = []
++
++                    def recording_require_int64(value, *, field_name="amount"):
++                        landed_values.append(value)
++                        return original_require_int64(value, field_name=field_name)
++
++                    sign = -1 if (units < 0) ^ (ppm < 0) else 1
++                    expected = sign * (
++                        (abs(units) * abs(ppm)) // RATE_PPM_SCALE
++                    )
++                    with patch.object(
++                        pv_amount,
++                        "require_int64",
++                        side_effect=recording_require_int64,
++                    ):
++                        actual = mul_units_by_ppm(units, ppm)
++
++                    self.assertEqual(expected, actual)
++                    self.assertGreater(len(landed_values), 0)
++                    self.assertTrue(
++                        all(INT64_MIN <= value <= INT64_MAX for value in landed_values)
++                    )
++
++    def test_mul_units_by_ppm_is_signed_and_truncates_toward_zero(self):
++        cases = [
++            (7, 500_000, 3),
++            (-7, 500_000, -3),
++            (7, -500_000, -3),
++            (-7, -500_000, 3),
++        ]
++        for units, ppm, expected in cases:
++            with self.subTest(units=units, ppm=ppm):
++                self.assertEqual(expected, mul_units_by_ppm(units, ppm))
++
++    def test_mul_units_by_ppm_rejects_rate_above_100_percent(self):
++        with self.assertRaisesRegex(ValueError, "100 percent"):
++            mul_units_by_ppm(1, RATE_PPM_SCALE + 1)
++
++    def test_mul_units_by_ppm_does_not_materialize_units_times_ppm(self):
++        tree = ast.parse(inspect.getsource(pv_amount.mul_units_by_ppm))
++        multiplied_names = []
++        for node in ast.walk(tree):
++            if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Mult):
++                continue
++            names = {
++                child.id
++                for child in ast.walk(node)
++                if isinstance(child, ast.Name)
++            }
++            multiplied_names.append(names)
++        self.assertFalse(
++            any({"units", "ppm"} <= names for names in multiplied_names)
++        )
++
++    # endregion
++
++    # region PPM 解析与奖金分舍入
++
++    def test_parse_percent_to_ppm(self):
++        cases = [
++            ("0", 0),
++            ("15", 150_000),
++            (Decimal("0.15"), 1_500),
++            (Decimal("29.7"), 297_000),
++            ("-15", -150_000),
++            ("100", 1_000_000),
++        ]
++        for raw, expected in cases:
++            with self.subTest(raw=raw):
++                self.assertEqual(expected, parse_percent_to_ppm(raw))
++
++    def test_parse_percent_to_ppm_rejects_invalid_input(self):
++        for raw in [0.15, True, "1e2", Decimal("NaN"), "100.0001", "0.00001"]:
++            with self.subTest(raw=raw):
++                with self.assertRaises((TypeError, ValueError)):
++                    parse_percent_to_ppm(raw)
++
++    def test_units_ppm_to_bonus_cents(self):
++        cases = [
++            (1_500_990_000, 150_000, "TRUNCATE", 22_514),
++            (-1_500_990_000, 150_000, "TRUNCATE", -22_514),
++            (1_500_990_000, 150_000, "ROUND_HALF_UP", 22_515),
++            (-1_500_990_000, 150_000, "ROUND_HALF_UP", -22_515),
++            (1_000_000, 5_000, "ROUND_HALF_UP", 1),
++            (0, 1_000_000, "TRUNCATE", 0),
++        ]
++        for units, ppm, mode, expected in cases:
++            with self.subTest(units=units, ppm=ppm, mode=mode):
++                self.assertEqual(
++                    expected,
++                    units_ppm_to_bonus_cents(units, ppm, mode),
++                )
++
++    def test_units_ppm_to_bonus_cents_rejects_unknown_rounding_mode(self):
++        with self.assertRaisesRegex(ValueError, "unsupported rounding_mode"):
++            units_ppm_to_bonus_cents(1, 1, "BANKERS")
++
++    # endregion
++
++    # region integer 类型与 DataFrame dtype
++
++    def test_require_units_int_rejects_bool_and_float(self):
++        with self.assertRaises(TypeError):
++            require_units_int(True)
++        with self.assertRaises(TypeError):
++            require_units_int(1.0)
++
++    def test_require_units_int_supports_numpy_integer_when_available(self):
++        if importlib.util.find_spec("numpy") is None:
++            self.skipTest("numpy is not installed")
++        import numpy
++
++        self.assertEqual(7, require_units_int(numpy.int64(7)))
++
++    def test_assert_integer_amount_dtype_accepts_signed_and_unsigned_integer(self):
++        frame = _Frame(
++            {"pv": _DType("int64", "i"), "gpv": _DType("uint64", "u")}
++        )
++        assert_integer_amount_dtype(frame, ["pv", "gpv"], "amounts")
++
++    def test_assert_integer_amount_dtype_rejects_float_and_missing_columns(self):
++        frame = _Frame({"pv": _DType("float64", "f")})
++        with self.assertRaisesRegex(TypeError, "integer dtype"):
++            assert_integer_amount_dtype(frame, ["pv"], "amounts")
++        with self.assertRaisesRegex(KeyError, "amounts.gpv is missing"):
++            assert_integer_amount_dtype(frame, ["gpv"], "amounts")
++
++    # endregion
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)
+diff --git a/User/UserStatsService.py b/User/UserStatsService.py
+index ac6369dc1f1faa38e2d7d03ee25000133228dda7..967db5e84b2b81017861f291f5a3aafe56b647a2 100644
+--- a/User/UserStatsService.py
++++ b/User/UserStatsService.py
+@@ -7,6 +7,12 @@ from dask.distributed import Client
+ from redis_om import NotFoundError
+ import Model.User.UserLevel as UserLevel
+ from Model.User.UserStats import UserStats
++from Common.AmountModelAdapter import build_factory_amount_fields
++from Redishelper.PVAmountConfigProvider import (
++    PVAmountConfigProvider,
++    PVAmountRunConfig,
++    PVAmountRunSession,
++)
+ 
+ # 配置日志
+ logging.basicConfig(
+@@ -62,13 +68,26 @@ class UserStatsService:
+             df_bfs = fut.result()
+             # endregion
+ 
+-            # region 验证
+-            if df_bfs is None or len(df_bfs) == 0:
++            # region 验证图 Actor 输出合同
++            if df_bfs is None:
++                return []
++
++            required_columns = {"ancestor", "predecessor", "level"}
++            missing_columns = required_columns - set(df_bfs.columns)
++            if missing_columns:
++                raise RuntimeError(
++                    f"get_allparent 缺少必要列: {missing_columns}"
++                )
++            if len(df_bfs) == 0:
+                 return []
+             # endregion
+ 
+             # region 按level排序 并换成对象list
+-            pdf = df_bfs.sort_values("level", ascending=True)
++            # graph_actor 对上级节点使用 ancestor；服务内部沿用 descendant 作为祖先节点键。
++            pdf = df_bfs.rename(columns={"ancestor": "descendant"}).sort_values(
++                "level",
++                ascending=True,
++            )
+ 
+             rows = pdf[["descendant", "predecessor", "level"]].astype({
+                 "descendant": str, "predecessor": str, "level": int
+@@ -96,7 +115,7 @@ class UserStatsService:
+             if owns_client and client is not None:
+                 client.close()
+ 
+-    def _get_or_init_user(self, period: str, user_id: str) -> UserStats:
++    def _get_or_init_user(self, period: str, user_id: str, run_config: PVAmountRunConfig) -> UserStats:
+         """
+         获取用户 stats; Redis 中不存在时返回零值的新对象 (不在此处落库,
+         由后续 _save_models_pipeline 统一写回).
+@@ -125,6 +144,7 @@ class UserStatsService:
+                 virtual_width=0,
+                 rank=UserLevel.NOTHING,
+                 qualified_legs=set(),
++                **build_factory_amount_fields(run_config.state),
+             )
+         self._normalize_qualified_legs(u)
+         # 每次加载时按当前 gpv 重新派生，避免快照/下游读取到空值。
+@@ -385,13 +405,19 @@ class UserStatsService:
+             return
+         # endregion
+ 
+-        # region 幂等验证
++        # region 幂等验证（已完成订单不创建新的业务 run）
+         redis_conn = UserStats.db()
+         if redis_conn.exists(done_key):
+             logger.warning("检测到重复订单 %s，忽略本次请求。", order_id)
+             return
+         # endregion
+ 
++        # region 加载并冻结本次业务运行配置
++        run_config = PVAmountRunSession.start(
++            PVAmountConfigProvider(redis_conn)
++        ).config
++        # endregion
++
+         order_lock = None
+         try:
+             # region 上订单锁
+@@ -452,7 +478,7 @@ class UserStatsService:
+                     # Step 1: 处理源用户
+                     # ---------------------------------------------------------
+                     # region 获取当前用户
+-                    current_user = self._get_or_init_user(period, user_id)
++                    current_user = self._get_or_init_user(period, user_id, run_config)
+                     # endregion
+ 
+                     # region 获取当前用户状态以及等级
+@@ -515,7 +541,7 @@ class UserStatsService:
+                         # region 获取父级节点的信息
+                         ancestor_id = str(row["descendant"])
+                         leg_id = str(row["predecessor"])
+-                        ancestor = self._get_or_init_user(period, ancestor_id)
++                        ancestor = self._get_or_init_user(period, ancestor_id, run_config)
+                         # endregion
+ 
+                         # region 记录父级节点的当前信息
+@@ -535,7 +561,7 @@ class UserStatsService:
+                         # (该 leg 在 lock_user_ids 中, 我们持有它的锁).
+                         leg_node = processed_nodes.get(leg_id)
+                         if leg_node is None:
+-                            leg_node = self._get_or_init_user(period, leg_id)
++                            leg_node = self._get_or_init_user(period, leg_id, run_config)
+                         # endregion
+ 
+                         # region 判断直属下级这条线是否合格，这条线合格的条件是：
+diff --git a/tests/pvam/WORK-PVAM-01/run_legacy_redis_dask_regressions.py b/tests/pvam/WORK-PVAM-01/run_legacy_redis_dask_regressions.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69ca3e49fe0e52688adf234f3a05b0340b59880
+--- /dev/null
++++ b/tests/pvam/WORK-PVAM-01/run_legacy_redis_dask_regressions.py
+@@ -0,0 +1,203 @@
++"""在冻结 scope 内运行受 PVAM 影响的旧 Redis/Dask 回归套件。"""
++
++from __future__ import annotations
++
++import argparse
++import os
++import sys
++import traceback
++from pathlib import Path
++from typing import Callable
++
++
++PROJECT_ROOT = Path(__file__).resolve().parents[3]
++if str(PROJECT_ROOT) not in sys.path:
++    sys.path.insert(0, str(PROJECT_ROOT))
++
++
++def _require_flush_permission() -> None:
++    if os.environ.get("ALLOW_REDIS_TEST_FLUSH") != "1":
++        raise RuntimeError(
++            "拒绝运行：套件会 flushdb；请确认使用专用测试 Redis，"
++            "并显式设置 ALLOW_REDIS_TEST_FLUSH=1。"
++        )
++
++
++def _publish_test_01(redis_client) -> None:
++    """清库后显式重建测试态 01；不改变 production provider 的 fail-loud 合同。"""
++
++    from Redishelper.PVAmountConfigBootstrap import publish_manual_bootstrap
++
++    publish_manual_bootstrap(
++        1,
++        expected_active_version=None,
++        redis_client=redis_client,
++    )
++
++
++def _warn_redis_target(redis_client) -> None:
++    """在首次 flushdb 前显示实际目标，供操作人员再次核对测试库。"""
++
++    try:
++        options = redis_client.connection_pool.connection_kwargs
++        print(
++            "⚠ 即将对 Redis 执行 flushdb → "
++            f"host={options.get('host')} port={options.get('port')} "
++            f"db={options.get('db')}；请确认这是测试库。"
++        )
++    except Exception:
++        print("⚠ 即将对当前 Redis 执行 flushdb；请确认这是测试库。")
++
++
++def run_user_stats() -> None:
++    from User.Test import UserStatsServiceTests as suite
++
++    _warn_redis_target(suite.UserStats.db())
++    original_flush = suite._flushdb_test_only
++
++    # region 测试清库后重建 PVAM 配置
++    def flush_and_publish_01() -> None:
++        original_flush()
++        _publish_test_01(suite.UserStats.db())
++
++    suite._flushdb_test_only = flush_and_publish_01
++    # endregion
++
++    suite.main()
++
++
++def _elite_precheck(suite) -> None:
++    """按 graph_actor 的正式 ancestor 输出校验测试关系链。"""
++
++    # region 获取并验证图数据集
++    datasets = set(suite._client().list_datasets())
++    if suite.GRAPH_DATASET not in datasets:
++        raise RuntimeError(
++            f"调度器 {suite.DASK_ADDRESS} 上未发现已发布的 "
++            f"'{suite.GRAPH_DATASET}'，现有: {sorted(datasets)}。"
++        )
++
++    actor = suite._client().get_dataset(suite.GRAPH_DATASET).result()
++    frame = actor.get_allparent(suite.U_LEAF).result()
++    required_columns = {"ancestor", "predecessor", "level"}
++    missing_columns = required_columns - set(frame.columns)
++    if missing_columns:
++        raise RuntimeError(f"get_allparent 缺少必要列: {missing_columns}")
++    # endregion
++
++    # region 校验祖先链
++    got = [
++        {
++            "descendant": str(row["ancestor"]),
++            "predecessor": str(row["predecessor"]),
++            "level": int(row["level"]),
++        }
++        for _, row in frame.sort_values("level").iterrows()
++    ]
++    if got != suite.EXPECTED_CHAIN_9:
++        raise RuntimeError(
++            "线上图关系与 tb_user 不一致（含 predecessor 校验）：\n"
++            f"  expected={suite.EXPECTED_CHAIN_9}\n  got     ={got}"
++        )
++    # endregion
++
++
++def _run_elite_functions(suite) -> None:
++    # region 收集普通用例与已知缺口用例
++    tests = [
++        (name, function, name.startswith("test_GAP_"))
++        for name, function in vars(suite).items()
++        if name.startswith("test_") and callable(function)
++    ]
++    passed = 0
++    failed = []
++    errored = []
++    xfailed = []
++    xpassed = []
++    # endregion
++
++    # region 执行并分类结果
++    for name, function, is_xfail in tests:
++        print(f"\n--- 运行: {name} ---")
++        try:
++            function()
++            if is_xfail:
++                xpassed.append(name)
++                print(f"⚠ XPASS {name}")
++            else:
++                passed += 1
++                print(f"✓ PASS  {name}")
++        except AssertionError as exc:
++            if is_xfail:
++                xfailed.append(name)
++                print(f"✗→XFAIL {name}\n        断言失败: {exc}")
++            else:
++                failed.append(name)
++                print(f"✗ FAIL  {name}\n        断言失败: {exc}")
++        except Exception as exc:
++            errored.append(name)
++            print(f"✗ ERROR {name}\n        意外异常: {type(exc).__name__}: {exc}")
++            traceback.print_exc()
++    # endregion
++
++    # region 汇总并保持原套件的 strict XPASS 口径
++    strict_xpass = os.environ.get("EB_XPASS_OK") != "1"
++    real_failed = failed + errored + (xpassed if strict_xpass else [])
++    print("\n" + "=" * 64)
++    print(
++        f"PASS {passed}  |  FAIL {len(failed)}  |  ERROR {len(errored)}  "
++        f"|  XFAIL {len(xfailed)}  |  XPASS {len(xpassed)}   (共 {len(tests)})"
++    )
++    if real_failed:
++        raise SystemExit(1)
++    # endregion
++
++
++def run_elite_bonus() -> None:
++    from User.Test import EliteBonusServiceTest as suite
++
++    _warn_redis_target(suite.redis_conn)
++    original_reset = suite._reset
++
++    # region 测试清库后重建 PVAM 配置
++    def reset_and_publish_01() -> None:
++        original_reset()
++        _publish_test_01(suite.redis_conn)
++
++    suite._reset = reset_and_publish_01
++    # endregion
++
++    try:
++        _elite_precheck(suite)
++        _run_elite_functions(suite)
++    finally:
++        if suite._CLIENT is not None:
++            suite._CLIENT.close()
++
++
++def build_parser() -> argparse.ArgumentParser:
++    parser = argparse.ArgumentParser(
++        description="运行会清空专用测试 Redis 的 PVAM 旧链路回归。",
++    )
++    parser.add_argument(
++        "suite",
++        choices=("user-stats", "elite-bonus"),
++        help="选择要执行的旧回归套件。",
++    )
++    return parser
++
++
++def main(argv=None) -> int:
++    args = build_parser().parse_args(argv)
++    _require_flush_permission()
++
++    runners: dict[str, Callable[[], None]] = {
++        "user-stats": run_user_stats,
++        "elite-bonus": run_elite_bonus,
++    }
++    runners[args.suite]()
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/pvam/WORK-PVAM-01/test_flag_factory_contract.py b/tests/pvam/WORK-PVAM-01/test_flag_factory_contract.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..447553e08539229cdd9f1bc465b82abb5f33692b
+--- /dev/null
++++ b/tests/pvam/WORK-PVAM-01/test_flag_factory_contract.py
+@@ -0,0 +1,555 @@
++"""WORK-PVAM-01 / TC-FLAG-14～21 条件化工厂与版本域 DEV tests。"""
++
++from __future__ import annotations
++
++import ast
++import copy
++import importlib.util
++import inspect
++import re
++import sys
++import unittest
++from pathlib import Path
++from types import ModuleType
++from unittest.mock import patch
++
++PROJECT_ROOT = Path(__file__).resolve().parents[3]
++if str(PROJECT_ROOT) not in sys.path:
++    sys.path.insert(0, str(PROJECT_ROOT))
++
++from Common.AmountModelAdapter import (
++    AmountRecordState,
++    build_factory_amount_fields,
++    classify_amount_record,
++    require_v2_amount_record,
++)
++from Common.PvAmount import AMOUNT_ENCODING_VERSION_V2
++from Redishelper.PVAmountConfigProvider import (
++    AR_CONFIG_SOURCE,
++    MANUAL_BOOTSTRAP_MODE,
++    PVAmountConfigError,
++    PVAmountRunConfig,
++    PVAmountRunSession,
++    admit_production_run_config,
++    compute_snapshot_checksum,
++)
++
++
++# region 测试常量与源码扫描辅助
++
++USER_STATS_SHARED_FIELDS = {
++    "pv",
++    "gpv",
++    "gpv_real",
++    "gpv_unreal",
++    "contrib",
++    "pv_1l",
++    "pv_2l",
++    "pre_surplus_1l",
++    "pre_surplus_2l",
++    "total_1l",
++    "total_2l",
++    "remain_surplus_1l",
++    "remain_surplus_2l",
++}
++
++ELITE_SHARED_FIELDS = {
++    "pv_pcs",
++    "gpv",
++    "gpv_real",
++    "contrib_to_parent",
++}
++
++_EXCLUDED_NAME = re.compile(r"(?:_bak\d*|_final)", re.IGNORECASE)
++
++
++def make_config(read_v2: bool, write_v2: bool, version: int) -> PVAmountRunConfig:
++    checksum = compute_snapshot_checksum(
++        read_v2=read_v2,
++        write_v2=write_v2,
++        config_version=version,
++        load_mode=MANUAL_BOOTSTRAP_MODE,
++        source=AR_CONFIG_SOURCE,
++    )
++    return PVAmountRunConfig(
++        read_v2=read_v2,
++        write_v2=write_v2,
++        config_version=version,
++        load_mode=MANUAL_BOOTSTRAP_MODE,
++        source=AR_CONFIG_SOURCE,
++        checksum=checksum,
++    )
++
++
++def load_real_elite_factory_modules():
++    """隔离外部依赖后加载两处真实生产 factory。"""
++
++    class CapturedEliteBonusStats:
++        def __init__(self, **kwargs):
++            for name, value in kwargs.items():
++                setattr(self, name, value)
++
++    dask = ModuleType("dask")
++    dask.__path__ = []
++    dask_distributed = ModuleType("dask.distributed")
++    dask_distributed.Client = type("Client", (), {})
++
++    redis_om = ModuleType("redis_om")
++    redis_om.NotFoundError = type("NotFoundError", (Exception,), {})
++
++    model = ModuleType("Model")
++    model.__path__ = []
++    model_user = ModuleType("Model.User")
++    model_user.__path__ = []
++    elite_model = ModuleType("Model.User.EliteBonusStats")
++    elite_model.EliteBonusStats = CapturedEliteBonusStats
++
++    user = ModuleType("User")
++    user.__path__ = []
++    user_stats_service = ModuleType("User.UserStatsService")
++    user_stats_service.SCHEDULE_ADDRESS = "test-only://not-connected"
++
++    stubs = {
++        "dask": dask,
++        "dask.distributed": dask_distributed,
++        "redis_om": redis_om,
++        "Model": model,
++        "Model.User": model_user,
++        "Model.User.EliteBonusStats": elite_model,
++        "User": user,
++        "User.UserStatsService": user_stats_service,
++    }
++
++    def load(path: Path, module_name: str):
++        spec = importlib.util.spec_from_file_location(module_name, path)
++        if spec is None or spec.loader is None:
++            raise AssertionError(f"cannot load module: {path}")
++        module = importlib.util.module_from_spec(spec)
++        sys.modules[module_name] = module
++        spec.loader.exec_module(module)
++        return module
++
++    with patch.dict(sys.modules, stubs):
++        incremental = load(
++            PROJECT_ROOT / "User" / "EliteBonusService.py",
++            "_pvam_test_elite_bonus_service",
++        )
++        global_recalculation = load(
++            PROJECT_ROOT / "User" / "GlobalEliteBonusRecalculationService.py",
++            "_pvam_test_global_elite_bonus_recalculation_service",
++        )
++
++    return incremental, global_recalculation
++
++def load_production_method(relative: str, class_name: str, function_name: str):
++    """从真实生产源码提取单个方法，用最小 globals 执行目标控制流。"""
++    path = PROJECT_ROOT / relative
++    tree = ast.parse(path.read_text(encoding="utf-8"))
++    class_node = next(
++        node
++        for node in tree.body
++        if isinstance(node, ast.ClassDef) and node.name == class_name
++    )
++    function_node = next(
++        copy.deepcopy(node)
++        for node in class_node.body
++        if isinstance(node, ast.FunctionDef) and node.name == function_name
++    )
++    function_node.decorator_list = []
++    isolated = ast.Module(body=[function_node], type_ignores=[])
++    ast.fix_missing_locations(isolated)
++    namespace = {}
++    exec(compile(isolated, str(path), "exec"), namespace)
++    return namespace[function_name]
++
++def effective_production_sources():
++    """遵循项目 file-filter，动态扫描 User 生产 Python，而非预列工厂名。"""
++    for path in sorted((PROJECT_ROOT / "User").rglob("*.py")):
++        relative = path.relative_to(PROJECT_ROOT)
++        if (
++            "Test" in relative.parts
++            or "__pycache__" in relative.parts
++            or _EXCLUDED_NAME.search(path.name)
++            or path.name == "GraphService.py"
++        ):
++            continue
++        yield path
++
++
++def _call_name(node: ast.AST) -> str | None:
++    if isinstance(node, ast.Name):
++        return node.id
++    return None
++
++
++def _is_module_main_guard(node: ast.If) -> bool:
++    test = node.test
++    if not isinstance(test, ast.Compare) or len(test.ops) != 1:
++        return False
++    if not isinstance(test.left, ast.Name) or test.left.id != "__name__":
++        return False
++    if not isinstance(test.ops[0], ast.Eq) or len(test.comparators) != 1:
++        return False
++    right = test.comparators[0]
++    return isinstance(right, ast.Constant) and right.value == "__main__"
++
++
++class FactoryCallVisitor(ast.NodeVisitor):
++    """发现所有有效生产源码中的模型构造点并区分纯反序列化。"""
++
++    def __init__(self, path: Path):
++        self.path = path
++        self.function_stack: list[str] = []
++        self.in_main_guard = 0
++        self.factories: list[tuple[ast.Call, str, str]] = []
++        self.deserializers: list[tuple[ast.Call, str, str]] = []
++
++    def visit_FunctionDef(self, node):
++        self.function_stack.append(node.name)
++        self.generic_visit(node)
++        self.function_stack.pop()
++
++    visit_AsyncFunctionDef = visit_FunctionDef
++
++    def visit_If(self, node):
++        is_main = _is_module_main_guard(node)
++        if is_main:
++            self.in_main_guard += 1
++        for child in node.body:
++            self.visit(child)
++        if is_main:
++            self.in_main_guard -= 1
++        for child in node.orelse:
++            self.visit(child)
++
++    def visit_Call(self, node):
++        model_name = _call_name(node.func)
++        if model_name in {"UserStats", "EliteBonusStats"} and not self.in_main_guard:
++            function_name = self.function_stack[-1] if self.function_stack else "<module>"
++            explicit_keywords = [kw for kw in node.keywords if kw.arg is not None]
++            expanded_keywords = [kw for kw in node.keywords if kw.arg is None]
++            is_deserializer = not explicit_keywords and len(expanded_keywords) == 1
++            target = self.deserializers if is_deserializer else self.factories
++            target.append((node, model_name, function_name))
++        self.generic_visit(node)
++
++
++def discover_factory_calls():
++    factories = []
++    deserializers = []
++    for path in effective_production_sources():
++        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
++        visitor = FactoryCallVisitor(path)
++        visitor.visit(tree)
++        factories.extend((path, *item) for item in visitor.factories)
++        deserializers.extend((path, *item) for item in visitor.deserializers)
++    return factories, deserializers
++
++
++def class_field_defaults(path: Path, class_name: str) -> dict[str, ast.AST | None]:
++    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
++    for node in tree.body:
++        if isinstance(node, ast.ClassDef) and node.name == class_name:
++            return {
++                item.target.id: item.value
++                for item in node.body
++                if isinstance(item, ast.AnnAssign)
++                and isinstance(item.target, ast.Name)
++            }
++    raise AssertionError(f"class not found: {class_name}")
++
++
++# endregion
++
++
++class ConditionalFactoryContractTests(unittest.TestCase):
++
++    # region TC-FLAG-14：READ=false 审计读取不改变 legacy 业务值
++
++    def test_tc_flag_14_audit_classification_is_read_only(self):
++        record = {
++            "amount_encoding_version": None,
++            "pv": 125,
++            "gpv": 375,
++            "estimated_bonus": 12.5,
++        }
++        before = copy.deepcopy(record)
++        legacy_result_before = record["pv"] + record["gpv"]
++
++        state = classify_amount_record(record)
++
++        self.assertIs(AmountRecordState.LEGACY_UNKNOWN, state)
++        self.assertEqual(before, record)
++        self.assertEqual(legacy_result_before, record["pv"] + record["gpv"])
++
++    # endregion
++
++    # region TC-FLAG-15～16：00/01 不 stamping 2，动态覆盖全部生产工厂
++
++    def test_tc_flag_15_state_00_legacy_factory_does_not_stamp_v2(self):
++        fields = build_factory_amount_fields("00")
++        self.assertIsNone(fields["amount_encoding_version"])
++
++    def test_tc_flag_16_state_01_all_discovered_shared_key_factories_are_conditional(self):
++        fields = build_factory_amount_fields("01")
++        elite_fields = build_factory_amount_fields(
++            "01",
++            include_bonus_cents=True,
++        )
++        self.assertIsNone(fields["amount_encoding_version"])
++        self.assertIsNone(elite_fields["amount_encoding_version"])
++        self.assertIsNone(elite_fields["estimated_bonus_cents"])
++
++        factories, deserializers = discover_factory_calls()
++        self.assertGreater(len(factories), 0)
++        self.assertGreater(len(deserializers), 0)
++
++        violations = []
++        for path, call, model_name, function_name in factories:
++            helpers = [
++                kw.value
++                for kw in call.keywords
++                if kw.arg is None
++                and isinstance(kw.value, ast.Call)
++                and _call_name(kw.value.func) == "build_factory_amount_fields"
++            ]
++            if len(helpers) != 1:
++                violations.append(
++                    f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}:"
++                    f"{function_name}:{model_name}:missing conditional helper"
++                )
++                continue
++
++            helper = helpers[0]
++            if (
++                not helper.args
++                or not isinstance(helper.args[0], ast.Attribute)
++                or not isinstance(helper.args[0].value, ast.Name)
++                or helper.args[0].value.id != "run_config"
++                or helper.args[0].attr != "state"
++            ):
++                violations.append(
++                    f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}:"
++                    f"{function_name}:{model_name}:not tied to frozen run_config"
++                )
++
++            if model_name == "EliteBonusStats":
++                include = [
++                    kw.value
++                    for kw in helper.keywords
++                    if kw.arg == "include_bonus_cents"
++                ]
++                if (
++                    len(include) != 1
++                    or not isinstance(include[0], ast.Constant)
++                    or include[0].value is not True
++                ):
++                    violations.append(
++                        f"{path.relative_to(PROJECT_ROOT)}:{call.lineno}:"
++                        f"{function_name}:{model_name}:missing additive cents init"
++                    )
++
++        self.assertEqual([], violations)
++
++    # endregion
++
++    # region TC-FLAG-17：精确共享字段锚点
++
++    def test_tc_flag_17_exact_shared_fields_and_additive_fields_exist(self):
++        user_defaults = class_field_defaults(
++            PROJECT_ROOT / "Model" / "User" / "UserStats.py",
++            "UserStats",
++        )
++        elite_defaults = class_field_defaults(
++            PROJECT_ROOT / "Model" / "User" / "EliteBonusStats.py",
++            "EliteBonusStats",
++        )
++
++        self.assertTrue(USER_STATS_SHARED_FIELDS <= set(user_defaults))
++        self.assertTrue(ELITE_SHARED_FIELDS <= set(elite_defaults))
++        self.assertIn("amount_encoding_version", user_defaults)
++        self.assertIn("amount_encoding_version", elite_defaults)
++        self.assertIn("estimated_bonus", elite_defaults)
++        self.assertIn("estimated_bonus_cents", elite_defaults)
++
++        self.assertIsInstance(user_defaults["amount_encoding_version"], ast.Constant)
++        self.assertIsNone(user_defaults["amount_encoding_version"].value)
++        self.assertIsInstance(elite_defaults["amount_encoding_version"], ast.Constant)
++        self.assertIsNone(elite_defaults["amount_encoding_version"].value)
++        self.assertIsInstance(elite_defaults["estimated_bonus_cents"], ast.Constant)
++        self.assertIsNone(elite_defaults["estimated_bonus_cents"].value)
++
++    # endregion
++
++    # region TC-FLAG-18～19：禁止 float 洗白，0 仅为 V2 blank/init
++
++    def test_tc_flag_18_no_legacy_float_to_cents_wash(self):
++        violations = []
++        paths = list(effective_production_sources()) + [
++            PROJECT_ROOT / "Common" / "AmountModelAdapter.py",
++            PROJECT_ROOT / "Model" / "User" / "EliteBonusStats.py",
++        ]
++        for path in paths:
++            source = path.read_text(encoding="utf-8")
++            tree = ast.parse(source, filename=str(path))
++
++            if re.search(
++                r"estimated_bonus_cents\s*=.*(?:estimated_bonus|float\s*\(|round\s*\()",
++                source,
++            ):
++                violations.append(f"{path.relative_to(PROJECT_ROOT)}:text conversion")
++
++            for node in ast.walk(tree):
++                if not isinstance(node, ast.Call):
++                    continue
++                for keyword in node.keywords:
++                    if keyword.arg != "estimated_bonus_cents":
++                        continue
++                    if not (
++                        isinstance(keyword.value, ast.Constant)
++                        and keyword.value.value in {None, 0}
++                    ):
++                        violations.append(
++                            f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}:constructor conversion"
++                        )
++
++        self.assertEqual([], violations)
++
++    def test_tc_flag_19_zero_only_proves_v2_blank_not_bonus_parity(self):
++        v2_blank = build_factory_amount_fields(
++            "11",
++            include_bonus_cents=True,
++        )
++        legacy_bonus = 12.34
++
++        self.assertEqual(0, v2_blank["estimated_bonus_cents"])
++        self.assertNotEqual(legacy_bonus, v2_blank["estimated_bonus_cents"])
++        self.assertIsNone(v2_blank["estimated_bonus"])
++
++    # endregion
++
++    # region TC-FLAG-20～21：TEST-ONLY 11 与 production admission 隔离
++
++    def test_tc_flag_20_direct_unit_domain_11_can_stamp_but_production_rejects(self):
++        test_fixture = make_config(True, True, 77)
++        fields = build_factory_amount_fields(
++            test_fixture.state,
++            include_bonus_cents=True,
++        )
++
++        self.assertEqual(
++            AMOUNT_ENCODING_VERSION_V2,
++            fields["amount_encoding_version"],
++        )
++        self.assertEqual(0, fields["estimated_bonus_cents"])
++        require_v2_amount_record(fields)
++
++        with self.assertRaises(PVAmountConfigError) as captured:
++            admit_production_run_config(test_fixture)
++        self.assertEqual("V2_STATE_NOT_AUTHORIZED", captured.exception.code)
++
++    def test_tc_flag_20_real_private_elite_factories_accept_test_only_11(self):
++        incremental_module, global_module = load_real_elite_factory_modules()
++        test_fixture = make_config(True, True, 77)
++
++        incremental_service = object.__new__(incremental_module.EliteBonusService)
++        incremental_service.period_num = 77
++        incremental_node = incremental_service._build_blank_node("42", test_fixture)
++
++        global_service = object.__new__(
++            global_module.GlobalEliteBonusRecalculationService
++        )
++        global_node = global_service._new_blank_stats("42", "77", test_fixture)
++
++        for node in (incremental_node, global_node):
++            self.assertEqual(AMOUNT_ENCODING_VERSION_V2, node.amount_encoding_version)
++            self.assertIsNone(node.estimated_bonus)
++            self.assertEqual(0, node.estimated_bonus_cents)
++
++    def test_tc_flag_21_production_has_no_test_only_bypass(self):
++        self.assertEqual(
++            ["config"],
++            list(inspect.signature(admit_production_run_config).parameters),
++        )
++        self.assertEqual(
++            ["provider"],
++            [
++                name
++                for name in inspect.signature(PVAmountRunSession.start).parameters
++                if name != "cls"
++            ],
++        )
++
++        paths = [
++            PROJECT_ROOT / "Redishelper" / "PVAmountConfigProvider.py",
++            PROJECT_ROOT / "Redishelper" / "PVAmountConfigBootstrap.py",
++            PROJECT_ROOT / "Common" / "AmountModelAdapter.py",
++            *effective_production_sources(),
++        ]
++        violations = []
++        for path in paths:
++            source = path.read_text(encoding="utf-8").lower()
++            for token in ("test_only", "test-only", "bypass"):
++                if token in source:
++                    violations.append(
++                        f"{path.relative_to(PROJECT_ROOT)}:{token}"
++                    )
++        self.assertEqual([], violations)
++
++    def test_completed_duplicate_short_circuits_before_config_load(self):
++        class CompletedOrderRedis:
++            @staticmethod
++            def exists(_key):
++                return True
++
++        class FakeUserStats:
++            @classmethod
++            def db(cls):
++                return CompletedOrderRedis()
++
++        class SessionMustNotStart:
++            @classmethod
++            def start(cls, _provider):
++                raise AssertionError("completed duplicate created a config run")
++
++        class SilentLogger:
++            @staticmethod
++            def warning(*_args):
++                return None
++
++            @staticmethod
++            def info(*_args):
++                return None
++
++        for relative, class_name, function_name in (
++            (
++                "User/UserStatsService.py",
++                "UserStatsService",
++                "update_elite_performance",
++            ),
++            (
++                "User/PlacementIncrementalService.py",
++                "PlacementIncrementalService",
++                "update_placement_performance",
++            ),
++        ):
++            method = load_production_method(relative, class_name, function_name)
++            method.__globals__.update(
++                UserStats=FakeUserStats,
++                PVAmountRunSession=SessionMustNotStart,
++                logger=SilentLogger(),
++            )
++            self.assertIsNone(
++                method(
++                    object(),
++                    period="202608",
++                    user_id="42",
++                    bv=1,
++                    order_id="already-completed",
++                )
++            )
++    # endregion
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)
+diff --git a/tests/pvam/WORK-PVAM-01/test_graph_actor_contract.py b/tests/pvam/WORK-PVAM-01/test_graph_actor_contract.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..f72df9c2a0600663148e966a7e2beb641a67c630
+--- /dev/null
++++ b/tests/pvam/WORK-PVAM-01/test_graph_actor_contract.py
+@@ -0,0 +1,233 @@
++"""WORK-PVAM-01 图 Actor 输出合同回归测试。"""
++
++from __future__ import annotations
++
++import ast
++import copy
++import unittest
++from pathlib import Path
++
++
++PROJECT_ROOT = Path(__file__).resolve().parents[3]
++
++
++# region 测试替身
++
++
++class FakeFrame:
++    """仅实现目标函数所需的最小 DataFrame 协议。"""
++
++    def __init__(self, columns, records):
++        self.columns = list(columns)
++        self.records = [dict(record) for record in records]
++
++    def __len__(self):
++        return len(self.records)
++
++    def rename(self, *, columns):
++        return FakeFrame(
++            [columns.get(name, name) for name in self.columns],
++            [
++                {columns.get(name, name): value for name, value in record.items()}
++                for record in self.records
++            ],
++        )
++
++    def sort_values(self, name, ascending=True):
++        return FakeFrame(
++            self.columns,
++            sorted(
++                self.records,
++                key=lambda record: record[name],
++                reverse=not ascending,
++            ),
++        )
++
++    def __getitem__(self, names):
++        return FakeFrame(
++            names,
++            [{name: record[name] for name in names} for record in self.records],
++        )
++
++    def astype(self, conversions):
++        if isinstance(conversions, dict):
++            convert = lambda name, value: conversions[name](value)
++        else:
++            convert = lambda _name, value: conversions(value)
++        return FakeFrame(
++            self.columns,
++            [
++                {name: convert(name, value) for name, value in record.items()}
++                for record in self.records
++            ],
++        )
++
++    def to_dict(self, orient):
++        if orient != "records":
++            raise AssertionError(f"unexpected orient: {orient}")
++        return [dict(record) for record in self.records]
++
++
++class FakeFuture:
++    def __init__(self, value):
++        self.value = value
++
++    def result(self):
++        return self.value
++
++
++class FakeActor:
++    def __init__(self, frame):
++        self.frame = frame
++
++    def get_allparent(self, _user_id):
++        return FakeFuture(self.frame)
++
++
++class FakeDatasetClient:
++    def __init__(self, actor):
++        self.actor = actor
++
++    def get_dataset(self, name):
++        if name != "graph_actor":
++            raise AssertionError(f"unexpected dataset: {name}")
++        return FakeFuture(self.actor)
++
++
++# endregion
++
++
++# region 真实方法提取
++
++
++def load_method(path: Path, class_name: str, method_name: str):
++    """从真实生产文件提取目标方法，隔离 Redis/Dask 等外部依赖执行。"""
++
++    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
++    class_node = next(
++        node
++        for node in tree.body
++        if isinstance(node, ast.ClassDef) and node.name == class_name
++    )
++    method_node = next(
++        node
++        for node in class_node.body
++        if isinstance(node, ast.FunctionDef) and node.name == method_name
++    )
++    probe_class = ast.ClassDef(
++        name="Probe",
++        bases=[],
++        keywords=[],
++        body=[copy.deepcopy(method_node)],
++        decorator_list=[],
++    )
++    module = ast.Module(
++        body=[
++            ast.ImportFrom(
++                module="__future__",
++                names=[ast.alias(name="annotations")],
++                level=0,
++            ),
++            probe_class,
++        ],
++        type_ignores=[],
++    )
++    ast.fix_missing_locations(module)
++    namespace = {}
++    exec(compile(module, str(path), "exec"), namespace)
++    return namespace["Probe"]
++
++
++# endregion
++
++
++class GraphActorContractTests(unittest.TestCase):
++    def setUp(self):
++        self.frame = FakeFrame(
++            ["level", "ancestor", "predecessor"],
++            [
++                {"level": 3, "ancestor": "4", "predecessor": "3"},
++                {"level": 1, "ancestor": "1", "predecessor": "9"},
++                {"level": 2, "ancestor": "3", "predecessor": "1"},
++            ],
++        )
++
++    def test_user_stats_normalizes_actor_ancestor_column(self):
++        probe_class = load_method(
++            PROJECT_ROOT / "User" / "UserStatsService.py",
++            "UserStatsService",
++            "_load_ancestors_info",
++        )
++
++        rows = probe_class()._load_ancestors_info(
++            "9",
++            graph_actor=FakeActor(self.frame),
++        )
++
++        self.assertEqual(
++            rows,
++            [
++                {"descendant": "1", "predecessor": "9", "level": 1},
++                {"descendant": "3", "predecessor": "1", "level": 2},
++                {"descendant": "4", "predecessor": "3", "level": 3},
++            ],
++        )
++
++    def test_elite_bonus_accepts_actor_ancestor_column(self):
++        probe_class = load_method(
++            PROJECT_ROOT / "User" / "EliteBonusService.py",
++            "EliteBonusService",
++            "_propagate_upward",
++        )
++        probe = probe_class()
++        probe.dask_client = FakeDatasetClient(
++            FakeActor(FakeFrame(self.frame.columns, []))
++        )
++
++        probe._propagate_upward(
++            user_id="9",
++            initial_delta=0,
++            pv_delta=0,
++            processed_nodes={},
++            models_to_save=[],
++            acquired_locks=[],
++            run_config=None,
++        )
++
++    def test_consumers_fail_loud_when_actor_schema_is_incomplete(self):
++        incomplete = FakeFrame(
++            ["level", "predecessor"],
++            [{"level": 1, "predecessor": "9"}],
++        )
++        user_stats_class = load_method(
++            PROJECT_ROOT / "User" / "UserStatsService.py",
++            "UserStatsService",
++            "_load_ancestors_info",
++        )
++        with self.assertRaisesRegex(RuntimeError, "ancestor"):
++            user_stats_class()._load_ancestors_info(
++                "9",
++                graph_actor=FakeActor(incomplete),
++            )
++
++        elite_bonus_class = load_method(
++            PROJECT_ROOT / "User" / "EliteBonusService.py",
++            "EliteBonusService",
++            "_propagate_upward",
++        )
++        elite_probe = elite_bonus_class()
++        elite_probe.dask_client = FakeDatasetClient(FakeActor(incomplete))
++        with self.assertRaisesRegex(RuntimeError, "ancestor"):
++            elite_probe._propagate_upward(
++                user_id="9",
++                initial_delta=0,
++                pv_delta=0,
++                processed_nodes={},
++                models_to_save=[],
++                acquired_locks=[],
++                run_config=None,
++            )
++
++
++if __name__ == "__main__":
++    unittest.main()

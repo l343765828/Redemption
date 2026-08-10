@@ -1,0 +1,55 @@
+⚠ 即将对 Redis 执行 flushdb → host=192.168.18.149 port=36378 db=0；请确认这是测试库。
+2026-08-10 14:34:53,426 - INFO - [UserStatsService] 连接 Dask 调度器: tcp://127.0.0.1:8786
+
+--- 运行: Case A: 源端早停, 不触碰祖先 ---
+2026-08-10 14:34:53,435 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:34:53,457 - INFO - [UserStatsService] 开始处理用户 4 的增量 BV: 50 (期数: 202605, 订单: A_8993d1e5)
+2026-08-10 14:34:54,490 - INFO - [UserStatsService] 用户 4 的 delta_update=0 且资格未变, 停止向上冒泡。
+2026-08-10 14:34:54,496 - INFO - [UserStatsService] === 集中写入完成: 批量更新 1 个节点 ===
+✓ PASS  Case A: 源端早停, 不触碰祖先
+
+--- 运行: Case B: 单层冒泡到 Elite 父后停止 ---
+2026-08-10 14:34:54,503 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:34:54,528 - INFO - [UserStatsService] 开始处理用户 9 的增量 BV: 200 (期数: 202605, 订单: B_6b5c9527)
+2026-08-10 14:34:54,757 - INFO - [UserStatsService] 到达上级用户 1 时, 传导安全停止。
+2026-08-10 14:34:54,764 - INFO - [UserStatsService] === 集中写入完成: 批量更新 2 个节点 ===
+✓ PASS  Case B: 单层冒泡到 Elite 父后停止
+
+--- 运行: Case C: 跨过 1000 触发截断回滚 + 全链路合格线更新 ---
+2026-08-10 14:34:54,782 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:34:54,806 - INFO - [UserStatsService] 开始处理用户 9 的增量 BV: 200 (期数: 202605, 订单: C_e2663ab5)
+2026-08-10 14:34:55,052 - INFO - [UserStatsService] === 集中写入完成: 批量更新 5 个节点 ===
+✓ PASS  Case C: 跨过 1000 触发截断回滚 + 全链路合格线更新
+
+--- 运行: Case D: Redis 中缺失的祖先被零值初始化并继续传导 ---
+2026-08-10 14:34:55,065 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:34:55,095 - INFO - [UserStatsService] 开始处理用户 9 的增量 BV: 500 (期数: 202605, 订单: D_349ce5f5)
+2026-08-10 14:34:55,330 - INFO - [UserStatsService] === 集中写入完成: 批量更新 5 个节点 ===
+✓ PASS  Case D: Redis 中缺失的祖先被零值初始化并继续传导
+
+--- 运行: Case E: rank / virtual_width 边界 ---
+2026-08-10 14:34:55,351 - INFO - [UserStatsService] 测试 DB 已清空。
+✓ PASS  Case E: rank / virtual_width 边界
+
+--- 运行: Case F: 源用户跨 virtual width 边界但祖先不变 ---
+2026-08-10 14:34:55,383 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:34:55,406 - INFO - [UserStatsService] 开始处理用户 1 的增量 BV: 100 (期数: 202605, 订单: F_335be72a)
+2026-08-10 14:34:55,635 - INFO - [UserStatsService] 到达上级用户 3 时, 传导安全停止。
+2026-08-10 14:34:55,642 - INFO - [UserStatsService] === 集中写入完成: 批量更新 1 个节点 ===
+✓ PASS  Case F: 源用户跨 virtual width 边界但祖先不变
+
+--- 运行: Case G: 两个兄弟分支依次截断并累积合格线 ---
+2026-08-10 14:34:55,654 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:34:55,674 - INFO - [UserStatsService] 开始处理用户 9 的增量 BV: 200 (期数: 202605, 订单: G1_ed6549cf)
+2026-08-10 14:34:55,905 - INFO - [UserStatsService] === 集中写入完成: 批量更新 5 个节点 ===
+2026-08-10 14:34:55,911 - INFO - [UserStatsService] 开始处理用户 13 的增量 BV: 200 (期数: 202605, 订单: G2_43337aa8)
+2026-08-10 14:34:56,144 - INFO - [UserStatsService] === 集中写入完成: 批量更新 5 个节点 ===
+✓ PASS  Case G: 两个兄弟分支依次截断并累积合格线
+
+--- 运行: Case H: bv=0 no-op ---
+2026-08-10 14:34:56,153 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:34:56,181 - INFO - [UserStatsService] 增量 BV 为 0, 跳过处理: period=202605, user_id=9, order_id=H_a762906c
+✓ PASS  Case H: bv=0 no-op
+
+============================================================
+全部 8 个用例通过 ✓

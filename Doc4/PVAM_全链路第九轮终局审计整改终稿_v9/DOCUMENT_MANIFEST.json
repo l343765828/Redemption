@@ -21,13 +21,13 @@
     "real_dev_executed":  true,
     "real_uat_executed":  false,
     "modplan_archive_sha256":  "6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97",
-    "workplan_archive_sha256":  "e77d0ca1930c5975f9b524260f055089a4d9805861ad13bef82c7be799aeed78",
+    "workplan_archive_sha256":  "9fcdfc7a510189c7af07cbbcdec73338d30a04337a7791c69845798864156aaf",
     "approved_commit_registry":  {
                                      "path":  "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
-                                     "sha256":  "ca9e7c98b59e161871c746163aebe343fe6e2f87598c3fe88036f73a3a22f82f",
+                                     "sha256":  "d4ab1ca9303cbf0da11e26ecfc9731ef1e356fd12fe9989c5a6068c9394ff513",
                                      "schema_version":  2
                                  },
-    "approved_commit_registry_sha256":  "ca9e7c98b59e161871c746163aebe343fe6e2f87598c3fe88036f73a3a22f82f",
+    "approved_commit_registry_sha256":  "d4ab1ca9303cbf0da11e26ecfc9731ef1e356fd12fe9989c5a6068c9394ff513",
     "current_round_delivery_files":  {
                                          "final_qa_report":  {
                                                                  "path":  "FINAL_QA_REPORT.md",
@@ -40,9 +40,9 @@
                                                                          "file_role":  "CURRENT_ROUND_CUMULATIVE_REMEDIATION_COMPILATION"
                                                                      }
                                      },
-    "package_file_count_total":  197,
-    "package_file_count_excluding_root_sha256":  196,
-    "root_sha256_entry_count":  196,
+    "package_file_count_total":  289,
+    "package_file_count_excluding_root_sha256":  288,
+    "root_sha256_entry_count":  288,
     "construction_readiness":  "DOCUMENTS_APPROVED_ORGANIZATIONAL_APPROVAL_PENDING",
     "control_script_status":  "SELFTEST_PASS",
     "archive_readiness":  "READY_FOR_ARCHIVE",

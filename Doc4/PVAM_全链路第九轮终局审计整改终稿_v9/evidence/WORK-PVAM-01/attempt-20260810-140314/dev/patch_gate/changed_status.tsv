@@ -1,0 +1,15 @@
+A	Common/AmountModelAdapter.py
+A	Common/PvAmount.py
+M	Model/User/EliteBonusStats.py
+M	Model/User/UserStats.py
+M	User/EliteBonusService.py
+M	User/GlobalEliteBonusRecalculationService.py
+M	User/GlobalRecalculationService.py
+M	User/PlacementIncrementalService.py
+M	User/PlacementRecalculationService.py
+A	User/Test/test_amount_model_version.py
+A	User/Test/test_pv_amount_common.py
+M	User/UserStatsService.py
+A	tests/pvam/WORK-PVAM-01/run_legacy_redis_dask_regressions.py
+A	tests/pvam/WORK-PVAM-01/test_flag_factory_contract.py
+A	tests/pvam/WORK-PVAM-01/test_graph_actor_contract.py

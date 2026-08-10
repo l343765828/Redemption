@@ -1,0 +1,55 @@
+{
+  "work_id": "WORK-PVAM-01",
+  "stage": null,
+  "root_baseline_sha": "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
+  "direct_prerequisites": [
+    "WORK-PVAM-01C"
+  ],
+  "prerequisite_closure": [
+    "WORK-PVAM-01C"
+  ],
+  "integration_order": [
+    "WORK-PVAM-01C"
+  ],
+  "included_works": [
+    {
+      "work_id": "WORK-PVAM-01C",
+      "commit_sha": "2a5d39651f8eb50845c4377d3181d3cb846f6cab",
+      "tree_sha": "3284a9309c4fa450a6e3c40befb591f9854b2074"
+    }
+  ],
+  "approved_commit_registry_path": "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
+  "approved_commit_registry_sha256": "ca9e7c98b59e161871c746163aebe343fe6e2f87598c3fe88036f73a3a22f82f",
+  "matched_registry_entries": [
+    {
+      "work_id": "WORK-PVAM-01C",
+      "commit_sha": "2a5d39651f8eb50845c4377d3181d3cb846f6cab",
+      "tree_sha": "3284a9309c4fa450a6e3c40befb591f9854b2074",
+      "approver_identity": "343765828@qq.com",
+      "approved_at": "2026-08-10T13:46:37Z",
+      "evidence": {
+        "patch": {
+          "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/WORK-PVAM-01C.patch",
+          "sha256": "8cb025ad8b9e15bbd90d5418a2d30fb2ac2e8a20d051b3693746bd286ef55254"
+        },
+        "scope_result": {
+          "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/scope_result.json",
+          "sha256": "8203457bc9a3e50f40b3bb67f7e5f8e77665e6f20870ddee0da638cb8b7eef1f"
+        },
+        "parent_provenance": {
+          "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/parent_provenance_validation.json",
+          "sha256": "61154e13a88abbe47009ba39133ade63858b7261b24c585e4a06b8fd57c3a4c6"
+        },
+        "approval_record": {
+          "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/approval/approval_record.json",
+          "sha256": "2be55003a01a8f6dfcaf2c206bff8b05aeec46e8aa42dfe7b56aa68f185f4486"
+        }
+      }
+    }
+  ],
+  "parent_commit_sha": "2a5d39651f8eb50845c4377d3181d3cb846f6cab",
+  "parent_tree_sha": "3284a9309c4fa450a6e3c40befb591f9854b2074",
+  "work_commit_sha": "9c1382600fa60e2d488113aef289bcc2331f8f45",
+  "work_tree_sha": "8cfa5f0738dc7cb50cf9b739fca9b4a20b609af9",
+  "provenance_status": "PASS"
+}
