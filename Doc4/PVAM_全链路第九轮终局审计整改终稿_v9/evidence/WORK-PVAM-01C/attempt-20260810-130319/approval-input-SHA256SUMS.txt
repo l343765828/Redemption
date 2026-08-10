@@ -1,0 +1,3 @@
+8cb025ad8b9e15bbd90d5418a2d30fb2ac2e8a20d051b3693746bd286ef55254  /mnt/dask/Redemption/Redemption/Doc4/PVAM_全链路第九轮终局审计整改终稿_v9/evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/WORK-PVAM-01C.patch
+8203457bc9a3e50f40b3bb67f7e5f8e77665e6f20870ddee0da638cb8b7eef1f  /mnt/dask/Redemption/Redemption/Doc4/PVAM_全链路第九轮终局审计整改终稿_v9/evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/scope_result.json
+61154e13a88abbe47009ba39133ade63858b7261b24c585e4a06b8fd57c3a4c6  /mnt/dask/Redemption/Redemption/Doc4/PVAM_全链路第九轮终局审计整改终稿_v9/evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/parent_provenance_validation.json

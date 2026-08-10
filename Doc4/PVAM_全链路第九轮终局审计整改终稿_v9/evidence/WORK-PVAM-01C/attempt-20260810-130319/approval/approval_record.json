@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "record_type": "WORK_APPROVAL_RECORD",
+  "work_id": "WORK-PVAM-01C",
+  "approval": "APPROVED",
+  "decision": "APPROVED",
+  "root_baseline_sha": "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
+  "work_commit_sha": "2a5d39651f8eb50845c4377d3181d3cb846f6cab",
+  "work_tree_sha": "3284a9309c4fa450a6e3c40befb591f9854b2074",
+  "source_registry_sha256": "9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1",
+  "approval_scope": "批准 WORK-PVAM-01C commit 2a5d39651f8eb50845c4377d3181d3cb846f6cab、",
+  "allowed_wave": "tree 3284a9309c4fa450a6e3c40befb591f9854b2074 及其正式 patch/dev 证据登记",
+  "approver_identity": "343765828@qq.com",
+  "approver_role": "PVAM 技术负责人",
+  "authority_basis": "CHG-20260810-001",
+  "signature_original": "由真实审批人输入包含其身份、APPROVED 结论、批准范围和限制的原文",
+  "approved_at": "2026-08-10T13:46:37Z",
+  "limitations": [
+    "This approval does not constitute Gate C closure.",
+    "This approval does not constitute production deployment approval.",
+    "This approval does not convert DEV evidence into real UAT evidence."
+  ],
+  "evidence": {
+    "patch": {
+      "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/WORK-PVAM-01C.patch",
+      "sha256": "8cb025ad8b9e15bbd90d5418a2d30fb2ac2e8a20d051b3693746bd286ef55254"
+    },
+    "scope_result": {
+      "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/scope_result.json",
+      "sha256": "8203457bc9a3e50f40b3bb67f7e5f8e77665e6f20870ddee0da638cb8b7eef1f"
+    },
+    "parent_provenance": {
+      "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/parent_provenance_validation.json",
+      "sha256": "61154e13a88abbe47009ba39133ade63858b7261b24c585e4a06b8fd57c3a4c6"
+    },
+    "patch_validation": {
+      "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/patch_validation.json",
+      "sha256": "6a7e783c880bc006b2887fe0324ea82550dbf7964c614eb95372798a58051ef8"
+    },
+    "dev_validation": {
+      "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/dev/dev_validation.json",
+      "sha256": "081f24d2082fd74445e22759bf3701a6f3a2a0573257668fc9c7b44dc8cca72d"
+    },
+    "junit": {
+      "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/dev/junit.xml",
+      "sha256": "77fef35b867ccc7798c7e628f73569e0d518e4e99803cbe7ea438e652e281af4"
+    }
+  }
+}
