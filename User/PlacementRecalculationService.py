@@ -13,6 +13,12 @@ from dask.distributed import Client, wait as dask_wait
 
 import Model.User.UserLevel as UserLevel
 from Model.User.UserStats import UserStats
+from Common.AmountModelAdapter import build_factory_amount_fields
+from Redishelper.PVAmountConfigProvider import (
+    PVAmountConfigProvider,
+    PVAmountRunConfig,
+    PVAmountRunSession,
+)
 from User.UserStatsService import UserStatsService
 from Model.Config import SCHEDULE_ADDRESS
 
@@ -62,7 +68,12 @@ class PlacementRecalculationService(UserStatsService):
         period = str(period)
         run_id = str(uuid.uuid4())
         status_key = self._status_key(period)
+        # region 加载并冻结本次业务运行配置
         redis_conn = UserStats.db()
+        run_config = PVAmountRunSession.start(
+            PVAmountConfigProvider(redis_conn)
+        ).config
+        # endregion
 
         prev_period = self._get_prev_period(period)
         if prev_period:
@@ -136,6 +147,7 @@ class PlacementRecalculationService(UserStatsService):
                 period=period,
                 run_id=run_id,
                 write_zero_nodes=write_zero_nodes,
+                run_config=run_config,
                 lock=lock
             )
 
@@ -274,7 +286,12 @@ class PlacementRecalculationService(UserStatsService):
                 out[uid]["2l"] = int(round(float(raw_data.get("remain_surplus_2l") or 0.0)))
         return out
 
-    def _mget_users_with_exists(self, user_ids: List[str], period: str) -> Dict[str, Tuple[UserStats, bool]]:
+    def _mget_users_with_exists(
+        self,
+        user_ids: List[str],
+        period: str,
+        run_config: PVAmountRunConfig,
+    ) -> Dict[str, Tuple[UserStats, bool]]:
         out: Dict[str, Tuple[UserStats, bool]] = {}
         if not user_ids: return out
 
@@ -295,7 +312,7 @@ class PlacementRecalculationService(UserStatsService):
 
         for uid, raw_data in zip(user_ids, raw_results):
             if raw_data is None:
-                out[uid] = (self._new_zero_user_stats(uid, period), False)
+                out[uid] = (self._new_zero_user_stats(uid, period, run_config), False)
                 continue
 
             actual_id = raw_data.get("id")
@@ -328,14 +345,15 @@ class PlacementRecalculationService(UserStatsService):
 
         return out
 
-    def _new_zero_user_stats(self, uid: str, period: str) -> UserStats:
+    def _new_zero_user_stats(self, uid: str, period: str, run_config: PVAmountRunConfig) -> UserStats:
         return UserStats(
             pk=f"{period}:{uid}", period=period, id=uid, user_id=uid,
             pv=0, gpv=0, gpv_real=0, gpv_unreal=0, contrib=0,
             is_elite=False, virtual_width=0, rank=UserLevel.NOTHING, qualified_legs=set(),
             pv_1l=0, pv_2l=0,
             pre_surplus_1l=0, pre_surplus_2l=0, total_1l=0, total_2l=0,
-            remain_surplus_1l=0, remain_surplus_2l=0
+            remain_surplus_1l=0, remain_surplus_2l=0,
+            **build_factory_amount_fields(run_config.state),
         )
 
     # =====================================================================
@@ -473,6 +491,7 @@ class PlacementRecalculationService(UserStatsService):
             period: str,
             run_id: str,
             write_zero_nodes: bool,
+            run_config: PVAmountRunConfig,
             lock
     ) -> None:
         prev_period = self._get_prev_period(period)
@@ -481,7 +500,7 @@ class PlacementRecalculationService(UserStatsService):
             self._refresh_lock(lock)
             batch_ids = target_list[i: i + self.PARENT_PAGE_SIZE]
 
-            user_lookup = self._mget_users_with_exists(batch_ids, period)
+            user_lookup = self._mget_users_with_exists(batch_ids, period, run_config)
             prev_surplus_lookup = self._mget_prev_surplus(batch_ids, prev_period)
 
             models_to_save: List[UserStats] = []

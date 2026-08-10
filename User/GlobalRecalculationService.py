@@ -11,6 +11,12 @@ from redis_om import NotFoundError
 
 import Model.User.UserLevel as UserLevel
 from Model.User.UserStats import UserStats
+from Common.AmountModelAdapter import build_factory_amount_fields
+from Redishelper.PVAmountConfigProvider import (
+    PVAmountConfigProvider,
+    PVAmountRunConfig,
+    PVAmountRunSession,
+)
 from Model.User.UserPeriodHighestRank import UserPeriodHighestRank
 from User.UserStatsService import (
     UserStatsService,
@@ -142,8 +148,14 @@ class GlobalRecalculationService(UserStatsService):
         # 强制转换为字符串，确保下游 Redis 键名与 payload 口径 100% 统一
         period = str(period)
 
-        # region 上redis锁
+        # region 加载并冻结本次业务运行配置
         redis_conn = UserStats.db()
+        run_config = PVAmountRunSession.start(
+            PVAmountConfigProvider(redis_conn)
+        ).config
+        # endregion
+
+        # region 上redis锁
         run_id = str(uuid.uuid4())
         status_key = self._status_key(period)
 
@@ -252,6 +264,7 @@ class GlobalRecalculationService(UserStatsService):
                         run_id=run_id,
                         redis_conn=redis_conn,
                         write_zero_nodes=write_zero_nodes,
+                        run_config=run_config,
                         lock=lock
                     )
                     # endregion
@@ -338,6 +351,7 @@ class GlobalRecalculationService(UserStatsService):
             run_id: str,
             redis_conn,
             write_zero_nodes: bool,
+            run_config: PVAmountRunConfig,
             lock
     ) -> None:
         """
@@ -356,7 +370,7 @@ class GlobalRecalculationService(UserStatsService):
         # endregion
 
         # region 从redis获取parent_ids的所有实体
-        parent_lookup = self._mget_users_with_exists(parent_ids, period)
+        parent_lookup = self._mget_users_with_exists(parent_ids, period, run_config)
         models_to_save: List[UserStats] = []
         outbox_events: List[Dict[str, Any]] = []
         honor_records: List[UserPeriodHighestRank] = []
@@ -404,7 +418,7 @@ class GlobalRecalculationService(UserStatsService):
                 # endregion
 
                 # region 获取子节点实体list
-                child_lookup = self._mget_users_with_exists(child_ids, period)
+                child_lookup = self._mget_users_with_exists(child_ids, period, run_config)
                 # endregion
 
                 for cid in child_ids:
@@ -613,7 +627,8 @@ class GlobalRecalculationService(UserStatsService):
     def _mget_users_with_exists(
             self,
             user_ids: Iterable[str],
-            period: str
+            period: str,
+            run_config: PVAmountRunConfig,
     ) -> Dict[str, Tuple[UserStats, bool]]:
         """
         批量读取 UserStats，并返回 Redis 中是否原本存在。
@@ -646,7 +661,7 @@ class GlobalRecalculationService(UserStatsService):
                     self._normalize_qualified_legs(node)
                     fallback_out[uid] = (node, True)
                 except NotFoundError:
-                    node = self._new_zero_user_stats(uid, period)
+                    node = self._new_zero_user_stats(uid, period, run_config)
                     self._normalize_qualified_legs(node)
                     fallback_out[uid] = (node, False)
 
@@ -687,7 +702,7 @@ class GlobalRecalculationService(UserStatsService):
 
             # region raw_data为空时 初始化对象 并跳过当前循环
             if raw_data is None:
-                node = self._new_zero_user_stats(uid, period)
+                node = self._new_zero_user_stats(uid, period, run_config)
                 self._normalize_qualified_legs(node)
                 out[uid] = (node, False)
                 continue
@@ -752,7 +767,7 @@ class GlobalRecalculationService(UserStatsService):
 
         return out
 
-    def _new_zero_user_stats(self, uid: str, period: str) -> UserStats:
+    def _new_zero_user_stats(self, uid: str, period: str, run_config: PVAmountRunConfig) -> UserStats:
         """构造 Redis 中不存在用户的零值 UserStats。"""
         uid = str(uid)
         return UserStats(
@@ -769,6 +784,7 @@ class GlobalRecalculationService(UserStatsService):
             virtual_width=0,
             rank=UserLevel.NOTHING,
             qualified_legs=set(),
+            **build_factory_amount_fields(run_config.state),
         )
 
     @staticmethod
@@ -935,7 +951,12 @@ class GlobalRecalculationService(UserStatsService):
 # 2. 预置 Redis 中的基础个人业绩 (PV)
 # ==========================================
 def inject_mock_pv_data(period: str):
+    # region 加载并冻结本次造数运行配置
     redis_conn = UserStats.db()
+    run_config = PVAmountRunSession.start(
+        PVAmountConfigProvider(redis_conn)
+    ).config
+    # endregion
     stats_prefix = UserStats.make_key("")
     for key in redis_conn.scan_iter(f"{stats_prefix}*"):
         redis_conn.delete(key)
@@ -947,13 +968,16 @@ def inject_mock_pv_data(period: str):
     # 造数必须带有 period 和正确的 pk
     UserStats(pk=f"{period}:13", period=period, id="13", user_id="13",
               pv=1000, gpv=1000, gpv_real=1000, gpv_unreal=0, is_elite=False,
-              rank=UserLevel.NOTHING).save()
+              rank=UserLevel.NOTHING,
+              **build_factory_amount_fields(run_config.state)).save()
     UserStats(pk=f"{period}:9", period=period, id="9", user_id="9",
               pv=800, gpv=800, gpv_real=800, gpv_unreal=0, is_elite=False,
-              rank=UserLevel.NOTHING).save()
+              rank=UserLevel.NOTHING,
+              **build_factory_amount_fields(run_config.state)).save()
     UserStats(pk=f"{period}:10", period=period, id="10", user_id="10",
               pv=2000, gpv=2000, gpv_real=1000, gpv_unreal=1000, is_elite=False,
-              rank=UserLevel.NOTHING).save()
+              rank=UserLevel.NOTHING,
+              **build_factory_amount_fields(run_config.state)).save()
     print("Redis 测试基础 PV 数据注入完成。")
 
 

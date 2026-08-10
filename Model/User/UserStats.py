@@ -8,6 +8,9 @@ class UserStats(BaseRedisModel, index=True):
     id: str
     period: str = Field(index=True)
     user_id: Optional[str] = None
+    # region PVAM 金额编码版本（legacy/unknown 默认不写 2）
+    amount_encoding_version: Optional[int] = None
+    # endregion
     pv: Optional[int] = 0
     gpv: Optional[int] = 0
     # PE/SE 晋级口径下拆分后的真实业绩：

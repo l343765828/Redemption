@@ -9,6 +9,12 @@ from dask.distributed import Client
 from redis_om import NotFoundError
 
 from Model.User.EliteBonusStats import EliteBonusStats
+from Common.AmountModelAdapter import build_factory_amount_fields
+from Redishelper.PVAmountConfigProvider import (
+    PVAmountConfigProvider,
+    PVAmountRunConfig,
+    PVAmountRunSession,
+)
 from User.UserStatsService import SCHEDULE_ADDRESS
 
 logger = logging.getLogger(__name__)
@@ -102,7 +108,13 @@ class GlobalEliteBonusRecalculationService:
     def settle_period(self, period: str) -> None:
         """单期全量 Elite Bonus 结算重算主入口"""
         period = str(period)
+        # region 加载并冻结本次业务运行配置
         redis_conn = EliteBonusStats.db()
+        run_config = PVAmountRunSession.start(
+            PVAmountConfigProvider(redis_conn)
+        ).config
+        # endregion
+
         run_id = str(uuid.uuid4())
         status_key = self._status_key(period)
 
@@ -168,6 +180,7 @@ class GlobalEliteBonusRecalculationService:
                         period=period,
                         run_id=run_id,
                         redis_conn=redis_conn,
+                        run_config=run_config,
                         lock=lock
                     )
 
@@ -189,7 +202,7 @@ class GlobalEliteBonusRecalculationService:
             if self.db_executor is not None:
                 logger.info("开始期末快照落库 AR_CALC_BONUS_E / AR_CALC_BONUS_E_SOURCE ...")
                 self._refresh_global_lock(lock)
-                persist_stats = self._persist_to_db(period)
+                persist_stats = self._persist_to_db(period, run_config)
                 persisted = True
                 logger.info(
                     "落库完成 bonus_rows=%s source_rows=%s",
@@ -231,12 +244,21 @@ class GlobalEliteBonusRecalculationService:
             except Exception:
                 pass
 
-    def _process_parent_batch(self, graph_actor, parent_ids: List[str], period: str, run_id: str, redis_conn, lock) -> None:
+    def _process_parent_batch(
+        self,
+        graph_actor,
+        parent_ids: List[str],
+        period: str,
+        run_id: str,
+        redis_conn,
+        run_config: PVAmountRunConfig,
+        lock,
+    ) -> None:
         """批处理同层父节点，自下而上进行 GPV 归集、路径判定、奖金算定与业绩吸收流转。"""
         if not parent_ids:
             return
 
-        parent_lookup = self._mget_stats_with_exists(parent_ids, period, redis_conn)
+        parent_lookup = self._mget_stats_with_exists(parent_ids, period, redis_conn, run_config)
         models_to_save: List[EliteBonusStats] = []
         pipe = redis_conn.pipeline(transaction=True)
         consumed_child_keys: List[str] = []
@@ -277,7 +299,7 @@ class GlobalEliteBonusRecalculationService:
                 if not child_ids:
                     break
 
-                child_lookup = self._mget_stats_with_exists(child_ids, period, redis_conn)
+                child_lookup = self._mget_stats_with_exists(child_ids, period, redis_conn, run_config)
 
                 for cid in child_ids:
                     c_node, _ = child_lookup[cid]
@@ -369,7 +391,13 @@ class GlobalEliteBonusRecalculationService:
             })
             pipe.expire(redis_key, self.SOURCE_TTL_SECONDS)
 
-    def _mget_stats_with_exists(self, user_ids: Iterable[str], period: str, redis_conn) -> Dict[str, Tuple[EliteBonusStats, bool]]:
+    def _mget_stats_with_exists(
+        self,
+        user_ids: Iterable[str],
+        period: str,
+        redis_conn,
+        run_config: PVAmountRunConfig,
+    ) -> Dict[str, Tuple[EliteBonusStats, bool]]:
         out: Dict[str, Tuple[EliteBonusStats, bool]] = {}
         uid_list = [str(uid) for uid in user_ids]
         if not uid_list:
@@ -382,13 +410,13 @@ class GlobalEliteBonusRecalculationService:
                 raise RuntimeError("MGET 结果集返回空指针")
         except Exception as e:
             logger.warning("JSON.MGET 发生阻断，平滑降级至单键兜底模式: %s", e)
-            return self._fallback_single_get(uid_list, period)
+            return self._fallback_single_get(uid_list, period, run_config)
 
         for uid, raw_data in zip(uid_list, raw_results):
             expected_pk = f"{period}:{uid}"
 
             if raw_data is None:
-                out[uid] = (self._new_blank_stats(uid, period), False)
+                out[uid] = (self._new_blank_stats(uid, period, run_config), False)
                 continue
 
             try:
@@ -412,27 +440,36 @@ class GlobalEliteBonusRecalculationService:
 
         return out
 
-    def _fallback_single_get(self, uid_list: List[str], period: str) -> Dict[str, Tuple[EliteBonusStats, bool]]:
+    def _fallback_single_get(
+        self,
+        uid_list: List[str],
+        period: str,
+        run_config: PVAmountRunConfig,
+    ) -> Dict[str, Tuple[EliteBonusStats, bool]]:
         out = {}
         for uid in uid_list:
             try:
                 node = EliteBonusStats.get(f"{period}:{uid}")
                 out[uid] = (node, True)
             except NotFoundError:
-                out[uid] = (self._new_blank_stats(uid, period), False)
+                out[uid] = (self._new_blank_stats(uid, period, run_config), False)
         return out
 
-    def _new_blank_stats(self, uid: str, period: str) -> EliteBonusStats:
+    def _new_blank_stats(self, uid: str, period: str, run_config: PVAmountRunConfig) -> EliteBonusStats:
         return EliteBonusStats(
             pk=f"{period}:{uid}", id=f"{period}:{uid}", user_id=uid, period_num=int(period),
-            pv_pcs=0, gpv=0, gpv_real=0, contrib_to_parent=0, estimated_bonus=0.0
+            pv_pcs=0, gpv=0, gpv_real=0, contrib_to_parent=0,
+            **build_factory_amount_fields(
+                run_config.state,
+                include_bonus_cents=True,
+            ),
         )
 
     # ==========================================
     # 正式产出落库 (复用增量 snapshot，保证两套实现口径一致)
     # ==========================================
 
-    def _persist_to_db(self, period: str) -> Dict[str, int]:
+    def _persist_to_db(self, period: str, run_config: PVAmountRunConfig) -> Dict[str, int]:
         """
         把本期 Redis 结果固化到关系库 AR_CALC_BONUS_E / AR_CALC_BONUS_E_SOURCE。
 
@@ -458,7 +495,7 @@ class GlobalEliteBonusRecalculationService:
             elite_rate_loader=lambda: locked_rate,
             user_info_resolver=self.user_info_resolver,
         )
-        return snapshot_svc.snapshot_period_to_db(self.db_executor)
+        return snapshot_svc._snapshot_period_to_db(self.db_executor, run_config)
 
     # ==========================================
     # 环境清理与纯净度保障 (含大表锁续期)

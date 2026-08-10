@@ -20,6 +20,10 @@ class EliteBonusStats(BaseRedisModel, index=True):
     user_id: str
     period_num: int = Field(index=True)  # 索引必须有,期末快照走 find 查询
 
+    # region PVAM 金额编码版本（legacy/unknown 默认不写 2）
+    amount_encoding_version: Optional[int] = None
+    # endregion
+
     # ---- 基础业绩(财务口径) ----
     pv_pcs: Optional[int] = 0    # 个人消费(本期累计,可被退单负向调整)
     gpv: Optional[int] = 0       # 原始累计 GPV,含下线临时上贡(用于路径 A 阈值判定)
@@ -39,6 +43,9 @@ class EliteBonusStats(BaseRedisModel, index=True):
 
     # ---- 奖金预估(实时跳动,期末快照固化) ----
     estimated_bonus: Optional[float] = 0.0
+    # region PVAM additive V2 空白载体（不由 legacy float 折算）
+    estimated_bonus_cents: Optional[int] = None
+    # endregion
 
     class Meta:
         global_key_prefix = "elite_bonus_stats"
