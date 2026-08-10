@@ -7,4 +7,4 @@ DEV 证据必须绑定 root baseline、parent commit/tree、parent provenance SH
 
 ## B7 前置交付信任根
 
-DEV parent provenance 只接受发布包 canonical registry（SHA-256 `6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68`）。当前 registry 全部为 `PENDING`，依赖型真实 WORK 继续 `BLOCKED`。
+DEV parent provenance 只接受发布包 canonical registry（SHA-256 `9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1`）。当前 registry 全部为 `PENDING`，依赖型真实 WORK 继续 `BLOCKED`。

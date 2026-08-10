@@ -8,6 +8,6 @@
 - Gate C：`OPEN`
 - 当前九轮治理处置：`P0-TRACE-CHAIN-09-01 / P1-WORK-INDEX-09-02 / P2-DELIVERY-NAME-09-03`
 
-唯一强制入口：`check_baseline_preflight.sh`、`validate_parent_provenance.py`、`validate_work_patch.sh`、`validate_work_dev.sh`。依赖型 WORK 只能使用发布包 canonical registry，当前 registry SHA-256=`6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68` 且全部条目为 `PENDING`。
+唯一强制入口：`check_baseline_preflight.sh`、`validate_parent_provenance.py`、`validate_work_patch.sh`、`validate_work_dev.sh`。依赖型 WORK 只能使用发布包 canonical registry，当前 registry SHA-256=`9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1` 且全部条目为 `PENDING`。
 
 施工总方案 §4.1 索引必须与十份专项 WORK 和 `TRACEABILITY_MANIFEST.json.work_contracts` 的来源 TASK、来源问题、关联决策精确相等；任何索引漂移由 `validate_document_governance.py` 非零拦截。

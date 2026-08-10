@@ -29,7 +29,7 @@
 | 七轮审查 | `B7-01～B7-06` 独立核验与第八轮定点修订；S6/F5 为历史来源 |
 | 九轮治理修补 | `P0-TRACE-CHAIN-09-01`、`P1-WORK-INDEX-09-02`、`P2-DELIVERY-NAME-09-03` 定点闭环；不改变文档业务版本 |
 | 项目代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
-| 修改方案套件SHA-256 | `b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898`（对象：`MODPLAN-PVAM_v1.2_终稿修改方案套件.zip`，随本包提供） |
+| 修改方案套件SHA-256 | `6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97`（对象：`MODPLAN-PVAM_v1.2_终稿修改方案套件.zip`，随本包提供） |
 | SQL业务基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，排除Skill列明废弃/副本 |
 | 编制人 | AI Agent（施工方案编制） |
 | 复核人 | 待组织指派（AI Agent 仅完成文档自检，不代签组织审批） |

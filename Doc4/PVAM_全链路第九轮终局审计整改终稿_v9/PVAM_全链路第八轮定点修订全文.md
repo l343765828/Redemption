@@ -5442,7 +5442,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 | 七轮审查 | `B7-01～B7-06` 独立核验与第八轮定点修订；S6/F5 为历史来源 |
 | 九轮治理修补 | `P0-TRACE-CHAIN-09-01`、`P1-WORK-INDEX-09-02`、`P2-DELIVERY-NAME-09-03` 定点闭环；不改变文档业务版本 |
 | 项目代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| 修改方案套件SHA-256 | `b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898`（对象：`MODPLAN-PVAM_v1.2_终稿修改方案套件.zip`，随本包提供） |
+| 修改方案套件SHA-256 | `6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97`（对象：`MODPLAN-PVAM_v1.2_终稿修改方案套件.zip`，随本包提供） |
 | SQL业务基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，排除Skill列明废弃/副本 |
 | 编制人 | AI Agent（施工方案编制） |
 | 复核人 | 待组织指派（AI Agent 仅完成文档自检，不代签组织审批） |
@@ -15103,7 +15103,7 @@ source "$C/ensure_temp_root.sh"
 PACKAGE_ROOT=$(cd "$C/.." && pwd)
 pvam_prepare_tmpdir "$(dirname "$PACKAGE_ROOT")/.pvam_tmp"
 TMP=$(mktemp -d "$TMPDIR/pvam-dev-parent.XXXXXX")
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "$TMP" >/dev/null 2>&1 || true' EXIT
 
 R="$TMP/repo"
 mkdir -p "$R/User"
@@ -15280,16 +15280,27 @@ source "$C/ensure_temp_root.sh"
 pvam_prepare_tmpdir "$(dirname "$ROOT")/.pvam_tmp"
 python "$C/validate_document_governance.py" --root "$ROOT"
 TMP=$(mktemp -d "$TMPDIR/pvam-governance.XXXXXX")
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "$TMP" >/dev/null 2>&1 || true' EXIT
 cp -a "$ROOT" "$TMP/pkg"
+reset_pkg() {
+  local attempt
+  for attempt in {1..20}; do
+    if rm -rf "$TMP/pkg" 2>/dev/null; then
+      cp -a "$ROOT" "$TMP/pkg"
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "BLOCKED_ENV_CAPABILITY: unable to reset governance selftest package" >&2
+  return 79
+}
 TARGET="$TMP/pkg/04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-01_金额编码公共层与基础模型适配器.md"
 sed -i 's/| 文档版本 | `v1.3` |/| 文档版本 | `v1.2` |/' "$TARGET"
 if python "$TMP/pkg/05_CONTROL/validate_document_governance.py" --root "$TMP/pkg" >/dev/null 2>&1; then
   echo 'old WORK metadata version was not rejected' >&2
   exit 41
 fi
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 TARGET="$TMP/pkg/04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-07B_事件路由与Stream保留.md"
 printf '\n无 GHOST_IN_DOUBT 且 XLEN 门禁通过才可恢复固定 MAXLEN。\n' >> "$TARGET"
 if python "$TMP/pkg/05_CONTROL/validate_document_governance.py" --root "$TMP/pkg" >/dev/null 2>&1; then
@@ -15299,8 +15310,7 @@ fi
 echo DOCUMENT_GOVERNANCE_SELFTEST_PASS
 
 # TASK/WORK source AC text drift must fail.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 TARGET="$TMP/pkg/04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-01_金额编码公共层与基础模型适配器.md"
 sed -i 's/NaN、Infinity、指数文本/NaN、sNaN、Infinity、指数文本/' "$TARGET"
 if python "$TMP/pkg/05_CONTROL/validate_document_governance.py" --root "$TMP/pkg" >/dev/null 2>&1; then
@@ -15310,8 +15320,7 @@ fi
 echo DOCUMENT_GOVERNANCE_AC_NEGATIVE_PASS
 
 # TASK/WORK AC environment drift must fail independently of source-text drift.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 TARGET="$TMP/pkg/04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-01_金额编码公共层与基础模型适配器.md"
 sed -i '/^| AC-06 |/ s/| DEV |/| UAT |/' "$TARGET"
 if python "$TMP/pkg/05_CONTROL/validate_document_governance.py" --root "$TMP/pkg" >/dev/null 2>&1; then
@@ -15321,8 +15330,7 @@ fi
 echo DOCUMENT_GOVERNANCE_AC_ENV_NEGATIVE_PASS
 
 # The dedicated AC-06 derived-test carrier is mandatory and unique.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 TARGET="$TMP/pkg/04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-01_金额编码公共层与基础模型适配器.md"
 sed -i 's/^### 10\.1 AC-06 实施细化 \/ 派生测试$/### 10.1 AC-06 派生测试说明/' "$TARGET"
 if python "$TMP/pkg/05_CONTROL/validate_document_governance.py" --root "$TMP/pkg" >/dev/null 2>&1; then
@@ -15334,8 +15342,7 @@ echo DOCUMENT_GOVERNANCE_AC06_SECTION_NEGATIVE_PASS
 # The WORK total §4.1 index is a controlled mirror of specialised WORK metadata
 # and TRACEABILITY_MANIFEST.work_contracts. Reintroducing the stale WORK-08 row
 # must be rejected independently of the root SHA layer.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 TARGET="$TMP/pkg/04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PLAN-PVAM_v1.3_施工总方案.md"
 sed -i \
   's/RISK-001、RISK-002、UV-001～UV-005、OPT-001、OPT-002、GAP-DEC004-2B | DEC-004、DEC-009、DEC-010、DEC-012、DEC-013、DEC-017、DEC-018/RISK-001、RISK-002、UV-001～UV-005、OPT-001、OPT-002 | DEC-009、DEC-010、DEC-012、DEC-013、DEC-015、DEC-017/' \
@@ -15390,31 +15397,27 @@ PY
 }
 
 # Current input roles are an allowlist, not caller-selected existing paths.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 sed -i 's#06_HISTORY/全链路项目工程文档七轮终局审查与核验报告.md#README.md#' \
   "$TMP/pkg/05_CONTROL/VERSION_REFERENCE_MANIFEST.json"
 expect_version_failure "$TMP/pkg" 'current review input roles/paths' current_input_role
 
 # A floating token cannot repair an incorrect structural heading.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 TARGET="$TMP/pkg/04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PLAN-PVAM_v1.3_施工总方案.md"
 sed -i 's/^#### Traceability Manifest v3$/#### Traceability Manifest v2/' "$TARGET"
 printf '\nTraceability Manifest v3\n' >> "$TARGET"
 expect_version_failure "$TMP/pkg" 'level-4 heading' shadow_traceability_heading
 
 # A floating revision token cannot replace a row in the version-history table.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 TARGET="$TMP/pkg/04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-01_金额编码公共层与基础模型适配器.md"
 sed -i '/^| v1\.3-r8 |/d' "$TARGET"
 printf '\nv1.3-r8\n' >> "$TARGET"
 expect_version_failure "$TMP/pkg" 'expected exactly one v1.3-r8 row' shadow_revision_token
 
 # The active authorization round must be a real H2, not a floating token.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 TARGET="$TMP/pkg/05_CONTROL/AUTHORIZATION_STATUS-PVAM-v2.md"
 sed -i 's/^## 第八轮技术就绪声明$/## 第七轮技术就绪声明/' "$TARGET"
 printf '\n第八轮技术就绪声明\n' >> "$TARGET"
@@ -15422,37 +15425,32 @@ expect_version_failure "$TMP/pkg" 'level-2 heading' shadow_authorization_round
 
 # A valid structural occurrence plus one extra raw occurrence must fail. Root
 # SHA is refreshed so these cases prove token semantics rather than hash drift.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 RELATIVE='04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PLAN-PVAM_v1.3_施工总方案.md'
 printf '\nTraceability Manifest v3\n' >> "$TMP/pkg/$RELATIVE"
 refresh_root_sha_entry "$TMP/pkg" "$RELATIVE"
 expect_version_failure "$TMP/pkg" 'expected exactly 1 raw occurrence, got 2' shadow_traceability_extra_occurrence
 
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 RELATIVE='04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件/WORK-PVAM-01_金额编码公共层与基础模型适配器.md'
 printf '\nv1.3-r8\n' >> "$TMP/pkg/$RELATIVE"
 refresh_root_sha_entry "$TMP/pkg" "$RELATIVE"
 expect_version_failure "$TMP/pkg" 'expected exactly 1 raw occurrence, got 2' shadow_revision_extra_occurrence
 
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 RELATIVE='05_CONTROL/AUTHORIZATION_STATUS-PVAM-v2.md'
 printf '\n第八轮技术就绪声明\n' >> "$TMP/pkg/$RELATIVE"
 refresh_root_sha_entry "$TMP/pkg" "$RELATIVE"
 expect_version_failure "$TMP/pkg" 'expected exactly 1 raw occurrence, got 2' shadow_authorization_extra_occurrence
 
 # Root SHA coverage is a bidirectional physical-file set comparison.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 sed -i '\#03_MODPLAN/MODPLAN-PVAM_v1.2_终稿修改方案套件/SHA256SUMS.txt$#d' \
   "$TMP/pkg/SHA256SUMS.txt"
 expect_version_failure "$TMP/pkg" 'root SHA file-set mismatch' root_sha_missing_entry
 
 # Package count fields are verified against the physical package.
-rm -rf "$TMP/pkg"
-cp -a "$ROOT" "$TMP/pkg"
+reset_pkg
 sed -i 's/"package_file_count_total": 105/"package_file_count_total": 999/' \
   "$TMP/pkg/DOCUMENT_MANIFEST.json"
 expect_version_failure "$TMP/pkg" 'package_file_count_total does not match physical files' package_count_drift
@@ -15479,7 +15477,7 @@ V="$C/validate_traceability_v3.py"
 BASE_ARGS=(--manifest "$C/TRACEABILITY_MANIFEST.json" --plan "$PLAN" --report "$REPORT" --modplan "$MOD" --task-dir "$T" --work-dir "$W")
 python "$V" "${BASE_ARGS[@]}"
 TMP=$(mktemp -d "$TMPDIR/pvam-trace-v3.XXXXXX")
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "$TMP" >/dev/null 2>&1 || true' EXIT
 
 expect_fail() {
   local label=$1; shift
@@ -19548,14 +19546,14 @@ WORK.来源修改任务 == edge.task_id == WORK 编号对应的同号 TASK
   "real_work_patches_generated": false,
   "real_dev_executed": false,
   "real_uat_executed": false,
-  "modplan_archive_sha256": "b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898",
-  "workplan_archive_sha256": "0a0e4b131abc6254c6befb574ff55c1b8399d2fd8b9baede33f168f8a71cb262",
+  "modplan_archive_sha256": "6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97",
+  "workplan_archive_sha256": "69368d3e976f93e7e1116b07c8b8870dc08c9523c92e3bda4f46385342ba1c98",
   "approved_commit_registry": {
     "path": "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
-    "sha256": "6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68",
+    "sha256": "9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1",
     "schema_version": 2
   },
-  "approved_commit_registry_sha256": "6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68",
+  "approved_commit_registry_sha256": "9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1",
   "current_round_delivery_files": {
     "final_qa_report": {
       "path": "FINAL_QA_REPORT.md",
@@ -19798,15 +19796,15 @@ WORK.来源修改任务 == edge.task_id == WORK 编号对应的同号 TASK
   "artifact_hashes": {
     "modplan_zip": {
       "path": "03_MODPLAN/MODPLAN-PVAM_v1.2_终稿修改方案套件.zip",
-      "sha256": "b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898"
+      "sha256": "6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97"
     },
     "workplan_zip": {
       "path": "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件.zip",
-      "sha256": "0a0e4b131abc6254c6befb574ff55c1b8399d2fd8b9baede33f168f8a71cb262"
+      "sha256": "69368d3e976f93e7e1116b07c8b8870dc08c9523c92e3bda4f46385342ba1c98"
     },
     "approved_commit_registry": {
       "path": "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
-      "sha256": "6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68",
+      "sha256": "9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1",
       "schema_version": 2
     }
   }
@@ -19865,9 +19863,9 @@ E8 定点修补包括：registry/evidence 全路径链 no-follow 门禁；根 SH
 
 `FINAL_QA_REPORT.md` 与 `PVAM_全链路第八轮定点修订全文.md` 均在 Version/Document Manifest 中以 `path + official_title + file_role` 结构化登记；后者保留历史文件名并作为当前轮次累计整改汇编。
 
-canonical registry：`05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json`，SHA-256=`6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68`。该摘要同时绑定于根 `DOCUMENT_MANIFEST.json` 与 `VERSION_REFERENCE_MANIFEST.json`；当前全部 registry 条目为 `PENDING`。
+canonical registry：`05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json`，SHA-256=`9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1`。该摘要同时绑定于根 `DOCUMENT_MANIFEST.json` 与 `VERSION_REFERENCE_MANIFEST.json`；当前全部 registry 条目为 `PENDING`。
 
 内嵌归档：
 
-- MODPLAN ZIP：`b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898`
-- WORKPLAN ZIP：`0a0e4b131abc6254c6befb574ff55c1b8399d2fd8b9baede33f168f8a71cb262`
+- MODPLAN ZIP：`6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97`
+- WORKPLAN ZIP：`69368d3e976f93e7e1116b07c8b8870dc08c9523c92e3bda4f46385342ba1c98`

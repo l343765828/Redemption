@@ -26,7 +26,7 @@ ARGS=(--repo "$ROOT" --base "$BASE" --parent-commit "$PARENT_COMMIT" --parent-tr
 [[ -z "$STAGE" ]] || ARGS+=(--stage "$STAGE")
 bash "$CONTROL_DIR/validate_work_patch.sh" "${ARGS[@]}"
 PATCH="$PATCH_OUT/${WORK_ID}.patch"; mkdir -p "$OUT_DIR/tmp"; TMP_ROOT=$(mktemp -d "$OUT_DIR/tmp/pvam-dev.XXXXXX"); TREE="$TMP_ROOT/tree"
-cleanup(){ if git -C "$ROOT" worktree list --porcelain | grep -Fqx "worktree $TREE"; then git -C "$ROOT" worktree remove --force "$TREE" >/dev/null 2>&1 || true; fi; rm -rf "$TMP_ROOT"; }
+cleanup(){ git -C "$ROOT" worktree remove --force "$TREE" >/dev/null 2>&1 || true; rm -rf "$TMP_ROOT"; }
 trap cleanup EXIT INT TERM
 BASE_SHA=$(git -C "$ROOT" rev-parse "$BASE^{commit}"); PARENT_COMMIT_SHA=$(git -C "$ROOT" rev-parse "$PARENT_COMMIT^{commit}"); PARENT_TREE_SHA=$(git -C "$ROOT" rev-parse "$PARENT_TREE^{tree}"); WORK_SHA=$(git -C "$ROOT" rev-parse "$WORK_COMMIT^{commit}"); WORK_TREE_SHA=$(git -C "$ROOT" rev-parse "$WORK_SHA^{tree}")
 git -C "$ROOT" worktree add --detach "$TREE" "$PARENT_COMMIT_SHA" >/dev/null; git -C "$TREE" apply --index "$PATCH"

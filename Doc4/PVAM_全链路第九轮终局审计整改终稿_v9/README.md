@@ -26,9 +26,9 @@ E8 定点修补包括：registry/evidence 全路径链 no-follow 门禁；根 SH
 
 r10 flag contract 补丁新增 Redis infrastructure/config 层 Provider 与 MANUAL_BOOTSTRAP 的独立施工卡；AR_CONFIG 仍为业务 Source of Truth，Redis 为唯一 runtime Provider，配置缺失或非法一律 fail-loud，run 内冻结；00/01/10/11 admission、TEST-ONLY 域、严格单调 config_version 与原子 CAS 均由 DEC-019 和 TC-FLAG-01～23 约束。生产实现仍须在治理 validator 全绿后按新 WORK allowlist 施工。
 
-canonical registry：`05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json`，SHA-256=`6c286713ee421777acc4d76177be6afbb6f16aad57565158d1f25de8fa3a1c68`。该摘要同时绑定于根 `DOCUMENT_MANIFEST.json` 与 `VERSION_REFERENCE_MANIFEST.json`；当前全部 registry 条目为 `PENDING`。
+canonical registry：`05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json`，SHA-256=`9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1`。该摘要同时绑定于根 `DOCUMENT_MANIFEST.json` 与 `VERSION_REFERENCE_MANIFEST.json`；当前全部 registry 条目为 `PENDING`。
 
 内嵌归档：
 
-- MODPLAN ZIP：`b221a56532155207e251fb2241d5b9ef2956291885fce5da0d2934ed78d91898`
-- WORKPLAN ZIP：`0a0e4b131abc6254c6befb574ff55c1b8399d2fd8b9baede33f168f8a71cb262`
+- MODPLAN ZIP：`6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97`
+- WORKPLAN ZIP：`69368d3e976f93e7e1116b07c8b8870dc08c9523c92e3bda4f46385342ba1c98`

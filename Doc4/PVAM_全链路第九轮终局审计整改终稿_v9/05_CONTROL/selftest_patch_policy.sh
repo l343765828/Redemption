@@ -5,7 +5,7 @@ source "$C/ensure_temp_root.sh"
 PACKAGE_ROOT=$(cd "$C/.." && pwd)
 pvam_prepare_tmpdir "$(dirname "$PACKAGE_ROOT")/.pvam_tmp"
 TMP=$(mktemp -d "$TMPDIR/pvam-patch-selftest.XXXXXX")
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "$TMP" >/dev/null 2>&1 || true' EXIT
 
 R="$TMP/repo"
 mkdir -p "$R/MessageConsumer"

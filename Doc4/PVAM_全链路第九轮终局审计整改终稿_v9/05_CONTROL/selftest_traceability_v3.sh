@@ -13,7 +13,7 @@ V="$C/validate_traceability_v3.py"
 BASE_ARGS=(--manifest "$C/TRACEABILITY_MANIFEST.json" --plan "$PLAN" --report "$REPORT" --modplan "$MOD" --task-dir "$T" --work-dir "$W")
 python "$V" "${BASE_ARGS[@]}"
 TMP=$(mktemp -d "$TMPDIR/pvam-trace-v3.XXXXXX")
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "$TMP" >/dev/null 2>&1 || true' EXIT
 
 expect_fail() {
   local label=$1; shift

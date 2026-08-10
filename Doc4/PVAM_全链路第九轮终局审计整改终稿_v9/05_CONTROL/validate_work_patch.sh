@@ -37,7 +37,7 @@ python "$CONTROL_DIR/validate_parent_provenance.py" "${ARGS[@]}"
 PATCH="$OUT_DIR/${WORK_ID}.patch"; STATUS_FILE="$OUT_DIR/changed_status.tsv"; FILES_FILE="$OUT_DIR/changed_files.txt"
 mkdir -p "$OUT_DIR/tmp"
 TMP_ROOT=$(mktemp -d "$OUT_DIR/tmp/pvam-patch.XXXXXX"); CHECK_TREE="$TMP_ROOT/tree"
-cleanup(){ if git -C "$REPO_ROOT" worktree list --porcelain | grep -Fqx "worktree $CHECK_TREE"; then git -C "$REPO_ROOT" worktree remove --force "$CHECK_TREE" >/dev/null 2>&1 || true; fi; rm -rf "$TMP_ROOT"; }
+cleanup(){ git -C "$REPO_ROOT" worktree remove --force "$CHECK_TREE" >/dev/null 2>&1 || true; rm -rf "$TMP_ROOT"; }
 trap cleanup EXIT INT TERM
 git -C "$REPO_ROOT" diff --name-status --find-renames "$PARENT_COMMIT_SHA" "$WORK_SHA" > "$STATUS_FILE"
 git -C "$REPO_ROOT" diff --name-only --find-renames "$PARENT_COMMIT_SHA" "$WORK_SHA" > "$FILES_FILE"
