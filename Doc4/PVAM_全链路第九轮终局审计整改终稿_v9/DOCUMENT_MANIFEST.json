@@ -17,17 +17,17 @@
     "code_audit_conclusion":  "REJECTED",
     "dec_013":  "OPEN",
     "gate_c":  "OPEN",
-    "real_work_patches_generated":  false,
-    "real_dev_executed":  false,
+    "real_work_patches_generated":  true,
+    "real_dev_executed":  true,
     "real_uat_executed":  false,
     "modplan_archive_sha256":  "6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97",
-    "workplan_archive_sha256":  "69368d3e976f93e7e1116b07c8b8870dc08c9523c92e3bda4f46385342ba1c98",
+    "workplan_archive_sha256":  "9fcdfc7a510189c7af07cbbcdec73338d30a04337a7791c69845798864156aaf",
     "approved_commit_registry":  {
                                      "path":  "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
-                                     "sha256":  "9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1",
+                                     "sha256":  "d4ab1ca9303cbf0da11e26ecfc9731ef1e356fd12fe9989c5a6068c9394ff513",
                                      "schema_version":  2
                                  },
-    "approved_commit_registry_sha256":  "9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1",
+    "approved_commit_registry_sha256":  "d4ab1ca9303cbf0da11e26ecfc9731ef1e356fd12fe9989c5a6068c9394ff513",
     "current_round_delivery_files":  {
                                          "final_qa_report":  {
                                                                  "path":  "FINAL_QA_REPORT.md",
@@ -40,9 +40,9 @@
                                                                          "file_role":  "CURRENT_ROUND_CUMULATIVE_REMEDIATION_COMPILATION"
                                                                      }
                                      },
-    "package_file_count_total":  103,
-    "package_file_count_excluding_root_sha256":  102,
-    "root_sha256_entry_count":  102,
+    "package_file_count_total":  289,
+    "package_file_count_excluding_root_sha256":  288,
+    "root_sha256_entry_count":  288,
     "construction_readiness":  "DOCUMENTS_APPROVED_ORGANIZATIONAL_APPROVAL_PENDING",
     "control_script_status":  "SELFTEST_PASS",
     "archive_readiness":  "READY_FOR_ARCHIVE",

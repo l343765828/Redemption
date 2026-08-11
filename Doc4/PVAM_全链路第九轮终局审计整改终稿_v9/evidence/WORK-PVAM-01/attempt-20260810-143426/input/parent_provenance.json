@@ -1,0 +1,23 @@
+{
+  "schema_version": 2,
+  "work_id": "WORK-PVAM-01",
+  "stage": null,
+  "root_baseline_sha": "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
+  "approved_commit_registry_sha256": "ca9e7c98b59e161871c746163aebe343fe6e2f87598c3fe88036f73a3a22f82f",
+  "direct_prerequisites": [
+    "WORK-PVAM-01C"
+  ],
+  "included_works": [
+    {
+      "work_id": "WORK-PVAM-01C",
+      "commit_sha": "2a5d39651f8eb50845c4377d3181d3cb846f6cab",
+      "tree_sha": "3284a9309c4fa450a6e3c40befb591f9854b2074"
+    }
+  ],
+  "integration_order": [
+    "WORK-PVAM-01C"
+  ],
+  "parent_commit_sha": "2a5d39651f8eb50845c4377d3181d3cb846f6cab",
+  "parent_tree_sha": "3284a9309c4fa450a6e3c40befb591f9854b2074",
+  "work_commit_sha": "9c1382600fa60e2d488113aef289bcc2331f8f45"
+}

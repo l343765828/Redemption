@@ -1,0 +1,12 @@
+{
+  "work_id": "WORK-PVAM-01",
+  "work_commit_sha": "9c1382600fa60e2d488113aef289bcc2331f8f45",
+  "work_tree_sha": "8cfa5f0738dc7cb50cf9b739fca9b4a20b609af9",
+  "user_stats_exit": 0,
+  "elite_bonus_exit": 0,
+  "known_elite_xfail_count": 5,
+  "unexpected_xpass_count": 0,
+  "started_at": "2026-08-10T14:34:53Z",
+  "finished_at": "2026-08-10T14:35:02Z",
+  "status": "PASS"
+}

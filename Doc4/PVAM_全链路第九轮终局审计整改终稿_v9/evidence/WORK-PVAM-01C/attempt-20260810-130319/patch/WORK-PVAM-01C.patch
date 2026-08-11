@@ -1,0 +1,1214 @@
+diff --git a/Redishelper/PVAmountConfigBootstrap.py b/Redishelper/PVAmountConfigBootstrap.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..f53b1bff7c70a4e72c0482b9dac7c5da5843ea5d
+--- /dev/null
++++ b/Redishelper/PVAmountConfigBootstrap.py
+@@ -0,0 +1,299 @@
++"""PVAM 金额版本开关的 MANUAL_BOOTSTRAP 原子发布入口。"""
++
++from __future__ import annotations
++
++import argparse
++import sys
++from typing import Any
++
++from Redishelper.PVAmountConfigProvider import (
++    ACTIVE_POINTER_KEY,
++    AR_CONFIG_SOURCE,
++    MANUAL_BOOTSTRAP_MODE,
++    PVAmountConfigError,
++    PVAmountConfigProvider,
++    PVAmountRunConfig,
++    SNAPSHOT_KEY_PREFIX,
++    _resolve_redis_client,
++    compute_snapshot_checksum,
++)
++
++
++# region Redis Lua CAS 合同
++
++# 所有字段校验、旧版本比较、immutable snapshot 写入与 active pointer 切换
++# 位于同一个 server-side 原子边界内。十进制版本按字符串比较，避免 Lua
++# number 在 2^53 以上丢失精度。
++PUBLISH_SNAPSHOT_LUA = r"""
++-- PVAM_PUBLISH_SNAPSHOT_V1
++local function canonical_decimal(value)
++    if value == "0" then
++        return value
++    end
++    if string.match(value, "^[1-9][0-9]*$") then
++        return value
++    end
++    return nil
++end
++
++local function compare_decimal(left, right)
++    if #left < #right then
++        return -1
++    end
++    if #left > #right then
++        return 1
++    end
++    if left < right then
++        return -1
++    end
++    if left > right then
++        return 1
++    end
++    return 0
++end
++
++local new_version = canonical_decimal(ARGV[2])
++if not new_version then
++    return {"ERR", "INVALID_CONFIG_VERSION"}
++end
++
++local active_pointer = redis.call("GET", KEYS[1])
++if ARGV[3] == "INITIAL" then
++    if active_pointer then
++        return {"ERR", "STALE_CONFIG_VERSION"}
++    end
++else
++    if not active_pointer then
++        return {"ERR", "ACTIVE_SNAPSHOT_MISSING"}
++    end
++
++    local separator = string.find(active_pointer, ":", 1, true)
++    if not separator then
++        return {"ERR", "ACTIVE_POINTER_INVALID"}
++    end
++
++    local active_version = canonical_decimal(
++        string.sub(active_pointer, 1, separator - 1)
++    )
++    local active_checksum = string.sub(active_pointer, separator + 1)
++    if not active_version or string.len(active_checksum) ~= 64 or
++       not string.match(active_checksum, "^[0-9a-f]+$") then
++        return {"ERR", "ACTIVE_POINTER_INVALID"}
++    end
++
++    local expected_version = canonical_decimal(ARGV[3])
++    if not expected_version or active_version ~= expected_version then
++        return {"ERR", "STALE_CONFIG_VERSION"}
++    end
++    if compare_decimal(new_version, active_version) <= 0 then
++        return {"ERR", "STALE_CONFIG_VERSION"}
++    end
++end
++
++local snapshot_key = ARGV[1] .. new_version
++if redis.call("EXISTS", snapshot_key) ~= 0 then
++    return {"ERR", "SNAPSHOT_ALREADY_EXISTS"}
++end
++
++redis.call(
++    "HSET",
++    snapshot_key,
++    "PV_AMOUNT_V2_READ", ARGV[4],
++    "PV_AMOUNT_V2_WRITE", ARGV[5],
++    "config_version", new_version,
++    "load_mode", ARGV[6],
++    "source", ARGV[7],
++    "checksum", ARGV[8]
++)
++local new_pointer = new_version .. ":" .. ARGV[8]
++redis.call("SET", KEYS[1], new_pointer)
++return {"OK", new_pointer, snapshot_key}
++"""
++
++_EXPECTED_VERSION_UNSET = object()
++
++# endregion
++
++
++# region MANUAL_BOOTSTRAP 发布
++
++
++def _require_version(value: Any, *, field_name: str) -> int:
++    if type(value) is not int or value < 0:
++        raise PVAmountConfigError("INVALID_CONFIG_VERSION", field_name)
++    return value
++
++
++def _parse_publish_reply(reply: Any) -> tuple[str, str]:
++    if not isinstance(reply, (list, tuple)) or len(reply) < 2:
++        raise PVAmountConfigError("ATOMIC_PUBLISH_PROTOCOL_INVALID")
++
++    def as_text(value: Any) -> str:
++        if isinstance(value, bytes):
++            return value.decode("utf-8")
++        if isinstance(value, str):
++            return value
++        raise PVAmountConfigError("ATOMIC_PUBLISH_PROTOCOL_INVALID")
++
++    status = as_text(reply[0])
++    if status == "ERR":
++        raise PVAmountConfigError(as_text(reply[1]))
++    if status != "OK" or len(reply) != 3:
++        raise PVAmountConfigError("ATOMIC_PUBLISH_PROTOCOL_INVALID")
++    return as_text(reply[1]), as_text(reply[2])
++
++
++def publish_manual_bootstrap(
++        config_version: int,
++        *,
++        expected_active_version: Any = _EXPECTED_VERSION_UNSET,
++        redis_client: Any = None,
++) -> PVAmountRunConfig:
++    """原子发布当前批准的 01 snapshot，并执行 read-after-write verify。
++
++    第一次发布必须显式传入 expected_active_version=None。后续发布必须
++    显式传入调用方所批准的 active version；Lua 在原子边界内做 CAS。
++    """
++
++    # region 发布前验证
++    config_version = _require_version(
++        config_version,
++        field_name="config_version",
++    )
++    if expected_active_version is _EXPECTED_VERSION_UNSET:
++        raise PVAmountConfigError("EXPECTED_ACTIVE_VERSION_REQUIRED")
++
++    if expected_active_version is None:
++        expected_token = "INITIAL"
++    else:
++        expected_active_version = _require_version(
++            expected_active_version,
++            field_name="expected_active_version",
++        )
++        if config_version <= expected_active_version:
++            raise PVAmountConfigError("STALE_CONFIG_VERSION")
++        expected_token = str(expected_active_version)
++
++    read_v2 = False
++    write_v2 = True
++    checksum = compute_snapshot_checksum(
++        read_v2=read_v2,
++        write_v2=write_v2,
++        config_version=config_version,
++        load_mode=MANUAL_BOOTSTRAP_MODE,
++        source=AR_CONFIG_SOURCE,
++    )
++    # endregion
++
++    # region Lua/CAS 原子发布
++    client = _resolve_redis_client(redis_client)
++    try:
++        reply = client.eval(
++            PUBLISH_SNAPSHOT_LUA,
++            1,
++            ACTIVE_POINTER_KEY,
++            SNAPSHOT_KEY_PREFIX,
++            str(config_version),
++            expected_token,
++            "false",
++            "true",
++            MANUAL_BOOTSTRAP_MODE,
++            AR_CONFIG_SOURCE,
++            checksum,
++        )
++    except PVAmountConfigError:
++        raise
++    except Exception as exc:
++        raise PVAmountConfigError(
++            "REDIS_UNAVAILABLE",
++            f"{type(exc).__name__}: {exc}",
++        ) from exc
++
++    pointer, snapshot_key = _parse_publish_reply(reply)
++    expected_pointer = f"{config_version}:{checksum}"
++    expected_snapshot_key = f"{SNAPSHOT_KEY_PREFIX}{config_version}"
++    if pointer != expected_pointer or snapshot_key != expected_snapshot_key:
++        raise PVAmountConfigError("ATOMIC_PUBLISH_PROTOCOL_INVALID")
++    # endregion
++
++    # region Read-after-write verify
++    verified = PVAmountConfigProvider(client).load_run_config()
++    expected = PVAmountRunConfig(
++        read_v2=read_v2,
++        write_v2=write_v2,
++        config_version=config_version,
++        load_mode=MANUAL_BOOTSTRAP_MODE,
++        source=AR_CONFIG_SOURCE,
++        checksum=checksum,
++    )
++    if verified != expected:
++        raise PVAmountConfigError("READ_AFTER_WRITE_VERIFY_FAILED")
++    return verified
++    # endregion
++
++
++# endregion
++
++
++# region CLI
++
++
++def build_argument_parser() -> argparse.ArgumentParser:
++    parser = argparse.ArgumentParser(
++        description="Atomically publish the approved PVAM 01 Redis snapshot.",
++    )
++    parser.add_argument(
++        "--config-version",
++        type=int,
++        required=True,
++        help="strictly monotonic non-negative integer revision",
++    )
++    expected = parser.add_mutually_exclusive_group(required=True)
++    expected.add_argument(
++        "--initial-create",
++        action="store_true",
++        help="require that no active snapshot exists",
++    )
++    expected.add_argument(
++        "--expected-active-version",
++        type=int,
++        help="CAS against this active version",
++    )
++    return parser
++
++
++def main(argv: Any = None) -> int:
++    args = build_argument_parser().parse_args(argv)
++    expected_active_version = (
++        None if args.initial_create else args.expected_active_version
++    )
++    try:
++        config = publish_manual_bootstrap(
++            args.config_version,
++            expected_active_version=expected_active_version,
++        )
++    except PVAmountConfigError as exc:
++        print(f"PVAM_BOOTSTRAP_FAIL {exc}", file=sys.stderr)
++        return 2
++
++    print(
++        "PVAM_BOOTSTRAP_PASS "
++        f"state={config.state} config_version={config.config_version} "
++        f"checksum={config.checksum}"
++    )
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
++
++
++# endregion
++
++
++__all__ = [
++    "PUBLISH_SNAPSHOT_LUA",
++    "build_argument_parser",
++    "main",
++    "publish_manual_bootstrap",
++]
+diff --git a/Redishelper/PVAmountConfigProvider.py b/Redishelper/PVAmountConfigProvider.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..23302359968c1a413b42a60962dfaa945b746317
+--- /dev/null
++++ b/Redishelper/PVAmountConfigProvider.py
+@@ -0,0 +1,393 @@
++"""PVAM 金额版本开关的 Redis runtime Provider。
++
++本模块属于 Redis infrastructure/config 层。它只负责原子读取、严格解析、
++production run admission 与 run 内冻结；不查询 AR_CONFIG、不读取环境变量，
++也不提供缺失配置的默认值或 stale cache。
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import re
++from dataclasses import dataclass
++from typing import Any, Optional
++
++
++# region Redis snapshot 合同
++
++ACTIVE_POINTER_KEY = "pvam:amount_config:active"
++SNAPSHOT_KEY_PREFIX = "pvam:amount_config:snapshot:"
++
++READ_FIELD = "PV_AMOUNT_V2_READ"
++WRITE_FIELD = "PV_AMOUNT_V2_WRITE"
++VERSION_FIELD = "config_version"
++LOAD_MODE_FIELD = "load_mode"
++SOURCE_FIELD = "source"
++CHECKSUM_FIELD = "checksum"
++
++MANUAL_BOOTSTRAP_MODE = "MANUAL_BOOTSTRAP"
++DELTA_SYNC_MODE = "DELTA_SYNC"
++AR_CONFIG_SOURCE = "AR_CONFIG"
++
++_CANONICAL_VERSION = re.compile(r"^(?:0|[1-9][0-9]*)$")
++_CANONICAL_CHECKSUM = re.compile(r"^[0-9a-f]{64}$")
++
++# Redis 在同一个 Lua 执行边界内读取 active pointer 与 versioned snapshot。
++# Provider 只接受该协议返回值，不使用 GET/HGET 的分步读取替代它。
++LOAD_SNAPSHOT_LUA = r"""
++-- PVAM_LOAD_SNAPSHOT_V1
++local pointer = redis.call("GET", KEYS[1])
++if not pointer then
++    return {"ERR", "ACTIVE_SNAPSHOT_MISSING"}
++end
++
++local separator = string.find(pointer, ":", 1, true)
++if not separator then
++    return {"ERR", "ACTIVE_POINTER_INVALID"}
++end
++
++local version = string.sub(pointer, 1, separator - 1)
++local checksum = string.sub(pointer, separator + 1)
++if version == "" or checksum == "" then
++    return {"ERR", "ACTIVE_POINTER_INVALID"}
++end
++
++local snapshot_key = ARGV[1] .. version
++if redis.call("EXISTS", snapshot_key) == 0 then
++    return {"ERR", "SNAPSHOT_MISSING"}
++end
++
++local fields = redis.call("HGETALL", snapshot_key)
++local result = {"OK", pointer, snapshot_key}
++for index = 1, #fields do
++    result[#result + 1] = fields[index]
++end
++return result
++"""
++
++# endregion
++
++
++# region 错误与 immutable run config
++
++
++class PVAmountConfigError(RuntimeError):
++    """所有配置合同错误的统一 fail-loud 异常。"""
++
++    def __init__(self, code: str, detail: Optional[str] = None):
++        self.code = str(code)
++        self.detail = detail
++        message = self.code if not detail else f"{self.code}: {detail}"
++        super().__init__(message)
++
++
++def _canonical_bool(value: bool) -> str:
++    return "true" if value else "false"
++
++
++def _require_canonical_version(value: str, *, error_code: str) -> int:
++    if not _CANONICAL_VERSION.fullmatch(value):
++        raise PVAmountConfigError(error_code, repr(value))
++    return int(value)
++
++
++def compute_snapshot_checksum(
++        *,
++        read_v2: bool,
++        write_v2: bool,
++        config_version: int,
++        load_mode: str,
++        source: str,
++) -> str:
++    """计算发布端/读取端一致性用 canonical SHA-256；它不是授权或 MAC。"""
++
++    if type(read_v2) is not bool or type(write_v2) is not bool:
++        raise PVAmountConfigError("INVALID_BOOL_TYPE")
++    if type(config_version) is not int or config_version < 0:
++        raise PVAmountConfigError("INVALID_CONFIG_VERSION")
++    if not isinstance(load_mode, str) or not load_mode:
++        raise PVAmountConfigError("INVALID_LOAD_MODE")
++    if not isinstance(source, str) or not source:
++        raise PVAmountConfigError("INVALID_SOURCE")
++
++    payload = {
++        READ_FIELD: _canonical_bool(read_v2),
++        WRITE_FIELD: _canonical_bool(write_v2),
++        VERSION_FIELD: str(config_version),
++        LOAD_MODE_FIELD: load_mode,
++        SOURCE_FIELD: source,
++    }
++    canonical = json.dumps(
++        payload,
++        ensure_ascii=True,
++        sort_keys=True,
++        separators=(",", ":"),
++    )
++    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
++
++
++@dataclass(frozen=True, slots=True)
++class PVAmountRunConfig:
++    """一次业务 run 使用的不可变金额版本配置。"""
++
++    read_v2: bool
++    write_v2: bool
++    config_version: int
++    load_mode: str
++    source: str
++    checksum: str
++
++    def __post_init__(self) -> None:
++        # region 数据验证
++        if type(self.read_v2) is not bool or type(self.write_v2) is not bool:
++            raise PVAmountConfigError("INVALID_BOOL_TYPE")
++        if type(self.config_version) is not int or self.config_version < 0:
++            raise PVAmountConfigError("INVALID_CONFIG_VERSION")
++        if self.load_mode not in {MANUAL_BOOTSTRAP_MODE, DELTA_SYNC_MODE}:
++            raise PVAmountConfigError("INVALID_LOAD_MODE", repr(self.load_mode))
++        if self.source != AR_CONFIG_SOURCE:
++            raise PVAmountConfigError("INVALID_SOURCE", repr(self.source))
++        if not isinstance(self.checksum, str) or not _CANONICAL_CHECKSUM.fullmatch(
++                self.checksum
++        ):
++            raise PVAmountConfigError("INVALID_CHECKSUM", repr(self.checksum))
++
++        expected_checksum = compute_snapshot_checksum(
++            read_v2=self.read_v2,
++            write_v2=self.write_v2,
++            config_version=self.config_version,
++            load_mode=self.load_mode,
++            source=self.source,
++        )
++        if self.checksum != expected_checksum:
++            raise PVAmountConfigError("CHECKSUM_MISMATCH")
++        # endregion
++
++    @property
++    def state(self) -> str:
++        """返回正式四态编码：00、01、10 或 11。"""
++
++        return f"{int(self.read_v2)}{int(self.write_v2)}"
++
++
++# endregion
++
++
++# region Provider 原子读取与严格解析
++
++
++def _as_text(value: Any, *, error_code: str) -> str:
++    if isinstance(value, bytes):
++        try:
++            return value.decode("utf-8")
++        except UnicodeDecodeError as exc:
++            raise PVAmountConfigError(error_code, "non-UTF-8 Redis value") from exc
++    if isinstance(value, str):
++        return value
++    raise PVAmountConfigError(error_code, f"unexpected type {type(value).__name__}")
++
++
++def _parse_canonical_bool(value: str, *, field_name: str) -> bool:
++    if value == "true":
++        return True
++    if value == "false":
++        return False
++    raise PVAmountConfigError("INVALID_BOOL", f"{field_name}={value!r}")
++
++
++def _resolve_redis_client(redis_client: Any = None) -> Any:
++    """延迟复用项目唯一 Redis 连接，避免模块 import 时额外建连接。"""
++
++    if redis_client is not None:
++        return redis_client
++
++    try:
++        from Redishelper.BaseRedisModel import redis_conn
++    except Exception as exc:  # pragma: no cover - 仅真实环境导入失败时触发
++        raise PVAmountConfigError(
++            "REDIS_UNAVAILABLE",
++            f"default client import failed: {type(exc).__name__}",
++        ) from exc
++    return redis_conn
++
++
++class PVAmountConfigProvider:
++    """从 Redis 原子 snapshot 加载一次 immutable run config。"""
++
++    def __init__(self, redis_client: Any = None):
++        self._redis_client = redis_client
++
++    def _client_for_io(self) -> Any:
++        return _resolve_redis_client(self._redis_client)
++
++    def load_run_config(self) -> PVAmountRunConfig:
++        # region Redis 原子读取
++        client = self._client_for_io()
++        try:
++            reply = client.eval(
++                LOAD_SNAPSHOT_LUA,
++                1,
++                ACTIVE_POINTER_KEY,
++                SNAPSHOT_KEY_PREFIX,
++            )
++        except PVAmountConfigError:
++            raise
++        except Exception as exc:
++            raise PVAmountConfigError(
++                "REDIS_UNAVAILABLE",
++                f"{type(exc).__name__}: {exc}",
++            ) from exc
++        # endregion
++
++        # region 原子协议验证
++        if not isinstance(reply, (list, tuple)) or len(reply) < 2:
++            raise PVAmountConfigError("ATOMIC_LOAD_PROTOCOL_INVALID")
++
++        status = _as_text(reply[0], error_code="ATOMIC_LOAD_PROTOCOL_INVALID")
++        if status == "ERR":
++            code = _as_text(reply[1], error_code="ATOMIC_LOAD_PROTOCOL_INVALID")
++            raise PVAmountConfigError(code)
++        if status != "OK" or len(reply) < 3:
++            raise PVAmountConfigError("ATOMIC_LOAD_PROTOCOL_INVALID")
++
++        pointer = _as_text(reply[1], error_code="ACTIVE_POINTER_INVALID")
++        snapshot_key = _as_text(reply[2], error_code="ATOMIC_LOAD_PROTOCOL_INVALID")
++        flat_fields = list(reply[3:])
++        if len(flat_fields) % 2 != 0:
++            raise PVAmountConfigError("SNAPSHOT_INCOMPLETE")
++        # endregion
++
++        # region Snapshot 字段解析
++        fields: dict[str, str] = {}
++        for index in range(0, len(flat_fields), 2):
++            field = _as_text(
++                flat_fields[index],
++                error_code="ATOMIC_LOAD_PROTOCOL_INVALID",
++            )
++            value = _as_text(
++                flat_fields[index + 1],
++                error_code="ATOMIC_LOAD_PROTOCOL_INVALID",
++            )
++            if field in fields:
++                raise PVAmountConfigError("SNAPSHOT_DUPLICATE_FIELD", field)
++            fields[field] = value
++
++        required_codes = (
++            (READ_FIELD, "READ_MISSING"),
++            (WRITE_FIELD, "WRITE_MISSING"),
++            (VERSION_FIELD, "CONFIG_VERSION_MISSING"),
++            (LOAD_MODE_FIELD, "LOAD_MODE_MISSING"),
++            (SOURCE_FIELD, "SOURCE_MISSING"),
++            (CHECKSUM_FIELD, "CHECKSUM_MISSING"),
++        )
++        for field, code in required_codes:
++            if field not in fields:
++                raise PVAmountConfigError(code)
++        # endregion
++
++        # region Pointer/version/checksum 交叉验证
++        if pointer.count(":") != 1:
++            raise PVAmountConfigError("ACTIVE_POINTER_INVALID")
++        pointer_version_text, pointer_checksum = pointer.split(":", 1)
++        pointer_version = _require_canonical_version(
++            pointer_version_text,
++            error_code="ACTIVE_POINTER_INVALID",
++        )
++        if not _CANONICAL_CHECKSUM.fullmatch(pointer_checksum):
++            raise PVAmountConfigError("ACTIVE_POINTER_INVALID")
++
++        snapshot_version = _require_canonical_version(
++            fields[VERSION_FIELD],
++            error_code="INVALID_CONFIG_VERSION",
++        )
++        if snapshot_version != pointer_version:
++            raise PVAmountConfigError("VERSION_MISMATCH")
++        if snapshot_key != f"{SNAPSHOT_KEY_PREFIX}{pointer_version_text}":
++            raise PVAmountConfigError("VERSION_MISMATCH")
++        if fields[CHECKSUM_FIELD] != pointer_checksum:
++            raise PVAmountConfigError("CHECKSUM_MISMATCH")
++        # endregion
++
++        # region Immutable run config
++        return PVAmountRunConfig(
++            read_v2=_parse_canonical_bool(
++                fields[READ_FIELD],
++                field_name=READ_FIELD,
++            ),
++            write_v2=_parse_canonical_bool(
++                fields[WRITE_FIELD],
++                field_name=WRITE_FIELD,
++            ),
++            config_version=snapshot_version,
++            load_mode=fields[LOAD_MODE_FIELD],
++            source=fields[SOURCE_FIELD],
++            checksum=fields[CHECKSUM_FIELD],
++        )
++        # endregion
++
++
++# endregion
++
++
++# region Production admission 与 run-freeze
++
++
++def admit_production_run_config(config: PVAmountRunConfig) -> None:
++    """校验 production run 的四态；当前没有 11 的正式授权入口。"""
++
++    if not isinstance(config, PVAmountRunConfig):
++        raise PVAmountConfigError("RUN_CONFIG_TYPE_INVALID")
++
++    if config.read_v2 and not config.write_v2:
++        raise PVAmountConfigError("INVALID_STATE")
++    if config.read_v2 and config.write_v2:
++        raise PVAmountConfigError("V2_STATE_NOT_AUTHORIZED")
++
++
++@dataclass(frozen=True, slots=True)
++class PVAmountRunSession:
++    """业务处理开始前建立、随后不可刷新的一次性 run session。"""
++
++    config: PVAmountRunConfig
++
++    @classmethod
++    def start(cls, provider: PVAmountConfigProvider) -> "PVAmountRunSession":
++        # region 单次加载
++        if not isinstance(provider, PVAmountConfigProvider):
++            raise PVAmountConfigError("PROVIDER_TYPE_INVALID")
++        config = provider.load_run_config()
++        # endregion
++
++        # region Production admission
++        admit_production_run_config(config)
++        # endregion
++
++        # region Run 内冻结
++        return cls(config=config)
++        # endregion
++
++
++# endregion
++
++
++__all__ = [
++    "ACTIVE_POINTER_KEY",
++    "AR_CONFIG_SOURCE",
++    "CHECKSUM_FIELD",
++    "DELTA_SYNC_MODE",
++    "LOAD_MODE_FIELD",
++    "LOAD_SNAPSHOT_LUA",
++    "MANUAL_BOOTSTRAP_MODE",
++    "PVAmountConfigError",
++    "PVAmountConfigProvider",
++    "PVAmountRunConfig",
++    "PVAmountRunSession",
++    "READ_FIELD",
++    "SNAPSHOT_KEY_PREFIX",
++    "SOURCE_FIELD",
++    "VERSION_FIELD",
++    "WRITE_FIELD",
++    "admit_production_run_config",
++    "compute_snapshot_checksum",
++]
+diff --git a/tests/pvam/WORK-PVAM-01C/test_flag_runtime_contract.py b/tests/pvam/WORK-PVAM-01C/test_flag_runtime_contract.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..18a55ca6aa69886e3c2c8d5df93b334132ff2f61
+--- /dev/null
++++ b/tests/pvam/WORK-PVAM-01C/test_flag_runtime_contract.py
+@@ -0,0 +1,504 @@
++"""WORK-PVAM-01C / TC-FLAG-01～13、22、23 DEV tests。
++
++FakeRedis 只证明 Provider 与 Lua 调用合同的 DEV 行为；它不构成真实 Redis UAT。
++"""
++
++from __future__ import annotations
++
++import ast
++import os
++import sys
++import threading
++import unittest
++from dataclasses import FrozenInstanceError
++from pathlib import Path
++from unittest.mock import patch
++
++PROJECT_ROOT = Path(__file__).resolve().parents[3]
++if str(PROJECT_ROOT) not in sys.path:
++    sys.path.insert(0, str(PROJECT_ROOT))
++
++from Redishelper.PVAmountConfigBootstrap import (
++    PUBLISH_SNAPSHOT_LUA,
++    publish_manual_bootstrap,
++)
++from Redishelper.PVAmountConfigProvider import (
++    ACTIVE_POINTER_KEY,
++    AR_CONFIG_SOURCE,
++    CHECKSUM_FIELD,
++    LOAD_MODE_FIELD,
++    LOAD_SNAPSHOT_LUA,
++    MANUAL_BOOTSTRAP_MODE,
++    PVAmountConfigError,
++    PVAmountConfigProvider,
++    PVAmountRunConfig,
++    PVAmountRunSession,
++    READ_FIELD,
++    SNAPSHOT_KEY_PREFIX,
++    SOURCE_FIELD,
++    VERSION_FIELD,
++    WRITE_FIELD,
++    admit_production_run_config,
++    compute_snapshot_checksum,
++)
++
++
++# region Fake Redis 原子边界
++
++
++class FakeRedis:
++    """只模拟本卡两个 Lua script 的 server-side 原子结果。"""
++
++    def __init__(self):
++        self.strings: dict[str, str] = {}
++        self.hashes: dict[str, dict[str, str]] = {}
++        self.lock = threading.Lock()
++        self.eval_calls: list[str] = []
++        self.publish_count = 0
++        self.fail_with: Exception | None = None
++
++    def eval(self, script, numkeys, *args):
++        if self.fail_with is not None:
++            raise self.fail_with
++        if numkeys != 1:
++            raise AssertionError("本合同只允许单 key 声明的 Lua 调用")
++
++        with self.lock:
++            if "PVAM_LOAD_SNAPSHOT_V1" in script:
++                self.eval_calls.append("load")
++                return self._eval_load(*args)
++            if "PVAM_PUBLISH_SNAPSHOT_V1" in script:
++                self.eval_calls.append("publish")
++                return self._eval_publish(*args)
++            raise AssertionError("未知 Lua script")
++
++    def _eval_load(self, active_key, snapshot_prefix):
++        pointer = self.strings.get(active_key)
++        if pointer is None:
++            return ["ERR", "ACTIVE_SNAPSHOT_MISSING"]
++        if pointer.count(":") != 1:
++            return ["ERR", "ACTIVE_POINTER_INVALID"]
++
++        version, _ = pointer.split(":", 1)
++        snapshot_key = snapshot_prefix + version
++        snapshot = self.hashes.get(snapshot_key)
++        if snapshot is None:
++            return ["ERR", "SNAPSHOT_MISSING"]
++
++        flat: list[str] = []
++        for field, value in snapshot.items():
++            flat.extend((field, value))
++        return ["OK", pointer, snapshot_key, *flat]
++
++    def _eval_publish(
++            self,
++            active_key,
++            snapshot_prefix,
++            new_version,
++            expected_token,
++            read_value,
++            write_value,
++            load_mode,
++            source,
++            checksum,
++    ):
++        self.publish_count += 1
++        pointer = self.strings.get(active_key)
++
++        if expected_token == "INITIAL":
++            if pointer is not None:
++                return ["ERR", "STALE_CONFIG_VERSION"]
++        else:
++            if pointer is None:
++                return ["ERR", "ACTIVE_SNAPSHOT_MISSING"]
++            if pointer.count(":") != 1:
++                return ["ERR", "ACTIVE_POINTER_INVALID"]
++            active_version, active_checksum = pointer.split(":", 1)
++            if len(active_checksum) != 64:
++                return ["ERR", "ACTIVE_POINTER_INVALID"]
++            if active_version != expected_token:
++                return ["ERR", "STALE_CONFIG_VERSION"]
++            if int(new_version) <= int(active_version):
++                return ["ERR", "STALE_CONFIG_VERSION"]
++
++        snapshot_key = snapshot_prefix + new_version
++        if snapshot_key in self.hashes:
++            return ["ERR", "SNAPSHOT_ALREADY_EXISTS"]
++
++        self.hashes[snapshot_key] = {
++            READ_FIELD: read_value,
++            WRITE_FIELD: write_value,
++            VERSION_FIELD: new_version,
++            LOAD_MODE_FIELD: load_mode,
++            SOURCE_FIELD: source,
++            CHECKSUM_FIELD: checksum,
++        }
++        pointer = f"{new_version}:{checksum}"
++        self.strings[active_key] = pointer
++        return ["OK", pointer, snapshot_key]
++
++    def seed(
++            self,
++            *,
++            read_v2: bool,
++            write_v2: bool,
++            version: int,
++            fields_override: dict[str, str] | None = None,
++    ) -> dict[str, str]:
++        checksum = compute_snapshot_checksum(
++            read_v2=read_v2,
++            write_v2=write_v2,
++            config_version=version,
++            load_mode=MANUAL_BOOTSTRAP_MODE,
++            source=AR_CONFIG_SOURCE,
++        )
++        fields = {
++            READ_FIELD: "true" if read_v2 else "false",
++            WRITE_FIELD: "true" if write_v2 else "false",
++            VERSION_FIELD: str(version),
++            LOAD_MODE_FIELD: MANUAL_BOOTSTRAP_MODE,
++            SOURCE_FIELD: AR_CONFIG_SOURCE,
++            CHECKSUM_FIELD: checksum,
++        }
++        if fields_override:
++            fields.update(fields_override)
++        self.hashes[f"{SNAPSHOT_KEY_PREFIX}{version}"] = fields
++        self.strings[ACTIVE_POINTER_KEY] = f"{version}:{checksum}"
++        return fields
++
++
++# endregion
++
++
++# region 测试辅助
++
++
++def make_config(read_v2: bool, write_v2: bool, version: int) -> PVAmountRunConfig:
++    checksum = compute_snapshot_checksum(
++        read_v2=read_v2,
++        write_v2=write_v2,
++        config_version=version,
++        load_mode=MANUAL_BOOTSTRAP_MODE,
++        source=AR_CONFIG_SOURCE,
++    )
++    return PVAmountRunConfig(
++        read_v2=read_v2,
++        write_v2=write_v2,
++        config_version=version,
++        load_mode=MANUAL_BOOTSTRAP_MODE,
++        source=AR_CONFIG_SOURCE,
++        checksum=checksum,
++    )
++
++
++class SequenceProvider(PVAmountConfigProvider):
++    def __init__(self, configs):
++        super().__init__(redis_client=object())
++        self.configs = list(configs)
++        self.calls = 0
++
++    def load_run_config(self):
++        config = self.configs[self.calls]
++        self.calls += 1
++        return config
++
++
++# endregion
++
++
++class FlagRuntimeContractTests(unittest.TestCase):
++
++    def assert_config_error(self, code, operation):
++        with self.assertRaises(PVAmountConfigError) as captured:
++            operation()
++        self.assertEqual(code, captured.exception.code)
++        return captured.exception
++
++    # region TC-FLAG-01～08：load 与 fail-loud
++
++    def test_tc_flag_01_load_legal_01_snapshot_as_immutable_config(self):
++        redis = FakeRedis()
++        redis.seed(read_v2=False, write_v2=True, version=7)
++
++        config = PVAmountConfigProvider(redis).load_run_config()
++
++        self.assertEqual("01", config.state)
++        self.assertEqual(7, config.config_version)
++        self.assertEqual(["load"], redis.eval_calls)
++        with self.assertRaises(FrozenInstanceError):
++            config.config_version = 8
++
++    def test_tc_flag_02_missing_active_snapshot_fails_loud(self):
++        redis = FakeRedis()
++        self.assert_config_error(
++            "ACTIVE_SNAPSHOT_MISSING",
++            lambda: PVAmountConfigProvider(redis).load_run_config(),
++        )
++
++    def test_tc_flag_03_read_missing_fails_loud(self):
++        redis = FakeRedis()
++        fields = redis.seed(read_v2=False, write_v2=True, version=3)
++        del fields[READ_FIELD]
++        self.assert_config_error(
++            "READ_MISSING",
++            lambda: PVAmountConfigProvider(redis).load_run_config(),
++        )
++
++    def test_tc_flag_04_write_missing_fails_loud(self):
++        redis = FakeRedis()
++        fields = redis.seed(read_v2=False, write_v2=True, version=3)
++        del fields[WRITE_FIELD]
++        self.assert_config_error(
++            "WRITE_MISSING",
++            lambda: PVAmountConfigProvider(redis).load_run_config(),
++        )
++
++    def test_tc_flag_05_version_missing_fails_loud(self):
++        redis = FakeRedis()
++        fields = redis.seed(read_v2=False, write_v2=True, version=3)
++        del fields[VERSION_FIELD]
++        self.assert_config_error(
++            "CONFIG_VERSION_MISSING",
++            lambda: PVAmountConfigProvider(redis).load_run_config(),
++        )
++
++    def test_tc_flag_06_non_canonical_bool_fails_loud(self):
++        redis = FakeRedis()
++        redis.seed(
++            read_v2=False,
++            write_v2=True,
++            version=3,
++            fields_override={READ_FIELD: "False"},
++        )
++        self.assert_config_error(
++            "INVALID_BOOL",
++            lambda: PVAmountConfigProvider(redis).load_run_config(),
++        )
++
++    def test_tc_flag_07_state_10_is_invalid_for_production(self):
++        self.assert_config_error(
++            "INVALID_STATE",
++            lambda: admit_production_run_config(make_config(True, False, 8)),
++        )
++
++    def test_tc_flag_08_redis_exception_has_no_fallback(self):
++        redis = FakeRedis()
++        redis.fail_with = ConnectionError("redis unavailable")
++        with patch.dict(
++                os.environ,
++                {
++                    READ_FIELD: "false",
++                    WRITE_FIELD: "true",
++                },
++                clear=False,
++        ):
++            error = self.assert_config_error(
++                "REDIS_UNAVAILABLE",
++                lambda: PVAmountConfigProvider(redis).load_run_config(),
++            )
++
++        self.assertIsInstance(error.__cause__, ConnectionError)
++        self.assertEqual({}, redis.hashes)
++        self.assertEqual({}, redis.strings)
++
++    # endregion
++
++    # region TC-FLAG-09～11：run-freeze 与 admission
++
++    def test_tc_flag_09_run_freezes_01_when_provider_later_changes_to_11(self):
++        provider = SequenceProvider(
++            [
++                make_config(False, True, 20),
++                make_config(True, True, 21),
++            ]
++        )
++
++        session = PVAmountRunSession.start(provider)
++
++        self.assertEqual("01", session.config.state)
++        self.assertEqual(20, session.config.config_version)
++        self.assertEqual(1, provider.calls)
++        self.assertFalse(hasattr(session, "refresh"))
++
++    def test_tc_flag_10_next_production_run_rejects_unapproved_11(self):
++        provider = SequenceProvider([make_config(True, True, 21)])
++
++        self.assert_config_error(
++            "V2_STATE_NOT_AUTHORIZED",
++            lambda: PVAmountRunSession.start(provider),
++        )
++        self.assertEqual(1, provider.calls)
++
++    def test_tc_flag_11_cross_version_or_checksum_fails_loud(self):
++        for mutation, code in (
++                ("pointer_version", "VERSION_MISMATCH"),
++                ("snapshot_version", "VERSION_MISMATCH"),
++                ("checksum", "CHECKSUM_MISMATCH"),
++        ):
++            with self.subTest(mutation=mutation):
++                redis = FakeRedis()
++                fields = redis.seed(read_v2=False, write_v2=True, version=30)
++
++                if mutation == "pointer_version":
++                    redis.hashes[f"{SNAPSHOT_KEY_PREFIX}31"] = fields
++                    redis.strings[ACTIVE_POINTER_KEY] = (
++                        "31:"
++                        + redis.strings[ACTIVE_POINTER_KEY].split(":", 1)[1]
++                    )
++                elif mutation == "snapshot_version":
++                    fields[VERSION_FIELD] = "31"
++                else:
++                    fields[CHECKSUM_FIELD] = "0" * 64
++
++                self.assert_config_error(
++                    code,
++                    lambda: PVAmountConfigProvider(redis).load_run_config(),
++                )
++
++    # endregion
++
++    # region TC-FLAG-12～13：bootstrap 与 consumer 静态检查
++
++    def test_tc_flag_12_bootstrap_atomically_publishes_complete_01(self):
++        redis = FakeRedis()
++
++        config = publish_manual_bootstrap(
++            1,
++            expected_active_version=None,
++            redis_client=redis,
++        )
++
++        self.assertEqual("01", config.state)
++        self.assertEqual(1, config.config_version)
++        self.assertEqual(["publish", "load"], redis.eval_calls)
++        self.assertEqual(1, redis.publish_count)
++        self.assertEqual(
++            {
++                READ_FIELD,
++                WRITE_FIELD,
++                VERSION_FIELD,
++                LOAD_MODE_FIELD,
++                SOURCE_FIELD,
++                CHECKSUM_FIELD,
++            },
++            set(redis.hashes[f"{SNAPSHOT_KEY_PREFIX}1"]),
++        )
++        self.assertIn("redis.call", LOAD_SNAPSHOT_LUA)
++        self.assertIn("redis.call", PUBLISH_SNAPSHOT_LUA)
++
++    def test_tc_flag_13_consumers_do_not_read_flags_directly(self):
++        root = Path(__file__).resolve().parents[3]
++        excluded = {
++            root / "Redishelper" / "PVAmountConfigProvider.py",
++            root / "Redishelper" / "PVAmountConfigBootstrap.py",
++        }
++        violations = []
++
++        for path in root.rglob("*.py"):
++            relative = path.relative_to(root)
++            if (
++                    path in excluded
++                    or "tests" in relative.parts
++                    or "Test" in relative.parts
++                    or "__pycache__" in relative.parts
++            ):
++                continue
++            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
++            for node in ast.walk(tree):
++                if isinstance(node, ast.Constant) and node.value in {
++                    READ_FIELD,
++                    WRITE_FIELD,
++                }:
++                    violations.append(f"{relative}:{node.lineno}")
++
++        self.assertEqual([], violations)
++
++    # endregion
++
++    # region TC-FLAG-22～23：stale 与并发 CAS
++
++    def test_tc_flag_22_stale_publish_fails_and_active_is_unchanged(self):
++        redis = FakeRedis()
++        publish_manual_bootstrap(
++            10,
++            expected_active_version=None,
++            redis_client=redis,
++        )
++        active_before = redis.strings[ACTIVE_POINTER_KEY]
++
++        self.assert_config_error(
++            "STALE_CONFIG_VERSION",
++            lambda: publish_manual_bootstrap(
++                10,
++                expected_active_version=10,
++                redis_client=redis,
++            ),
++        )
++        self.assert_config_error(
++            "STALE_CONFIG_VERSION",
++            lambda: publish_manual_bootstrap(
++                9,
++                expected_active_version=10,
++                redis_client=redis,
++            ),
++        )
++
++        self.assertEqual(active_before, redis.strings[ACTIVE_POINTER_KEY])
++        self.assertNotIn(f"{SNAPSHOT_KEY_PREFIX}9", redis.hashes)
++
++    def test_tc_flag_23_concurrent_cas_has_no_lost_update(self):
++        redis = FakeRedis()
++        publish_manual_bootstrap(
++            100,
++            expected_active_version=None,
++            redis_client=redis,
++        )
++        barrier = threading.Barrier(3)
++        results = []
++        results_lock = threading.Lock()
++
++        def publish(version):
++            barrier.wait()
++            try:
++                config = publish_manual_bootstrap(
++                    version,
++                    expected_active_version=100,
++                    redis_client=redis,
++                )
++                result = ("ok", config.config_version)
++            except PVAmountConfigError as exc:
++                result = ("error", exc.code)
++            with results_lock:
++                results.append(result)
++
++        threads = [
++            threading.Thread(target=publish, args=(101,)),
++            threading.Thread(target=publish, args=(102,)),
++        ]
++        for thread in threads:
++            thread.start()
++        barrier.wait()
++        for thread in threads:
++            thread.join(timeout=5)
++            self.assertFalse(thread.is_alive())
++
++        successes = [value for status, value in results if status == "ok"]
++        failures = [value for status, value in results if status == "error"]
++        active_version = int(redis.strings[ACTIVE_POINTER_KEY].split(":", 1)[0])
++
++        self.assertEqual(1, len(successes))
++        self.assertEqual(["STALE_CONFIG_VERSION"], failures)
++        self.assertEqual(successes[0], active_version)
++        self.assertIn(active_version, {101, 102})
++        self.assertEqual(
++            active_version,
++            PVAmountConfigProvider(redis).load_run_config().config_version,
++        )
++        self.assertIn("compare_decimal", PUBLISH_SNAPSHOT_LUA)
++        self.assertNotIn("tonumber", PUBLISH_SNAPSHOT_LUA)
++
++    # endregion
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)

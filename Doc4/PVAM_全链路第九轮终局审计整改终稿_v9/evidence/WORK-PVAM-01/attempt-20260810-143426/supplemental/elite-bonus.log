@@ -1,0 +1,108 @@
+⚠ 即将对 Redis 执行 flushdb → host=192.168.18.149 port=36378 db=0；请确认这是测试库。
+
+--- 运行: test_path_a_basic_and_self_source ---
+2026-08-10 14:34:57,745 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+✓ PASS  test_path_a_basic_and_self_source
+
+--- 运行: test_group_accumulation_qualifies_path_a ---
+2026-08-10 14:34:57,987 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+✓ PASS  test_group_accumulation_qualifies_path_a
+
+--- 运行: test_qualified_node_truncates_upward_flow ---
+2026-08-10 14:34:58,440 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+✓ PASS  test_qualified_node_truncates_upward_flow
+
+--- 运行: test_path_b_connected_qualification ---
+2026-08-10 14:34:58,675 - INFO - Period 202604 期初锁定 elite_rate = 0.156
+✓ PASS  test_path_b_connected_qualification
+
+--- 运行: test_rate_config_takes_effect ---
+2026-08-10 14:34:59,133 - INFO - Period 202604 期初锁定 elite_rate = 0.12
+✓ PASS  test_rate_config_takes_effect
+
+--- 运行: test_bonus_truncation_not_rounding ---
+2026-08-10 14:34:59,372 - INFO - Period 202604 期初锁定 elite_rate = 0.156
+✓ PASS  test_bonus_truncation_not_rounding
+
+--- 运行: test_zero_pv_no_qualification_no_source ---
+2026-08-10 14:34:59,606 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+✓ PASS  test_zero_pv_no_qualification_no_source
+
+--- 运行: test_source_skips_unqualified_nearest_and_uses_first_qualified_ancestor ---
+2026-08-10 14:34:59,620 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+✓ PASS  test_source_skips_unqualified_nearest_and_uses_first_qualified_ancestor
+
+--- 运行: test_track_bonus_source_keeps_min_layer ---
+2026-08-10 14:34:59,854 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+✓ PASS  test_track_bonus_source_keeps_min_layer
+
+--- 运行: test_no_qualified_upline_writes_no_source ---
+2026-08-10 14:34:59,868 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+✓ PASS  test_no_qualified_upline_writes_no_source
+
+--- 运行: test_refund_dequalifies_stats ---
+2026-08-10 14:35:00,095 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+✓ PASS  test_refund_dequalifies_stats
+
+--- 运行: test_refund_boundary_guard_skips_negative_pv ---
+2026-08-10 14:35:00,548 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+2026-08-10 14:35:00,763 - WARNING - 用户 9 pv_pcs 穿透负值(当前 30, 增量 -50),本次跳过
+✓ PASS  test_refund_boundary_guard_skips_negative_pv
+
+--- 运行: test_snapshot_output_mapping ---
+2026-08-10 14:35:00,772 - INFO - Period 202604 期初锁定 elite_rate = 0.156
+2026-08-10 14:35:00,777 - INFO - Period 202604 快照完成: bonus_rows=2 source_rows=1
+✓ PASS  test_snapshot_output_mapping
+
+--- 运行: test_snapshot_is_read_only_and_repeatable ---
+2026-08-10 14:35:00,785 - INFO - Period 202604 期初锁定 elite_rate = 0.156
+2026-08-10 14:35:00,787 - INFO - Period 202604 快照完成: bonus_rows=1 source_rows=1
+2026-08-10 14:35:00,789 - INFO - Period 202604 快照完成: bonus_rows=1 source_rows=1
+✓ PASS  test_snapshot_is_read_only_and_repeatable
+
+--- 运行: test_snapshot_calls_executor_every_run_not_db_idempotent ---
+2026-08-10 14:35:00,798 - INFO - Period 202604 期初锁定 elite_rate = 0.156
+2026-08-10 14:35:00,801 - INFO - Period 202604 快照完成: bonus_rows=1 source_rows=0
+2026-08-10 14:35:00,803 - INFO - Period 202604 快照完成: bonus_rows=1 source_rows=0
+✓ PASS  test_snapshot_calls_executor_every_run_not_db_idempotent
+
+--- 运行: test_cross_period_independent_calc ---
+2026-08-10 14:35:00,810 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+2026-08-10 14:35:01,037 - INFO - Period 202605 期初锁定 elite_rate = 0.15
+✓ PASS  test_cross_period_independent_calc
+
+--- 运行: test_cleanup_clears_stats_source_lock_period_scoped ---
+2026-08-10 14:35:01,278 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+2026-08-10 14:35:01,280 - INFO - Period 202604 清理完成: 释放 3 个 key
+✓ PASS  test_cleanup_clears_stats_source_lock_period_scoped
+
+--- 运行: test_GAP_refund_clears_source_key ---
+2026-08-10 14:35:01,298 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+✗→XFAIL test_GAP_refund_clears_source_key
+        断言失败: 
+
+--- 运行: test_GAP_refund_snapshot_drops_stale_source_even_if_key_left ---
+2026-08-10 14:35:01,749 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+2026-08-10 14:35:02,187 - INFO - Period 202604 快照完成: bonus_rows=0 source_rows=1
+✗→XFAIL test_GAP_refund_snapshot_drops_stale_source_even_if_key_left
+        断言失败: 
+
+--- 运行: test_GAP_group_accumulation_backfills_child_source ---
+2026-08-10 14:35:02,196 - INFO - Period 202604 期初锁定 elite_rate = 0.15
+✗→XFAIL test_GAP_group_accumulation_backfills_child_source
+        断言失败: 
+
+--- 运行: test_GAP_snapshot_skips_not_qualified_dirty_record ---
+2026-08-10 14:35:02,633 - INFO - Period 202604 期初锁定 elite_rate = 0.156
+2026-08-10 14:35:02,635 - INFO - Period 202604 快照完成: bonus_rows=1 source_rows=0
+✗→XFAIL test_GAP_snapshot_skips_not_qualified_dirty_record
+        断言失败: 
+
+--- 运行: test_GAP_snapshot_drops_source_without_bonus_row ---
+2026-08-10 14:35:02,641 - INFO - Period 202604 期初锁定 elite_rate = 0.156
+2026-08-10 14:35:02,647 - INFO - Period 202604 快照完成: bonus_rows=1 source_rows=2
+✗→XFAIL test_GAP_snapshot_drops_source_without_bonus_row
+        断言失败: 
+
+================================================================
+PASS 17  |  FAIL 0  |  ERROR 0  |  XFAIL 5  |  XPASS 0   (共 22)

@@ -1,0 +1,10 @@
+actor = GraphService-c477be75-899b-41b3-b41b-cfdaea6ed13c
+users_version = 198
+columns = ['level', 'ancestor', 'predecessor']
+rows = 4
+   level ancestor predecessor
+0      1        1           9
+1      3        4           3
+2      2        3           1
+3      4        5           4
+GRAPH_ACTOR_PREFLIGHT_PASS

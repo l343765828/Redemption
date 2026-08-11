@@ -1,0 +1,17 @@
+{
+  "work_id": "WORK-PVAM-01C",
+  "stage": null,
+  "root_baseline_sha": "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
+  "direct_prerequisites": [],
+  "prerequisite_closure": [],
+  "integration_order": [],
+  "included_works": [],
+  "approved_commit_registry_path": "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
+  "approved_commit_registry_sha256": "9b4eab9bad7dc52cda3df5396db3f579b7796f241b843389e1822db7dc943bd1",
+  "matched_registry_entries": [],
+  "parent_commit_sha": "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
+  "parent_tree_sha": "7fab5a447b8d3d2a12d224ff65c0581fbd6cb9f4",
+  "work_commit_sha": "2a5d39651f8eb50845c4377d3181d3cb846f6cab",
+  "work_tree_sha": "3284a9309c4fa450a6e3c40befb591f9854b2074",
+  "provenance_status": "PASS"
+}

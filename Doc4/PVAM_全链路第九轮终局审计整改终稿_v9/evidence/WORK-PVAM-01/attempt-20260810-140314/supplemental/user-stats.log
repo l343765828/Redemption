@@ -1,0 +1,62 @@
+⚠ 即将对 Redis 执行 flushdb → host=192.168.18.149 port=36378 db=0；请确认这是测试库。
+2026-08-10 14:05:03,119 - INFO - [UserStatsService] 连接 Dask 调度器: tcp://127.0.0.1:8786
+
+--- 运行: Case A: 源端早停, 不触碰祖先 ---
+2026-08-10 14:05:03,139 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:05:03,190 - INFO - [UserStatsService] 开始处理用户 4 的增量 BV: 50 (期数: 202605, 订单: A_f70473f3)
+✗ ERROR Case A: 源端早停, 不触碰祖先
+        意外异常: AttributeError: 'NoneType' object has no attribute 'nodes'
+
+--- 运行: Case B: 单层冒泡到 Elite 父后停止 ---
+2026-08-10 14:05:04,017 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:05:04,044 - INFO - [UserStatsService] 开始处理用户 9 的增量 BV: 200 (期数: 202605, 订单: B_8dd56ab5)
+✗ ERROR Case B: 单层冒泡到 Elite 父后停止
+        意外异常: AttributeError: 'NoneType' object has no attribute 'nodes'
+
+--- 运行: Case C: 跨过 1000 触发截断回滚 + 全链路合格线更新 ---
+2026-08-10 14:05:04,073 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:05:04,096 - INFO - [UserStatsService] 开始处理用户 9 的增量 BV: 200 (期数: 202605, 订单: C_89bd3210)
+✗ ERROR Case C: 跨过 1000 触发截断回滚 + 全链路合格线更新
+        意外异常: AttributeError: 'NoneType' object has no attribute 'nodes'
+
+--- 运行: Case D: Redis 中缺失的祖先被零值初始化并继续传导 ---
+2026-08-10 14:05:04,125 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:05:04,146 - INFO - [UserStatsService] 开始处理用户 9 的增量 BV: 500 (期数: 202605, 订单: D_47a36bd2)
+✗ ERROR Case D: Redis 中缺失的祖先被零值初始化并继续传导
+        意外异常: AttributeError: 'NoneType' object has no attribute 'nodes'
+
+--- 运行: Case E: rank / virtual_width 边界 ---
+2026-08-10 14:05:04,176 - INFO - [UserStatsService] 测试 DB 已清空。
+✓ PASS  Case E: rank / virtual_width 边界
+
+--- 运行: Case F: 源用户跨 virtual width 边界但祖先不变 ---
+2026-08-10 14:05:04,206 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:05:04,228 - INFO - [UserStatsService] 开始处理用户 1 的增量 BV: 100 (期数: 202605, 订单: F_e577c221)
+✗ ERROR Case F: 源用户跨 virtual width 边界但祖先不变
+        意外异常: AttributeError: 'NoneType' object has no attribute 'nodes'
+
+--- 运行: Case G: 两个兄弟分支依次截断并累积合格线 ---
+2026-08-10 14:05:04,258 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:05:04,273 - INFO - [UserStatsService] 开始处理用户 9 的增量 BV: 200 (期数: 202605, 订单: G1_9a7d79ac)
+✗ ERROR Case G: 两个兄弟分支依次截断并累积合格线
+        意外异常: AttributeError: 'NoneType' object has no attribute 'nodes'
+
+--- 运行: Case H: bv=0 no-op ---
+2026-08-10 14:05:04,302 - INFO - [UserStatsService] 测试 DB 已清空。
+2026-08-10 14:05:04,321 - INFO - [UserStatsService] 增量 BV 为 0, 跳过处理: period=202605, user_id=9, order_id=H_649ae1db
+✓ PASS  Case H: bv=0 no-op
+
+============================================================
+6/8 个用例失败:
+  - Case A: 源端早停, 不触碰祖先
+      AttributeError: 'NoneType' object has no attribute 'nodes'
+  - Case B: 单层冒泡到 Elite 父后停止
+      AttributeError: 'NoneType' object has no attribute 'nodes'
+  - Case C: 跨过 1000 触发截断回滚 + 全链路合格线更新
+      AttributeError: 'NoneType' object has no attribute 'nodes'
+  - Case D: Redis 中缺失的祖先被零值初始化并继续传导
+      AttributeError: 'NoneType' object has no attribute 'nodes'
+  - Case F: 源用户跨 virtual width 边界但祖先不变
+      AttributeError: 'NoneType' object has no attribute 'nodes'
+  - Case G: 两个兄弟分支依次截断并累积合格线
+      AttributeError: 'NoneType' object has no attribute 'nodes'
