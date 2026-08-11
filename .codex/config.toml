@@ -1,0 +1,4 @@
+[projects.'D:\Redemption']
+trust_level = "trusted"
+sandbox_mode      = "read-only"
+approval_policy   = "on-request"
