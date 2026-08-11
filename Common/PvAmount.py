@@ -9,10 +9,8 @@ from typing import Final
 # PVAM 固定精度金额公共常量
 # =====================================================================
 # region 金额、费率及奖金分的缩放倍率
-# 保留 6 位小数
 PV_SCALE: Final[int] = 1_000_000
 RATE_PPM_SCALE: Final[int] = 1_000_000
-# 奖金分刻度
 BONUS_CENT_SCALE: Final[int] = 100
 AMOUNT_ENCODING_VERSION_V2: Final[int] = 2
 # endregion
@@ -41,22 +39,18 @@ _ROUNDING_MODE_HALF_UP: Final[str] = "ROUND_HALF_UP"
 # 基础整数与金额精度校验
 # =====================================================================
 def require_int64(value: object, *, field_name: str) -> int:
-    # region 类型判断
     if isinstance(value, bool) or not isinstance(value, Integral):
         raise TypeError(
-            f"{field_name} 必须是int, "
+            f"{field_name} must be an integer, "
             f"got {type(value).__name__}"
         )
-    # endregion
 
     result = int(value)
 
-    # region 判断是否溢出
     if result < INT64_MIN or result > INT64_MAX:
         raise OverflowError(
-            f"{field_name} 超出了int64的范围"
+            f"{field_name} is outside signed int64"
         )
-    # endregion
 
     return result
 
@@ -312,7 +306,6 @@ def parse_percent_to_ppm(raw: Decimal | str) -> int:
 
 
 def checked_add_int64(*values: int) -> int:
-    """防止累加之后int64溢出"""
     total = 0
     for index, value in enumerate(values):
         normalized = require_int64(
@@ -327,7 +320,6 @@ def checked_add_int64(*values: int) -> int:
 
 
 def checked_mul_int64(a: int, b: int) -> int:
-    """防止相乘之后int64溢出"""
     left = require_int64(a, field_name="multiplicand")
     right = require_int64(b, field_name="multiplier")
     return require_int64(
@@ -337,7 +329,6 @@ def checked_mul_int64(a: int, b: int) -> int:
 
 
 def _require_rate_ppm(ppm: int) -> int:
-    """验证汇率是否合法"""
     normalized = require_int64(ppm, field_name="rate_ppm")
     if abs(normalized) > RATE_PPM_SCALE:
         raise ValueError("rate_ppm magnitude must not exceed 100 percent")
