@@ -1,0 +1,43 @@
+schema_version: "1.0"
+work_id: WORK-PVAM-08
+artifact_status: PENDING
+validation_status: PENDING_TEST_ENV
+reason: "DEC-013、隔离环境、镜像及外部服务版本证据尚未提供"
+repository:
+  commit: 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2
+  source_archive_sha256: null
+container:
+  image_digest: null
+runtime:
+  python: null
+  requirements_sha256: null
+  conda_sha256: null
+database:
+  product_version: null
+  global_sql_mode: null
+  session_sql_mode: null
+redis:
+  server_version: null
+  client_version: null
+  topology: null
+kafka:
+  broker_version: null
+  client_version: null
+  topics: []
+  consumer_groups: []
+dask_rapids:
+  dask_version: null
+  distributed_version: null
+  rapids_version: null
+  cudf_version: null
+  cuda_version: null
+  gpu: null
+locale:
+  timezone: Asia/Shanghai
+  locale: null
+isolation:
+  database_schema: null
+  redis_db_and_prefix: null
+  kafka_namespace: null
+  network_approval: null
+  permission_approval: null

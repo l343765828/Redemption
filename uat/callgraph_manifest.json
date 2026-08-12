@@ -1,0 +1,288 @@
+{
+  "schema_version": "1.0",
+  "work_id": "WORK-PVAM-08",
+  "artifact_status": "AVAILABLE",
+  "validation_status": "BLOCKED",
+  "reason": "static graph generated; production reachability needs external deployment and runtime evidence",
+  "source_commit": "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
+  "targets": [
+    "PvEventConsumer",
+    "TopologyMutationService"
+  ],
+  "CALLGRAPH_CONFIDENCE": "STATIC_REFERENCE_ONLY",
+  "references": {
+    "production": [
+      {
+        "target": "TopologyMutationService",
+        "module": "User.TopologyMutationService",
+        "path": "User/TopologyMutationService.py",
+        "line": 21,
+        "kind": "definition",
+        "classification": "production"
+      }
+    ],
+    "test": [
+      {
+        "target": "TopologyMutationService",
+        "module": "User.Test.run_mutation_test",
+        "path": "User/Test/run_mutation_test.py",
+        "line": 2,
+        "kind": "import_reference",
+        "classification": "test"
+      },
+      {
+        "target": "TopologyMutationService",
+        "module": "User.Test.run_mutation_test",
+        "path": "User/Test/run_mutation_test.py",
+        "line": 24,
+        "kind": "name_reference",
+        "classification": "test"
+      }
+    ],
+    "demo": []
+  },
+  "entrypoints": [
+    {
+      "module": "Crontab.test",
+      "path": "Crontab/test.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "Doc4.PVAM_\u5168\u94fe\u8def\u7b2c\u4e5d\u8f6e\u7ec8\u5c40\u5ba1\u8ba1\u6574\u6539\u7ec8\u7a3f_v9.05_CONTROL.validate_document_governance",
+      "path": "Doc4/PVAM_\u5168\u94fe\u8def\u7b2c\u4e5d\u8f6e\u7ec8\u5c40\u5ba1\u8ba1\u6574\u6539\u7ec8\u7a3f_v9/05_CONTROL/validate_document_governance.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "Doc4.PVAM_\u5168\u94fe\u8def\u7b2c\u4e5d\u8f6e\u7ec8\u5c40\u5ba1\u8ba1\u6574\u6539\u7ec8\u7a3f_v9.05_CONTROL.validate_parent_provenance",
+      "path": "Doc4/PVAM_\u5168\u94fe\u8def\u7b2c\u4e5d\u8f6e\u7ec8\u5c40\u5ba1\u8ba1\u6574\u6539\u7ec8\u7a3f_v9/05_CONTROL/validate_parent_provenance.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "Doc4.PVAM_\u5168\u94fe\u8def\u7b2c\u4e5d\u8f6e\u7ec8\u5c40\u5ba1\u8ba1\u6574\u6539\u7ec8\u7a3f_v9.05_CONTROL.validate_traceability_v3",
+      "path": "Doc4/PVAM_\u5168\u94fe\u8def\u7b2c\u4e5d\u8f6e\u7ec8\u5c40\u5ba1\u8ba1\u6574\u6539\u7ec8\u7a3f_v9/05_CONTROL/validate_traceability_v3.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "Doc4.PVAM_\u5168\u94fe\u8def\u7b2c\u4e5d\u8f6e\u7ec8\u5c40\u5ba1\u8ba1\u6574\u6539\u7ec8\u7a3f_v9.05_CONTROL.validate_version_references",
+      "path": "Doc4/PVAM_\u5168\u94fe\u8def\u7b2c\u4e5d\u8f6e\u7ec8\u5c40\u5ba1\u8ba1\u6574\u6539\u7ec8\u7a3f_v9/05_CONTROL/validate_version_references.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "Doc4.PVAM_\u5168\u94fe\u8def\u7b2c\u4e5d\u8f6e\u7ec8\u5c40\u5ba1\u8ba1\u6574\u6539\u7ec8\u7a3f_v9.06_HISTORY.validate_traceability_v2_HISTORICAL_ONLY",
+      "path": "Doc4/PVAM_\u5168\u94fe\u8def\u7b2c\u4e5d\u8f6e\u7ec8\u5c40\u5ba1\u8ba1\u6574\u6539\u7ec8\u7a3f_v9/06_HISTORY/validate_traceability_v2_HISTORICAL_ONLY.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "MessageConsumer.RateConsumer",
+      "path": "MessageConsumer/RateConsumer.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "MessageConsumer.RecalcStreamConsumer",
+      "path": "MessageConsumer/RecalcStreamConsumer.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "MessageConsumer.Test.RecalcStreamConsumerTest",
+      "path": "MessageConsumer/Test/RecalcStreamConsumerTest.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "MessageConsumer.test",
+      "path": "MessageConsumer/test.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "MessageConsumer.UserConsumer",
+      "path": "MessageConsumer/UserConsumer.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "MessageConsumer.UserInfoConsumer",
+      "path": "MessageConsumer/UserInfoConsumer.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "Order.OrderService",
+      "path": "Order/OrderService.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "Spark.CheckMysqlToDelta",
+      "path": "Spark/CheckMysqlToDelta.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "Spark.MysqlToDelta",
+      "path": "Spark/MysqlToDelta.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "uat.scripts.build_callgraph",
+      "path": "uat/scripts/build_callgraph.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "uat.scripts.build_traceability_manifest",
+      "path": "uat/scripts/build_traceability_manifest.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "uat.scripts.verify_evidence_pack",
+      "path": "uat/scripts/verify_evidence_pack.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "uat.Test.test_wave0_tooling",
+      "path": "uat/Test/test_wave0_tooling.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.GlobalRecalculationService",
+      "path": "User/GlobalRecalculationService.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.HonorLevelGPUService",
+      "path": "User/HonorLevelGPUService.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.HonorLevelHighGPUService",
+      "path": "User/HonorLevelHighGPUService.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.LeadershipBonusGPUService",
+      "path": "User/LeadershipBonusGPUService.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.PEBonusService_Main",
+      "path": "User/PEBonusService_Main.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.run_monthly_bonus_pipeline_v2",
+      "path": "User/run_monthly_bonus_pipeline_v2.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.run_team_bonus_tb",
+      "path": "User/run_team_bonus_tb.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.SuperEliteBonusService",
+      "path": "User/SuperEliteBonusService.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.Test.eab_test_fixed",
+      "path": "User/Test/eab_test_fixed.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.Test.EliteBonusServiceTest",
+      "path": "User/Test/EliteBonusServiceTest.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.Test.GlobalRecalculationServiceTest",
+      "path": "User/Test/GlobalRecalculationServiceTest.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.Test.init_test_data",
+      "path": "User/Test/init_test_data.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.Test.PEBonusServiceTest",
+      "path": "User/Test/PEBonusServiceTest.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.Test.PlacementRecalculationServiceTest",
+      "path": "User/Test/PlacementRecalculationServiceTest.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.Test.run_mutation_test",
+      "path": "User/Test/run_mutation_test.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.Test.SuperEliteBonusServiceTest",
+      "path": "User/Test/SuperEliteBonusServiceTest.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.Test.test_team_bonus_tb",
+      "path": "User/Test/test_team_bonus_tb.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.Test.UserStatsServiceTests",
+      "path": "User/Test/UserStatsServiceTests.py",
+      "classification": "test",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.UserInfoService",
+      "path": "User/UserInfoService.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    },
+    {
+      "module": "User.UserService",
+      "path": "User/UserService.py",
+      "classification": "production",
+      "evidence": "python_main_guard"
+    }
+  ],
+  "static_import_paths": [],
+  "deployment_evidence": [],
+  "parse_errors": [],
+  "blockers": [
+    "fixed source archive SHA-256 not supplied to this static scan",
+    "signed deployment manifest not supplied",
+    "runtime trace not supplied"
+  ]
+}

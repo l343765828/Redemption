@@ -1,0 +1,15 @@
+schema_version: "1.0"
+work_id: WORK-PVAM-08
+artifact_status: PENDING
+validation_status: BLOCKED
+reason: "DEC-009 最小 schema、DDL、SQL_MODE 与 assignment 批准记录尚未提供"
+approval:
+  decision: DEC-009
+  approved_by: null
+  approved_at: null
+objects:
+  database: []
+  redis: []
+  event_and_outbox: []
+  effective_sql: []
+checksums: {}

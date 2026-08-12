@@ -1,0 +1,17 @@
+schema_version: "1.0"
+work_id: WORK-PVAM-08
+attempt_id: null
+artifact_status: PENDING
+validation_status: NOT_RUN
+reason: "模板初始状态；尚未在固定镜像或隔离 UAT 环境执行"
+command: []
+exit_code: null
+started_at: null
+finished_at: null
+evidence_links: []
+external_services:
+  mysql: NOT_RUN
+  redis: NOT_RUN
+  kafka: NOT_RUN
+  dask: NOT_RUN
+  rapids_gpu: NOT_RUN

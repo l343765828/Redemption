@@ -1,0 +1,21 @@
+schema_version: "1.0"
+work_id: WORK-PVAM-08
+artifact_status: PENDING
+validation_status: BLOCKED
+reason: "配置快照与 GAP-DEC004-2B 受控 fixture 外部证据尚未提供"
+config_snapshot:
+  snapshot_id: null
+  source: null
+  captured_by: null
+  captured_at: null
+  valid_until: null
+  sha256: null
+gap_dec004_2b:
+  implementation_status: DEFERRED
+  fixture_status: BLOCKED
+  production_supply_chain_closed: false
+  source: null
+  injected_by: null
+  injected_at: null
+  valid_until: null
+  sha256: null

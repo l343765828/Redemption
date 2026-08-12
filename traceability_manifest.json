@@ -1,0 +1,1301 @@
+{
+  "schema_version": "1.0",
+  "work_id": "WORK-PVAM-08",
+  "artifact_status": "AVAILABLE",
+  "validation_status": "NOT_RUN",
+  "reason": "Wave 0 trace graph generated; no DEV/UAT validation conclusion asserted",
+  "retired_tests": [
+    "TC-000"
+  ],
+  "nodes": [
+    {
+      "id": "CHK-ARCH-001",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-DATA-006",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-DATA-007",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-BIZ-002",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-BIZ-007",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-BIZ-008",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-BIZ-009",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-BIZ-011",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-EVT-003",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-EVT-004",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-EVT-005",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-EVT-006",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-EVT-007",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-PUB-001",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-PUB-002",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-TEST-001",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-TEST-002",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-TEST-003",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "CHK-TEST-004",
+      "kind": "check",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "RISK-001",
+      "kind": "issue",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "RISK-002",
+      "kind": "issue",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "UV-001",
+      "kind": "issue",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "UV-002",
+      "kind": "issue",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "UV-003",
+      "kind": "issue",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "UV-004",
+      "kind": "issue",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "UV-005",
+      "kind": "issue",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "OPT-001",
+      "kind": "issue",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "OPT-002",
+      "kind": "issue",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "GAP-DEC004-2B",
+      "kind": "issue",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "DEC-004",
+      "kind": "decision",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "DEC-009",
+      "kind": "decision",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "DEC-010",
+      "kind": "decision",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "DEC-012",
+      "kind": "decision",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "DEC-013",
+      "kind": "decision",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "DEC-017",
+      "kind": "decision",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "DEC-018",
+      "kind": "decision",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TASK-PVAM-08",
+      "kind": "task",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "WORK-PVAM-08",
+      "kind": "work",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "STEP-PVAM-08-01",
+      "kind": "step",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "STEP-PVAM-08-02",
+      "kind": "step",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "STEP-PVAM-08-03",
+      "kind": "step",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "STEP-PVAM-08-04",
+      "kind": "step",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "STEP-PVAM-08-05",
+      "kind": "step",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "STEP-PVAM-08-06",
+      "kind": "step",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "STEP-PVAM-08-07",
+      "kind": "step",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-PVAM-08-01",
+      "kind": "local_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-PVAM-08-02",
+      "kind": "local_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-PVAM-08-03",
+      "kind": "local_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-PVAM-08-04",
+      "kind": "local_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-PVAM-08-05",
+      "kind": "local_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-PVAM-08-06",
+      "kind": "local_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-PVAM-08-07",
+      "kind": "local_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-PVAM-08-08",
+      "kind": "local_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-PVAM-08-09",
+      "kind": "local_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-001",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-002",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-003",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-004",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-005",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-006",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-007",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-008",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-009",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-010",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-011",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-012",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-013",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-014",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-015",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-016",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-017",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-018",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-019",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-020",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-021",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-022",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-023",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-024",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-025",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-026",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-027",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-028",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-029",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-030",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-031",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "TC-032",
+      "kind": "controlled_test",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-01",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-02",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-03",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-04",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-05",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-06",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-07",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-08",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-09",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-10",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-11",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-12",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-13",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    },
+    {
+      "id": "EV-PVAM-08-14",
+      "kind": "evidence",
+      "validation_status": "NOT_RUN"
+    }
+  ],
+  "edges": [
+    {
+      "from": "CHK-ARCH-001",
+      "to": "RISK-001",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-DATA-006",
+      "to": "RISK-002",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-DATA-007",
+      "to": "UV-001",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-BIZ-002",
+      "to": "UV-002",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-BIZ-007",
+      "to": "UV-003",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-BIZ-008",
+      "to": "UV-004",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-BIZ-009",
+      "to": "UV-005",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-BIZ-011",
+      "to": "OPT-001",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-EVT-003",
+      "to": "OPT-002",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-EVT-004",
+      "to": "GAP-DEC004-2B",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-EVT-005",
+      "to": "RISK-001",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-EVT-006",
+      "to": "RISK-002",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-EVT-007",
+      "to": "UV-001",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-PUB-001",
+      "to": "UV-002",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-PUB-002",
+      "to": "UV-003",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-TEST-001",
+      "to": "UV-004",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-TEST-002",
+      "to": "UV-005",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-TEST-003",
+      "to": "OPT-001",
+      "relation": "identifies"
+    },
+    {
+      "from": "CHK-TEST-004",
+      "to": "OPT-002",
+      "relation": "identifies"
+    },
+    {
+      "from": "RISK-001",
+      "to": "DEC-004",
+      "relation": "governed_by"
+    },
+    {
+      "from": "RISK-002",
+      "to": "DEC-009",
+      "relation": "governed_by"
+    },
+    {
+      "from": "UV-001",
+      "to": "DEC-010",
+      "relation": "governed_by"
+    },
+    {
+      "from": "UV-002",
+      "to": "DEC-012",
+      "relation": "governed_by"
+    },
+    {
+      "from": "UV-003",
+      "to": "DEC-013",
+      "relation": "governed_by"
+    },
+    {
+      "from": "UV-004",
+      "to": "DEC-017",
+      "relation": "governed_by"
+    },
+    {
+      "from": "UV-005",
+      "to": "DEC-018",
+      "relation": "governed_by"
+    },
+    {
+      "from": "OPT-001",
+      "to": "DEC-004",
+      "relation": "governed_by"
+    },
+    {
+      "from": "OPT-002",
+      "to": "DEC-009",
+      "relation": "governed_by"
+    },
+    {
+      "from": "GAP-DEC004-2B",
+      "to": "DEC-010",
+      "relation": "governed_by"
+    },
+    {
+      "from": "DEC-004",
+      "to": "TASK-PVAM-08",
+      "relation": "constrains"
+    },
+    {
+      "from": "DEC-009",
+      "to": "TASK-PVAM-08",
+      "relation": "constrains"
+    },
+    {
+      "from": "DEC-010",
+      "to": "TASK-PVAM-08",
+      "relation": "constrains"
+    },
+    {
+      "from": "DEC-012",
+      "to": "TASK-PVAM-08",
+      "relation": "constrains"
+    },
+    {
+      "from": "DEC-013",
+      "to": "TASK-PVAM-08",
+      "relation": "constrains"
+    },
+    {
+      "from": "DEC-017",
+      "to": "TASK-PVAM-08",
+      "relation": "constrains"
+    },
+    {
+      "from": "DEC-018",
+      "to": "TASK-PVAM-08",
+      "relation": "constrains"
+    },
+    {
+      "from": "TASK-PVAM-08",
+      "to": "WORK-PVAM-08",
+      "relation": "implemented_by"
+    },
+    {
+      "from": "WORK-PVAM-08",
+      "to": "STEP-PVAM-08-01",
+      "relation": "contains"
+    },
+    {
+      "from": "WORK-PVAM-08",
+      "to": "STEP-PVAM-08-02",
+      "relation": "contains"
+    },
+    {
+      "from": "WORK-PVAM-08",
+      "to": "STEP-PVAM-08-03",
+      "relation": "contains"
+    },
+    {
+      "from": "WORK-PVAM-08",
+      "to": "STEP-PVAM-08-04",
+      "relation": "contains"
+    },
+    {
+      "from": "WORK-PVAM-08",
+      "to": "STEP-PVAM-08-05",
+      "relation": "contains"
+    },
+    {
+      "from": "WORK-PVAM-08",
+      "to": "STEP-PVAM-08-06",
+      "relation": "contains"
+    },
+    {
+      "from": "WORK-PVAM-08",
+      "to": "STEP-PVAM-08-07",
+      "relation": "contains"
+    },
+    {
+      "from": "STEP-PVAM-08-01",
+      "to": "TC-PVAM-08-01",
+      "relation": "verified_by"
+    },
+    {
+      "from": "STEP-PVAM-08-02",
+      "to": "TC-PVAM-08-02",
+      "relation": "verified_by"
+    },
+    {
+      "from": "STEP-PVAM-08-03",
+      "to": "TC-PVAM-08-03",
+      "relation": "verified_by"
+    },
+    {
+      "from": "STEP-PVAM-08-04",
+      "to": "TC-PVAM-08-04",
+      "relation": "verified_by"
+    },
+    {
+      "from": "STEP-PVAM-08-05",
+      "to": "TC-PVAM-08-05",
+      "relation": "verified_by"
+    },
+    {
+      "from": "STEP-PVAM-08-06",
+      "to": "TC-PVAM-08-06",
+      "relation": "verified_by"
+    },
+    {
+      "from": "STEP-PVAM-08-07",
+      "to": "TC-PVAM-08-07",
+      "relation": "verified_by"
+    },
+    {
+      "from": "STEP-PVAM-08-07",
+      "to": "TC-PVAM-08-08",
+      "relation": "verified_by"
+    },
+    {
+      "from": "STEP-PVAM-08-07",
+      "to": "TC-PVAM-08-09",
+      "relation": "verified_by"
+    },
+    {
+      "from": "STEP-PVAM-08-01",
+      "to": "TC-001",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-02",
+      "to": "TC-002",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-03",
+      "to": "TC-003",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-04",
+      "to": "TC-004",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-05",
+      "to": "TC-005",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-06",
+      "to": "TC-006",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-07",
+      "to": "TC-007",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-01",
+      "to": "TC-008",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-02",
+      "to": "TC-009",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-03",
+      "to": "TC-010",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-04",
+      "to": "TC-011",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-05",
+      "to": "TC-012",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-06",
+      "to": "TC-013",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-07",
+      "to": "TC-014",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-01",
+      "to": "TC-015",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-02",
+      "to": "TC-016",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-03",
+      "to": "TC-017",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-04",
+      "to": "TC-018",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-05",
+      "to": "TC-019",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-06",
+      "to": "TC-020",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-07",
+      "to": "TC-021",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-01",
+      "to": "TC-022",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-02",
+      "to": "TC-023",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-03",
+      "to": "TC-024",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-04",
+      "to": "TC-025",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-05",
+      "to": "TC-026",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-06",
+      "to": "TC-027",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-07",
+      "to": "TC-028",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-01",
+      "to": "TC-029",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-02",
+      "to": "TC-030",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-03",
+      "to": "TC-031",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "STEP-PVAM-08-04",
+      "to": "TC-032",
+      "relation": "controlled_by"
+    },
+    {
+      "from": "TC-PVAM-08-01",
+      "to": "EV-PVAM-08-01",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-PVAM-08-02",
+      "to": "EV-PVAM-08-02",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-PVAM-08-03",
+      "to": "EV-PVAM-08-03",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-PVAM-08-04",
+      "to": "EV-PVAM-08-04",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-PVAM-08-05",
+      "to": "EV-PVAM-08-05",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-PVAM-08-06",
+      "to": "EV-PVAM-08-06",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-PVAM-08-07",
+      "to": "EV-PVAM-08-07",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-PVAM-08-08",
+      "to": "EV-PVAM-08-08",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-PVAM-08-09",
+      "to": "EV-PVAM-08-09",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-001",
+      "to": "EV-PVAM-08-10",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-002",
+      "to": "EV-PVAM-08-11",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-003",
+      "to": "EV-PVAM-08-12",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-004",
+      "to": "EV-PVAM-08-13",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-005",
+      "to": "EV-PVAM-08-14",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-006",
+      "to": "EV-PVAM-08-01",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-007",
+      "to": "EV-PVAM-08-02",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-008",
+      "to": "EV-PVAM-08-03",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-009",
+      "to": "EV-PVAM-08-04",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-010",
+      "to": "EV-PVAM-08-05",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-011",
+      "to": "EV-PVAM-08-06",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-012",
+      "to": "EV-PVAM-08-07",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-013",
+      "to": "EV-PVAM-08-08",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-014",
+      "to": "EV-PVAM-08-09",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-015",
+      "to": "EV-PVAM-08-10",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-016",
+      "to": "EV-PVAM-08-11",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-017",
+      "to": "EV-PVAM-08-12",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-018",
+      "to": "EV-PVAM-08-13",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-019",
+      "to": "EV-PVAM-08-14",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-020",
+      "to": "EV-PVAM-08-01",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-021",
+      "to": "EV-PVAM-08-02",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-022",
+      "to": "EV-PVAM-08-03",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-023",
+      "to": "EV-PVAM-08-04",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-024",
+      "to": "EV-PVAM-08-05",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-025",
+      "to": "EV-PVAM-08-06",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-026",
+      "to": "EV-PVAM-08-07",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-027",
+      "to": "EV-PVAM-08-08",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-028",
+      "to": "EV-PVAM-08-09",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-029",
+      "to": "EV-PVAM-08-10",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-030",
+      "to": "EV-PVAM-08-11",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-031",
+      "to": "EV-PVAM-08-12",
+      "relation": "produces"
+    },
+    {
+      "from": "TC-032",
+      "to": "EV-PVAM-08-13",
+      "relation": "produces"
+    }
+  ],
+  "acceptance_criteria": {
+    "AC-01": {
+      "steps": [
+        "STEP-PVAM-08-01"
+      ],
+      "tests": [
+        "TC-001"
+      ],
+      "evidence": [
+        "EV-PVAM-08-01"
+      ]
+    },
+    "AC-02": {
+      "steps": [
+        "STEP-PVAM-08-02"
+      ],
+      "tests": [
+        "TC-002"
+      ],
+      "evidence": [
+        "EV-PVAM-08-02"
+      ]
+    },
+    "AC-03": {
+      "steps": [
+        "STEP-PVAM-08-03"
+      ],
+      "tests": [
+        "TC-003"
+      ],
+      "evidence": [
+        "EV-PVAM-08-03"
+      ]
+    },
+    "AC-04": {
+      "steps": [
+        "STEP-PVAM-08-04"
+      ],
+      "tests": [
+        "TC-004"
+      ],
+      "evidence": [
+        "EV-PVAM-08-04"
+      ]
+    },
+    "AC-05": {
+      "steps": [
+        "STEP-PVAM-08-05"
+      ],
+      "tests": [
+        "TC-005"
+      ],
+      "evidence": [
+        "EV-PVAM-08-05"
+      ]
+    },
+    "AC-06": {
+      "steps": [
+        "STEP-PVAM-08-06"
+      ],
+      "tests": [
+        "TC-006"
+      ],
+      "evidence": [
+        "EV-PVAM-08-06"
+      ]
+    },
+    "AC-07": {
+      "steps": [
+        "STEP-PVAM-08-07"
+      ],
+      "tests": [
+        "TC-007"
+      ],
+      "evidence": [
+        "EV-PVAM-08-07"
+      ]
+    },
+    "AC-08": {
+      "steps": [
+        "STEP-PVAM-08-01"
+      ],
+      "tests": [
+        "TC-008"
+      ],
+      "evidence": [
+        "EV-PVAM-08-08"
+      ]
+    },
+    "AC-09": {
+      "steps": [
+        "STEP-PVAM-08-02"
+      ],
+      "tests": [
+        "TC-009"
+      ],
+      "evidence": [
+        "EV-PVAM-08-09"
+      ]
+    },
+    "AC-10": {
+      "steps": [
+        "STEP-PVAM-08-03"
+      ],
+      "tests": [
+        "TC-010"
+      ],
+      "evidence": [
+        "EV-PVAM-08-10"
+      ]
+    },
+    "AC-11": {
+      "steps": [
+        "STEP-PVAM-08-04"
+      ],
+      "tests": [
+        "TC-011"
+      ],
+      "evidence": [
+        "EV-PVAM-08-11"
+      ]
+    },
+    "AC-12": {
+      "steps": [
+        "STEP-PVAM-08-05"
+      ],
+      "tests": [
+        "TC-012"
+      ],
+      "evidence": [
+        "EV-PVAM-08-12"
+      ]
+    },
+    "AC-13": {
+      "steps": [
+        "STEP-PVAM-08-06"
+      ],
+      "tests": [
+        "TC-013"
+      ],
+      "evidence": [
+        "EV-PVAM-08-13"
+      ]
+    },
+    "AC-14": {
+      "steps": [
+        "STEP-PVAM-08-07"
+      ],
+      "tests": [
+        "TC-014"
+      ],
+      "evidence": [
+        "EV-PVAM-08-14"
+      ]
+    }
+  },
+  "orphan_required_nodes": []
+}
