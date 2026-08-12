@@ -7,7 +7,7 @@
 2. 依赖型 WORK 的每个 included prerequisite 必须与 canonical `WORK_APPROVED_COMMIT_REGISTRY.json` 中 APPROVED entry 的 commit/tree 一致；
 3. registry entry 还必须绑定 patch、scope、parent provenance 与批准记录 SHA-256，以及批准人身份、角色和时间；
 4. `validate_work_patch.sh` 执行 scope、rename 双路径、`git apply --check --index` 与 applied tree 对账；
-5. 当前规范注册表为 PENDING，不能据此声称任何真实 WORK 已批准。
+5. 当前规范注册表为 `ACTIVE`；仅 WORK-PVAM-01C、WORK-PVAM-01、WORK-PVAM-03 已由正式批准记录登记为 `APPROVED`，其余 WORK 保持 `PENDING`。
 
 
 ## B7 发布信任根门禁

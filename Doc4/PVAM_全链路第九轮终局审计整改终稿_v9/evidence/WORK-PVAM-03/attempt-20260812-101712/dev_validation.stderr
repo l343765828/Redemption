@@ -1,0 +1,8 @@
+Preparing worktree (detached HEAD 9c13826)
+error: User/EliteAchievementBonusService.py: does not match index
+error: User/EliteBonusService.py: does not match index
+error: User/GlobalEliteBonusRecalculationService.py: does not match index
+error: User/LeadershipBonusGPUService.py: does not match index
+error: User/PEBonusService.py: does not match index
+error: User/SuperEliteBonusService.py: does not match index
+error: User/team_bonus_tb.py: does not match index

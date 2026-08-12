@@ -24,10 +24,10 @@
     "workplan_archive_sha256":  "c33b6d9bbc33f8a790df9e593baa47d45372913bc53626b49ff6077d63734c14",
     "approved_commit_registry":  {
                                      "path":  "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
-                                     "sha256":  "d4ab1ca9303cbf0da11e26ecfc9731ef1e356fd12fe9989c5a6068c9394ff513",
+                                     "sha256":  "60007f2da4588909ef84c96db53111a6ce20d0ae4cc79f0e9c072b668b3d0127",
                                      "schema_version":  2
                                  },
-    "approved_commit_registry_sha256":  "d4ab1ca9303cbf0da11e26ecfc9731ef1e356fd12fe9989c5a6068c9394ff513",
+    "approved_commit_registry_sha256":  "60007f2da4588909ef84c96db53111a6ce20d0ae4cc79f0e9c072b668b3d0127",
     "current_round_delivery_files":  {
                                          "final_qa_report":  {
                                                                  "path":  "FINAL_QA_REPORT.md",
@@ -40,9 +40,9 @@
                                                                          "file_role":  "CURRENT_ROUND_CUMULATIVE_REMEDIATION_COMPILATION"
                                                                      }
                                      },
-    "package_file_count_total":  289,
-    "package_file_count_excluding_root_sha256":  288,
-    "root_sha256_entry_count":  288,
+    "package_file_count_total":  433,
+    "package_file_count_excluding_root_sha256":  432,
+    "root_sha256_entry_count":  432,
     "construction_readiness":  "DOCUMENTS_APPROVED_ORGANIZATIONAL_APPROVAL_PENDING",
     "control_script_status":  "SELFTEST_PASS",
     "archive_readiness":  "READY_FOR_ARCHIVE",

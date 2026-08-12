@@ -263,7 +263,7 @@
                                              },
                             "approved_commit_registry":  {
                                                              "path":  "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
-                                                             "sha256":  "d4ab1ca9303cbf0da11e26ecfc9731ef1e356fd12fe9989c5a6068c9394ff513",
+                                                             "sha256":  "60007f2da4588909ef84c96db53111a6ce20d0ae4cc79f0e9c072b668b3d0127",
                                                              "schema_version":  2
                                                          }
                         }

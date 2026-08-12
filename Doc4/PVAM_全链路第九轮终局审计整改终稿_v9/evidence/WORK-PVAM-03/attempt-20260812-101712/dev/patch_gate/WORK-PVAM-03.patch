@@ -1,0 +1,1399 @@
+diff --git a/Common/BonusConfig.py b/Common/BonusConfig.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..80d17c5070fadfc3e277549b62ee9de05300e6b2
+--- /dev/null
++++ b/Common/BonusConfig.py
+@@ -0,0 +1,538 @@
++from __future__ import annotations
++
++import hashlib
++import json
++import re
++from dataclasses import dataclass
++from datetime import datetime, timezone
++from decimal import Decimal, InvalidOperation
++from enum import Enum
++from types import MappingProxyType
++from typing import Any, Callable, Mapping
++
++from Common.PvAmount import RATE_PPM_SCALE, require_int64
++
++
++BONUS_CONFIG_SNAPSHOT_V2 = "BONUS_CONFIG_SNAPSHOT_V2"
++CONFIG_REQUIREMENTS_VERSION = "PVAM-CONFIG-REQUIREMENTS-v1"
++
++_CANONICAL_DECIMAL = re.compile(r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$")
++_PERCENT_TO_PPM = RATE_PPM_SCALE // 100
++
++
++class MissingPolicy(str, Enum):
++    ZERO = "ZERO"
++    ERROR = "ERROR"
++
++
++@dataclass(frozen=True, slots=True)
++class ConfigRequirement:
++    """单个奖项配置键的读取合同，不承载任何业务默认值。"""
++
++    config_name: str
++    type_exact: str | None
++    missing_policy: MissingPolicy
++    duplicate_is_error: bool
++    exact_raw_name: bool = False
++    exact_raw_type: bool = False
++    allow_negative: bool = True
++    value_encoding: str = "PERCENT_PPM"
++
++    @property
++    def is_prefix(self) -> bool:
++        return self.config_name.endswith("*")
++
++    @property
++    def name_token(self) -> str:
++        return self.config_name[:-1] if self.is_prefix else self.config_name
++
++    def to_dict(self) -> dict[str, Any]:
++        return {
++            "config_name": self.config_name,
++            "type_exact": self.type_exact,
++            "missing_policy": self.missing_policy.value,
++            "duplicate_is_error": self.duplicate_is_error,
++            "exact_raw_name": self.exact_raw_name,
++            "exact_raw_type": self.exact_raw_type,
++            "allow_negative": self.allow_negative,
++            "value_encoding": self.value_encoding,
++        }
++
++
++# SQL 中 MIN/IFNULL 或 LEFT JOIN 明确给出缺失为 0 的键使用 ZERO。Country
++# 行不属于费率，且 SE 与 EAB/LB 分别保留 exact-raw 和上游校验豁免语义。
++CONFIG_REQUIREMENT_MATRIX: Mapping[str, tuple[ConfigRequirement, ...]] = MappingProxyType({
++    "PE": (
++        ConfigRequirement("proEliteRate", "bonus", MissingPolicy.ZERO, False),
++    ),
++    "ELITE": (
++        ConfigRequirement("eliteRate", "bonus", MissingPolicy.ZERO, False),
++    ),
++    "SE": (
++        ConfigRequirement(
++            "superEliteRate", "bonus", MissingPolicy.ZERO, False,
++            exact_raw_name=True, exact_raw_type=True,
++        ),
++        ConfigRequirement(
++            "Country*", "bonus", MissingPolicy.ZERO, True,
++            exact_raw_name=True, exact_raw_type=True, value_encoding="RAW",
++        ),
++    ),
++    "EAB": (
++        ConfigRequirement("eabRate", "bonus", MissingPolicy.ZERO, False),
++        ConfigRequirement(
++            "Country*", "bonus", MissingPolicy.ZERO, False,
++            value_encoding="RAW",
++        ),
++    ),
++    "LB": (
++        ConfigRequirement("leadershipRate*", "bonus", MissingPolicy.ZERO, False),
++        ConfigRequirement(
++            "Country*", "bonus", MissingPolicy.ZERO, False,
++            value_encoding="RAW",
++        ),
++    ),
++    "TB": (
++        ConfigRequirement("teamBisectRate", "bonus", MissingPolicy.ZERO, False),
++        ConfigRequirement("teamTouchRate*", "bonus", MissingPolicy.ZERO, False),
++        ConfigRequirement(
++            "teamTouchCapping*", "bonus", MissingPolicy.ZERO, False,
++            value_encoding="DECIMAL",
++        ),
++    ),
++})
++
++
++def parse_signed_percent_to_ppm(raw: Decimal | str) -> int:
++    """把 AR_CONFIG 百分数原值精确转换为 signed ppm。
++
++    这里只实施十进制格式、ppm 精度和 int64 技术边界。业务最大值由上游
++    管理，不在本解析器中新增二次上限。
++    """
++    if isinstance(raw, Decimal):
++        value = raw
++    elif isinstance(raw, str) and _CANONICAL_DECIMAL.fullmatch(raw):
++        try:
++            value = Decimal(raw)
++        except InvalidOperation as exc:
++            raise ValueError("config percent is not a decimal") from exc
++    else:
++        raise TypeError("config percent must be Decimal or canonical decimal string")
++
++    if not value.is_finite():
++        raise ValueError("config percent must be finite")
++
++    scaled = value * _PERCENT_TO_PPM
++    if scaled != scaled.to_integral_value():
++        raise ValueError("config percent has precision finer than ppm")
++
++    return require_int64(int(scaled), field_name="config_rate_ppm")
++
++
++@dataclass(frozen=True, slots=True)
++class ConfigRow:
++    """保留业务字段原值的不可变配置行。"""
++
++    fields: tuple[tuple[str, Any], ...]
++
++    def get(self, key: str, default: Any = None) -> Any:
++        normalized = key.lower()
++        for field, value in self.fields:
++            if field == normalized:
++                return value
++        return default
++
++    def to_dict(self) -> dict[str, Any]:
++        return dict(self.fields)
++
++
++@dataclass(frozen=True, slots=True)
++class ConfigSnapshot:
++    """单次奖金 run 使用的不可变配置快照。"""
++
++    period_num: int | str | None
++    calc_month: int | None
++    source: str
++    source_version: str
++    loaded_at: str
++    raw_row_count: int
++    raw_rows_checksum: str
++    requirements_version: str
++    canonical_values: tuple[tuple[str, str, str], ...]
++    canonical_checksum: str
++    snapshot_id: str
++    _rows: tuple[ConfigRow, ...]
++
++    @classmethod
++    def from_rows(
++        cls,
++        rows: Any,
++        *,
++        period_num: int | str | None = None,
++        calc_month: int | None = None,
++        source: str = "controlled-fixture",
++        source_version: str = "unversioned",
++        loaded_at: str | None = None,
++        requirements_version: str = CONFIG_REQUIREMENTS_VERSION,
++    ) -> "ConfigSnapshot":
++        frozen_rows = _freeze_rows(rows)
++        raw_tokens = sorted(_stable_row_token(row) for row in frozen_rows)
++        raw_checksum = _sha256_json(raw_tokens)
++
++        canonical_values = tuple(sorted(
++            (
++                _canonical_text(row.get("config_name")),
++                _canonical_text(row.get("type")),
++                _canonical_text(row.get("value")),
++            )
++            for row in frozen_rows
++        ))
++        canonical_checksum = _sha256_json(canonical_values)
++        snapshot_id = _sha256_json({
++            "period_num": period_num,
++            "calc_month": calc_month,
++            "source": source,
++            "source_version": source_version,
++            "raw_rows_checksum": raw_checksum,
++            "requirements_version": requirements_version,
++            "canonical_checksum": canonical_checksum,
++        })
++
++        return cls(
++            period_num=period_num,
++            calc_month=calc_month,
++            source=str(source),
++            source_version=str(source_version),
++            loaded_at=loaded_at or datetime.now(timezone.utc).isoformat(),
++            raw_row_count=len(frozen_rows),
++            raw_rows_checksum=raw_checksum,
++            requirements_version=str(requirements_version),
++            canonical_values=canonical_values,
++            canonical_checksum=canonical_checksum,
++            snapshot_id=snapshot_id,
++            _rows=frozen_rows,
++        )
++
++    @property
++    def checksum(self) -> str:
++        """兼容施工单示例；配置消费者应记录 canonical checksum。"""
++        return self.canonical_checksum
++
++    @property
++    def raw_rows(self) -> tuple[ConfigRow, ...]:
++        return self._rows
++
++    def assert_run(self, period_num: int | str, calc_month: int | None = None) -> None:
++        if self.period_num is not None and str(self.period_num) != str(period_num):
++            raise ValueError(
++                f"config snapshot period mismatch: {self.period_num!r} != {period_num!r}"
++            )
++        if (
++            calc_month is not None
++            and self.calc_month is not None
++            and int(self.calc_month) != int(calc_month)
++        ):
++            raise ValueError(
++                f"config snapshot calc_month mismatch: {self.calc_month!r} != {calc_month!r}"
++            )
++
++    def requirement(self, award: str, config_name: str) -> ConfigRequirement:
++        award_key = str(award).upper()
++        requirements = CONFIG_REQUIREMENT_MATRIX.get(award_key)
++        if requirements is None:
++            raise KeyError(f"unknown config award: {award}")
++        for requirement in requirements:
++            if requirement.is_prefix:
++                if config_name.startswith(requirement.name_token):
++                    return requirement
++            elif requirement.config_name == config_name:
++                return requirement
++        raise KeyError(f"{config_name!r} is not declared for award {award_key}")
++
++    def rows_for(self, requirement: ConfigRequirement) -> tuple[ConfigRow, ...]:
++        matches = tuple(row for row in self._rows if _row_matches(row, requirement))
++        if requirement.duplicate_is_error:
++            counts: dict[str, int] = {}
++            for row in matches:
++                raw_name = row.get("config_name")
++                duplicate_key = (
++                    raw_name
++                    if requirement.exact_raw_name
++                    else raw_name.strip().casefold()
++                )
++                counts[duplicate_key] = counts.get(duplicate_key, 0) + 1
++            duplicates = sorted(name for name, count in counts.items() if count > 1)
++            if duplicates:
++                raise ValueError(
++                    f"duplicate config rows for {requirement.config_name}: {duplicates}"
++                )
++        return matches
++
++    def require_ppm(self, config_name: str, *, award: str | None = None) -> int:
++        requirement = (
++            self.requirement(award, config_name)
++            if award is not None
++            else _find_unique_requirement(config_name)
++        )
++        if requirement.value_encoding != "PERCENT_PPM":
++            raise TypeError(f"{config_name} is not a percent configuration")
++
++        matches = self.rows_for(requirement)
++        if not matches:
++            if requirement.missing_policy is MissingPolicy.ZERO:
++                return 0
++            raise KeyError(f"required config is missing: {config_name}")
++
++        values = [parse_signed_percent_to_ppm(row.get("value")) for row in matches]
++        result = min(values) if len(values) > 1 else values[0]
++        if result < 0 and not requirement.allow_negative:
++            raise ValueError(f"negative config is not allowed: {config_name}")
++        return result
++
++    def rate_decimal(self, config_name: str, *, award: str | None = None) -> Decimal:
++        return Decimal(self.require_ppm(config_name, award=award)) / Decimal(RATE_PPM_SCALE)
++
++    def iter_ppm_rows(self, award: str, config_name_pattern: str) -> tuple[tuple[str, int], ...]:
++        requirement = self.requirement(award, config_name_pattern)
++        if requirement.value_encoding != "PERCENT_PPM":
++            raise TypeError(f"{config_name_pattern} is not a percent configuration")
++        result = []
++        for row in self.rows_for(requirement):
++            name = row.get("config_name")
++            if not isinstance(name, str):
++                raise TypeError("config_name must be a string")
++            ppm = parse_signed_percent_to_ppm(row.get("value"))
++            if ppm < 0 and not requirement.allow_negative:
++                raise ValueError(f"negative config is not allowed: {name}")
++            if requirement.exact_raw_name:
++                canonical_name = name
++            else:
++                normalized_name = name.strip()
++                suffix = normalized_name[len(requirement.name_token):]
++                canonical_name = f"{requirement.name_token}{suffix}"
++            result.append((canonical_name, ppm))
++        return tuple(result)
++
++    def country_rows(self, award: str) -> tuple[dict[str, Any], ...]:
++        requirement = self.requirement(award, "Country*")
++        result = []
++        for row in self.rows_for(requirement):
++            record = row.to_dict()
++            if not requirement.exact_raw_name:
++                raw_name = record["config_name"].strip()
++                suffix = raw_name[len(requirement.name_token):]
++                record["config_name"] = f"{requirement.name_token}{suffix}"
++            if requirement.type_exact is not None and not requirement.exact_raw_type:
++                record["type"] = requirement.type_exact
++            result.append(record)
++        return tuple(result)
++
++    def to_records(self) -> list[dict[str, Any]]:
++        return [row.to_dict() for row in self._rows]
++
++    def to_pandas(self, *, uppercase_columns: bool = False):
++        import pandas as pd
++
++        records = self.to_records()
++        if records:
++            frame = pd.DataFrame(records)
++        else:
++            frame = pd.DataFrame(columns=["config_name", "type", "value"])
++        if uppercase_columns:
++            frame = frame.rename(columns=str.upper)
++        return frame
++
++    def manifest(self) -> dict[str, Any]:
++        return {
++            "period_num": self.period_num,
++            "calc_month": self.calc_month,
++            "source": self.source,
++            "source_version": self.source_version,
++            "loaded_at": self.loaded_at,
++            "raw_row_count": self.raw_row_count,
++            "raw_rows_checksum": self.raw_rows_checksum,
++            "requirements_version": self.requirements_version,
++            "canonical_values": [list(value) for value in self.canonical_values],
++            "canonical_checksum": self.canonical_checksum,
++            "snapshot_id": self.snapshot_id,
++        }
++
++
++class ConfigSnapshotLoader:
++    """从调用方提供的只读行源加载一次快照；本类不连接 MySQL。"""
++
++    def __init__(self, source: Any | Callable[[], Any]):
++        self._source = source
++
++    def load(
++        self,
++        *,
++        period_num: int | str | None = None,
++        calc_month: int | None = None,
++        source: str = "controlled-fixture",
++        source_version: str = "unversioned",
++    ) -> ConfigSnapshot:
++        rows = self._source() if callable(self._source) else self._source
++        return ConfigSnapshot.from_rows(
++            rows,
++            period_num=period_num,
++            calc_month=calc_month,
++            source=source,
++            source_version=source_version,
++        )
++
++
++def ensure_config_snapshot(
++    value: ConfigSnapshot | Any,
++    *,
++    period_num: int | str | None = None,
++    calc_month: int | None = None,
++    source: str = "legacy-dataframe-fixture",
++) -> ConfigSnapshot:
++    """把受控 fixture 适配为快照；生产编排应直接传入同一个 snapshot。"""
++    if isinstance(value, ConfigSnapshot):
++        if period_num is not None:
++            value.assert_run(period_num, calc_month)
++        return value
++    return ConfigSnapshot.from_rows(
++        value,
++        period_num=period_num,
++        calc_month=calc_month,
++        source=source,
++    )
++
++
++def requirement_matrix_manifest() -> dict[str, list[dict[str, Any]]]:
++    return {
++        award: [requirement.to_dict() for requirement in requirements]
++        for award, requirements in CONFIG_REQUIREMENT_MATRIX.items()
++    }
++
++
++def _find_unique_requirement(config_name: str) -> ConfigRequirement:
++    found = []
++    for requirements in CONFIG_REQUIREMENT_MATRIX.values():
++        for requirement in requirements:
++            if not requirement.is_prefix and requirement.config_name == config_name:
++                found.append(requirement)
++    if len(found) != 1:
++        raise KeyError(f"config requirement is not uniquely declared: {config_name}")
++    return found[0]
++
++
++def _row_matches(row: ConfigRow, requirement: ConfigRequirement) -> bool:
++    raw_name = row.get("config_name")
++    raw_type = row.get("type")
++    if not isinstance(raw_name, str):
++        return False
++
++    name = raw_name if requirement.exact_raw_name else raw_name.strip().casefold()
++    token = (
++        requirement.name_token
++        if requirement.exact_raw_name
++        else requirement.name_token.casefold()
++    )
++    name_matches = name.startswith(token) if requirement.is_prefix else name == token
++    if not name_matches:
++        return False
++
++    if requirement.type_exact is None:
++        return True
++    if not isinstance(raw_type, str):
++        return False
++    actual_type = raw_type if requirement.exact_raw_type else raw_type.strip().casefold()
++    expected_type = (
++        requirement.type_exact
++        if requirement.exact_raw_type
++        else requirement.type_exact.casefold()
++    )
++    return actual_type == expected_type
++
++
++def _freeze_rows(rows: Any) -> tuple[ConfigRow, ...]:
++    if hasattr(rows, "to_pandas"):
++        rows = rows.to_pandas()
++    if hasattr(rows, "compute"):
++        rows = rows.compute()
++    if hasattr(rows, "to_dict") and not isinstance(rows, Mapping):
++        try:
++            rows = rows.to_dict(orient="records")
++        except TypeError:
++            rows = rows.to_dict("records")
++
++    if isinstance(rows, Mapping):
++        rows = [rows]
++    try:
++        source_rows = list(rows)
++    except TypeError as exc:
++        raise TypeError("config rows must be an iterable of mappings") from exc
++
++    frozen = []
++    for index, source_row in enumerate(source_rows):
++        if not isinstance(source_row, Mapping):
++            raise TypeError(f"config row {index} must be a mapping")
++        normalized: dict[str, Any] = {}
++        for key, value in source_row.items():
++            normalized_key = str(key).lower()
++            if normalized_key in normalized:
++                raise ValueError(
++                    f"config row {index} has duplicate case-insensitive column {normalized_key!r}"
++                )
++            normalized[normalized_key] = _freeze_value(value)
++        missing = {"config_name", "type", "value"} - set(normalized)
++        if missing:
++            raise ValueError(f"config row {index} misses columns: {sorted(missing)}")
++        frozen.append(ConfigRow(tuple(sorted(normalized.items()))))
++    return tuple(frozen)
++
++
++def _freeze_value(value: Any) -> Any:
++    if isinstance(value, Mapping):
++        return tuple(sorted((str(key), _freeze_value(item)) for key, item in value.items()))
++    if isinstance(value, (list, tuple)):
++        return tuple(_freeze_value(item) for item in value)
++    if isinstance(value, (str, int, bool, Decimal)) or value is None:
++        return value
++    if isinstance(value, float):
++        return value
++    if hasattr(value, "item"):
++        try:
++            return _freeze_value(value.item())
++        except (TypeError, ValueError):
++            pass
++    return value
++
++
++def _stable_row_token(row: ConfigRow) -> str:
++    return json.dumps(
++        [(key, _typed_json_value(value)) for key, value in row.fields],
++        ensure_ascii=False,
++        separators=(",", ":"),
++    )
++
++
++def _typed_json_value(value: Any) -> Any:
++    if isinstance(value, Decimal):
++        return {"type": "decimal", "value": format(value, "f")}
++    if isinstance(value, str):
++        return {"type": "str", "value": value}
++    if isinstance(value, bool):
++        return {"type": "bool", "value": value}
++    if isinstance(value, int):
++        return {"type": "int", "value": str(value)}
++    if isinstance(value, float):
++        return {"type": "float", "value": repr(value)}
++    if value is None:
++        return {"type": "null", "value": None}
++    if isinstance(value, tuple):
++        return {"type": "tuple", "value": [_typed_json_value(item) for item in value]}
++    return {"type": type(value).__name__, "value": repr(value)}
++
++
++def _canonical_text(value: Any) -> str:
++    return json.dumps(_typed_json_value(value), ensure_ascii=False, separators=(",", ":"))
++
++
++def _sha256_json(value: Any) -> str:
++    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
++    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+diff --git a/Model/Config/ConfigSnapshot.py b/Model/Config/ConfigSnapshot.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..d08d7c73924bc9fa7b63aacd3aa083c7022d43bb
+--- /dev/null
++++ b/Model/Config/ConfigSnapshot.py
+@@ -0,0 +1,82 @@
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Any, Mapping, Protocol
++
++
++class SnapshotManifestSource(Protocol):
++    period_num: int | str | None
++    calc_month: int | None
++    source: str
++    source_version: str
++    loaded_at: str
++    raw_row_count: int
++    raw_rows_checksum: str
++    requirements_version: str
++    canonical_values: tuple[tuple[str, str, str], ...]
++    canonical_checksum: str
++    snapshot_id: str
++
++
++@dataclass(frozen=True, slots=True)
++class ConfigSnapshotManifest:
++    """配置快照的可序列化审计模型；不包含密钥或外部连接信息。"""
++
++    period_num: int | str | None
++    calc_month: int | None
++    source: str
++    source_version: str
++    loaded_at: str
++    raw_row_count: int
++    raw_rows_checksum: str
++    requirements_version: str
++    canonical_values: tuple[tuple[str, str, str], ...]
++    canonical_checksum: str
++    snapshot_id: str
++
++    @classmethod
++    def from_snapshot(cls, snapshot: SnapshotManifestSource) -> "ConfigSnapshotManifest":
++        return cls(
++            period_num=snapshot.period_num,
++            calc_month=snapshot.calc_month,
++            source=snapshot.source,
++            source_version=snapshot.source_version,
++            loaded_at=snapshot.loaded_at,
++            raw_row_count=snapshot.raw_row_count,
++            raw_rows_checksum=snapshot.raw_rows_checksum,
++            requirements_version=snapshot.requirements_version,
++            canonical_values=tuple(snapshot.canonical_values),
++            canonical_checksum=snapshot.canonical_checksum,
++            snapshot_id=snapshot.snapshot_id,
++        )
++
++    def to_dict(self) -> dict[str, Any]:
++        return {
++            "period_num": self.period_num,
++            "calc_month": self.calc_month,
++            "source": self.source,
++            "source_version": self.source_version,
++            "loaded_at": self.loaded_at,
++            "raw_row_count": self.raw_row_count,
++            "raw_rows_checksum": self.raw_rows_checksum,
++            "requirements_version": self.requirements_version,
++            "canonical_values": [list(value) for value in self.canonical_values],
++            "canonical_checksum": self.canonical_checksum,
++            "snapshot_id": self.snapshot_id,
++        }
++
++    @classmethod
++    def from_mapping(cls, value: Mapping[str, Any]) -> "ConfigSnapshotManifest":
++        return cls(
++            period_num=value.get("period_num"),
++            calc_month=value.get("calc_month"),
++            source=str(value["source"]),
++            source_version=str(value["source_version"]),
++            loaded_at=str(value["loaded_at"]),
++            raw_row_count=int(value["raw_row_count"]),
++            raw_rows_checksum=str(value["raw_rows_checksum"]),
++            requirements_version=str(value["requirements_version"]),
++            canonical_values=tuple(tuple(item) for item in value["canonical_values"]),
++            canonical_checksum=str(value["canonical_checksum"]),
++            snapshot_id=str(value["snapshot_id"]),
++        )
+diff --git a/User/EliteAchievementBonusService.py b/User/EliteAchievementBonusService.py
+index 9474b5726abce3ef1eb987b4f9f54e3604317633..21beaba597409d8ad69a6b9d98d54b27da2891c6 100644
+--- a/User/EliteAchievementBonusService.py
++++ b/User/EliteAchievementBonusService.py
+@@ -6,6 +6,8 @@ from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+ from pandas.api.types import is_float_dtype, is_integer_dtype
+ from typing import Any, Dict, Optional, Set, Tuple
+ 
++from Common.BonusConfig import ConfigSnapshot, ensure_config_snapshot
++
+ logger = logging.getLogger("Bonus.EliteAchievementBonusService")
+ 
+ _INVALID_STR_TOKENS = {"none", "nan", "null", "na", "nat", "<na>", ""}
+@@ -124,6 +126,8 @@ class EliteAchievementBonusService:
+     @staticmethod
+     def _to_local_pandas(df, name: str) -> pd.DataFrame:
+         if hasattr(df, "result"): df = df.result()
++        if isinstance(df, ConfigSnapshot):
++            return df.to_pandas()
+         if hasattr(df, "compute"): df = df.compute()
+         if hasattr(df, "to_pandas"): df = df.to_pandas()
+         if not isinstance(df, pd.DataFrame):
+@@ -215,37 +219,8 @@ class EliteAchievementBonusService:
+ 
+     # ------------------------------------------------------------------ 配置解析
+     def _parse_eab_rate(self, df_config: pd.DataFrame) -> Decimal:
+-        df_cfg = self._lower_columns(self._to_local_pandas(df_config, "df_config").copy(), "df_config")
+-        self._require_columns(df_cfg, "df_config", {"config_name", "value", "type"})
+-        name_norm = df_cfg['config_name'].astype(str).str.strip()
+-        type_norm = df_cfg['type'].astype(str).str.strip().str.lower()
+-        df_rate = df_cfg[(name_norm == 'eabRate') & (type_norm == 'bonus')]
+-        if df_rate.empty:
+-            raise ValueError("[阻断] EAB_RATE 配置缺失 (TYPE='bonus')。")
+-        if len(df_rate) > 1:
+-            raise ValueError("[阻断] EAB_RATE 配置存在多条。")
+-        value = df_rate.iloc[0]['value']
+-        if pd.isna(value) or value is None:
+-            raise ValueError("[阻断] eabRate 配置的值为空。")
+-        if isinstance(value, (float, np.floating)):
+-            raise ValueError(f"[阻断] eabRate 配置值为 float({value!r})，请用字符串以免精度问题。")
+-        # 先 strip 判空：空串/纯空白归"配置的值为空"（而非走 Decimal 的 InvalidOperation）
+-        s = str(value).strip()
+-        if s == "":
+-            raise ValueError("[阻断] eabRate 配置的值为空。")
+-        try:
+-            rate_val = Decimal(s)
+-        except InvalidOperation:
+-            raise ValueError(f"[阻断] eabRate 值非法: {value!r}")
+-        # NaN 单独归"值非法"（Decimal('NaN') 本身合法但语义无效）；必须在 is_finite 之前判，
+-        # 因为 NaN 与 Infinity 都 not is_finite，但二者归类不同。
+-        if rate_val.is_nan():
+-            raise ValueError(f"[阻断] eabRate 值非法: {value!r}")
+-        if not rate_val.is_finite():
+-            raise ValueError(f"[阻断] eabRate 配置值不是有限数值: {value!r}")
+-        if rate_val <= 0 or rate_val > 100:
+-            raise ValueError(f"[阻断] eabRate 必须介于 (0, 100]，当前: {rate_val}")
+-        return rate_val / Decimal('100')
++        snapshot = ensure_config_snapshot(df_config)
++        return snapshot.rate_decimal("eabRate", award="EAB")
+ 
+     def _parse_country_mapping(self, df_config: pd.DataFrame, valid_countries: Optional[set] = None) -> pd.DataFrame:
+         df_cfg = self._lower_columns(self._to_local_pandas(df_config, "df_config").copy(), "df_config")
+@@ -261,28 +236,19 @@ class EliteAchievementBonusService:
+             mapping = []
+             for _, row in df_country.iterrows():
+                 config_name = row['__name']
+-                if len(config_name) <= self._COUNTRY_PREFIX_LEN:
+-                    raise ValueError(f"[阻断] Country 配置名过短非法: {config_name}")
+                 source_country = self._normalize_id_scalar(config_name[self._COUNTRY_PREFIX_LEN:])
+                 target_region = self._normalize_id_scalar(row['value'])
+-                if not source_country or source_country.lower() in _INVALID_STR_TOKENS:
+-                    raise ValueError(f"[阻断] 源国家ID非法: {config_name}")
+-                if not target_region or target_region.lower() in _INVALID_STR_TOKENS:
+-                    raise ValueError(f"[阻断] 目标大区 value 非法: {target_region}")
+                 mapping.append({"source_country_id": source_country, "region_default_id": target_region})
+             df_mapping = pd.DataFrame(mapping, columns=['source_country_id', 'region_default_id'])
+-            if df_mapping['source_country_id'].duplicated().any():
+-                duplicates = df_mapping[df_mapping['source_country_id'].duplicated()]['source_country_id'].tolist()
+-                raise ValueError(f"[阻断] 重复源国家（含大小写变体）: {duplicates}")
+         if self.required_region_sources:
+             missing_req = self.required_region_sources - set(df_mapping['source_country_id'])
+             if missing_req:
+                 raise ValueError(f"[阻断] 业务要求的可合并国家缺少映射: {missing_req}")
+         if valid_countries is not None and not df_mapping.empty:
+-            invalid_targets = set(df_mapping['region_default_id']) - valid_countries
++            invalid_targets = {value for value in df_mapping['region_default_id'] if value not in {"", "0"}} - valid_countries
+             if invalid_targets:
+                 raise ValueError(f"[阻断] 目标大区不在国家主数据: {invalid_targets}")
+-            invalid_sources = set(df_mapping['source_country_id']) - valid_countries
++            invalid_sources = {value for value in df_mapping['source_country_id'] if value not in {"", "0"}} - valid_countries
+             if invalid_sources:
+                 raise ValueError(f"[阻断] 源国家不在国家主数据: {invalid_sources}")
+         return df_mapping
+@@ -388,8 +354,13 @@ class EliteAchievementBonusService:
+         # endregion
+ 
+         # region 获取汇率 并将国家 大区信息放到dask中
+-        eab_rate = self._parse_eab_rate(df_config)
+-        mapping_ddf = dd.from_pandas(self._parse_country_mapping(df_config, valid_countries), npartitions=1)
++        config_snapshot = ensure_config_snapshot(
++            df_config,
++            period_num=period_int,
++            calc_month=calc_month_int,
++        )
++        eab_rate = self._parse_eab_rate(config_snapshot)
++        mapping_ddf = dd.from_pandas(self._parse_country_mapping(config_snapshot, valid_countries), npartitions=1)
+         # endregion
+ 
+         # region 将ddf_elite_users放到内存中
+diff --git a/User/EliteBonusService.py b/User/EliteBonusService.py
+index 6eb33b64afa5df5101fddac321e4e8d2eaa0b579..bbbe0a3eb3fbf2d43f71137eee070e67f9405a57 100644
+--- a/User/EliteBonusService.py
++++ b/User/EliteBonusService.py
+@@ -33,6 +33,7 @@ from dask.distributed import Client
+ from redis_om import NotFoundError
+ from Model.User.EliteBonusStats import EliteBonusStats
+ from Common.AmountModelAdapter import build_factory_amount_fields
++from Common.BonusConfig import ConfigSnapshot
+ from Redishelper.PVAmountConfigProvider import (
+     PVAmountConfigProvider,
+     PVAmountRunConfig,
+@@ -58,9 +59,6 @@ SOURCE_TTL_SECONDS = 60 * 60 * 24 * 90  # 溯源记录 90 天兜底过期
+ # 出参: dict[user_id] -> {"user_name", "real_name", "country_id", "parent_uid", "top_deep"}
+ UserInfoResolver = Callable[[List[str]], Dict[str, Dict[str, Any]]]
+ 
+-# 比例加载器: 期初锁定 elite_rate
+-EliteRateLoader = Callable[[], Decimal]
+-
+ # 落盘执行器: db_executor(table_name, rows) 由调用方提供事务与批量 INSERT
+ DbExecutor = Callable[[str, List[Dict[str, Any]]], None]
+ 
+@@ -87,22 +85,14 @@ class EliteBonusService:
+         self,
+         period_num: int,
+         calc_month: int,
+-        elite_rate_loader: Optional[EliteRateLoader] = None,
++        config_snapshot: ConfigSnapshot,
+         user_info_resolver: Optional[UserInfoResolver] = None,
+         dask_address: str = DEFAULT_DASK_ADDRESS,
+     ):
+         """
+         :param period_num:  IV_PERIOD_NUM
+         :param calc_month:  IV_CALC_MONTH
+-        :param elite_rate_loader:
+-            从 AR_CONFIG 读取比例的函数,期初调用一次锁定,期内不刷新。
+-            生产实现示例:
+-                def loader():
+-                    raw = db.execute(
+-                        "SELECT MIN(VALUE) FROM AR_CONFIG "
+-                        "WHERE CONFIG_NAME='eliteRate' AND TYPE='bonus'"
+-                    ).scalar()
+-                    return Decimal(str(raw or 15)) / Decimal('100')
++        :param config_snapshot: run 启动时冻结的配置快照；同一 run 不得刷新。
+         :param user_info_resolver:
+             期末快照时批量解析用户信息(姓名/国家/父级/层数)的回调。
+             生产必须传入,否则 SOURCE / BONUS_E 表关联字段全空。
+@@ -116,16 +106,20 @@ class EliteBonusService:
+         self._dask_address = dask_address
+         self._user_info_resolver = user_info_resolver or _default_user_info_resolver
+ 
+-        # 期初锁定 elite_rate(必填,默认占位会出 WARN)
+-        if elite_rate_loader is not None:
+-            self.elite_rate = elite_rate_loader()
+-            logger.info("Period %s 期初锁定 elite_rate = %s", period_num, self.elite_rate)
+-        else:
+-            logger.warning(
+-                "elite_rate_loader 未提供,使用占位值 0.15。"
+-                "生产环境必须传入从 AR_CONFIG 读取的 loader!"
+-            )
+-            self.elite_rate = Decimal('0.15')
++        # region 期初锁定 Elite 配置
++        if not isinstance(config_snapshot, ConfigSnapshot):
++            raise TypeError("EliteBonusService 必须显式传入冻结 ConfigSnapshot")
++        config_snapshot.assert_run(period_num, calc_month)
++        self.config_snapshot = config_snapshot
++        self.elite_rate_ppm = config_snapshot.require_ppm("eliteRate", award="ELITE")
++        self.elite_rate = Decimal(self.elite_rate_ppm) / Decimal(1_000_000)
++        logger.info(
++            "Period %s 期初锁定 elite_rate_ppm=%s snapshot=%s",
++            period_num,
++            self.elite_rate_ppm,
++            config_snapshot.snapshot_id,
++        )
++        # endregion
+ 
+     # =================================================================
+     # 基础设施: Dask 懒加载
+diff --git a/User/GlobalEliteBonusRecalculationService.py b/User/GlobalEliteBonusRecalculationService.py
+index 7e351492d37f68a7b04e0e3ee945b788c99b55f0..9c7879cbae25d44947d717c51eefb76f72d3c69c 100644
+--- a/User/GlobalEliteBonusRecalculationService.py
++++ b/User/GlobalEliteBonusRecalculationService.py
+@@ -10,6 +10,7 @@ from redis_om import NotFoundError
+ 
+ from Model.User.EliteBonusStats import EliteBonusStats
+ from Common.AmountModelAdapter import build_factory_amount_fields
++from Common.BonusConfig import ConfigSnapshot
+ from Redishelper.PVAmountConfigProvider import (
+     PVAmountConfigProvider,
+     PVAmountRunConfig,
+@@ -78,14 +79,14 @@ class GlobalEliteBonusRecalculationService:
+ 
+     def __init__(
+         self,
+-        elite_rate: float = 0.15,
++        config_snapshot: ConfigSnapshot,
+         *,
+         calc_month: Optional[int] = None,
+         db_executor: Optional[Callable[[str, List[Dict[str, Any]]], None]] = None,
+         user_info_resolver: Optional[Callable[[List[str]], Dict[str, Dict[str, Any]]]] = None,
+     ):
+         """
+-        :param elite_rate: 需由调用方从 AR_CONFIG 锁定传入，Decimal 转换避开二进制浮点误差。
++        :param config_snapshot: run 启动时冻结的配置快照。
+         :param calc_month: IV_CALC_MONTH，写入 AR_CALC_BONUS_E / _SOURCE 的 CALC_MONTH。
+             仅当提供 db_executor（自包含落库模式）时必填。
+         :param db_executor: 关系库事务批量插入回调，签名 db_executor(table_name, rows)。
+@@ -96,7 +97,13 @@ class GlobalEliteBonusRecalculationService:
+         :param user_info_resolver: 落库时批量解析用户姓名/国家/父级/层数的回调；
+             不提供则 SOURCE / BONUS_E 表的姓名/国家/父级等关联字段为空。
+         """
+-        self.elite_rate = Decimal(str(elite_rate))
++        if not isinstance(config_snapshot, ConfigSnapshot):
++            raise TypeError(
++                "GlobalEliteBonusRecalculationService 必须显式传入冻结 ConfigSnapshot"
++            )
++        self.config_snapshot = config_snapshot
++        self.elite_rate_ppm = config_snapshot.require_ppm("eliteRate", award="ELITE")
++        self.elite_rate = Decimal(self.elite_rate_ppm) / Decimal(1_000_000)
+         self.calc_month = calc_month
+         self.db_executor = db_executor
+         self.user_info_resolver = user_info_resolver
+@@ -109,6 +116,7 @@ class GlobalEliteBonusRecalculationService:
+         """单期全量 Elite Bonus 结算重算主入口"""
+         period = str(period)
+         # region 加载并冻结本次业务运行配置
++        self.config_snapshot.assert_run(period, self.calc_month)
+         redis_conn = EliteBonusStats.db()
+         run_config = PVAmountRunSession.start(
+             PVAmountConfigProvider(redis_conn)
+@@ -488,11 +496,10 @@ class GlobalEliteBonusRecalculationService:
+         # 懒导入，避免顶层 import 路径耦合导致整模块加载失败；路径以实际工程为准。
+         from User.EliteBonusService import EliteBonusService
+ 
+-        locked_rate = self.elite_rate  # 锁定期初比例，避免闭包捕获到后续被改写的引用
+         snapshot_svc = EliteBonusService(
+             period_num=int(period),
+             calc_month=self.calc_month,
+-            elite_rate_loader=lambda: locked_rate,
++            config_snapshot=self.config_snapshot,
+             user_info_resolver=self.user_info_resolver,
+         )
+         return snapshot_svc._snapshot_period_to_db(self.db_executor, run_config)
+diff --git a/User/LeadershipBonusGPUService.py b/User/LeadershipBonusGPUService.py
+index 022a1e0accf1fdfbbb2d8549016b906f55a4cb81..cc4e671d95c4878cb557da31a294e4f1259c90b3 100644
+--- a/User/LeadershipBonusGPUService.py
++++ b/User/LeadershipBonusGPUService.py
+@@ -27,6 +27,8 @@ from typing import Dict, Iterable, Optional, Tuple
+ import cudf
+ import cupy as cp
+ 
++from Common.BonusConfig import ensure_config_snapshot
++
+ LOG = logging.getLogger("Bonus.LeadershipBonusGPUService")
+ 
+ 
+@@ -288,7 +290,11 @@ class LeadershipBonusGPUService:
+         self._require_columns(df_users, "df_users", {"user_id", "country_id", "is_active"})
+         self._require_columns(df_perf_month, "df_perf_month", {"period_num", "country_id", "pv_pcs"})
+         self._require_columns(df_honor_levels, "df_honor_levels", {"calc_id", "honor_lv"})
+-        self._require_columns(df_config, "df_config", {"config_name", "value", "type"})
++        config_snapshot = ensure_config_snapshot(
++            df_config,
++            period_num=iv_period_num,
++            calc_month=iv_calc_month,
++        )
+         # endregion
+ 
+         # region 创建df_network（用户关系）、df_pv_raw（real以及unreal）、df_honor_last（等级相关）
+@@ -307,22 +313,26 @@ class LeadershipBonusGPUService:
+         # 0. 配置准备（严格按 TYPE='bonus'）
+         # --------------------------------------------------------------
+ 
+-        # region 创建df_rate_cfg 等级对应的比例 例如：leadershipRate10 -> 4.5%
+-        df_config_bonus = df_config[df_config["type"] == "bonus"].copy()
+-        df_rate_cfg = df_config_bonus[
+-            df_config_bonus["config_name"].str.startswith("leadershipRate")
+-        ].copy()
++        # region 创建df_rate_cfg 等级对应的 signed ppm
++        rate_rows = config_snapshot.iter_ppm_rows("LB", "leadershipRate*")
++        df_rate_cfg = cudf.DataFrame({
++            "config_name": [name for name, _ in rate_rows],
++            "honor_rate_ppm": [ppm for _, ppm in rate_rows],
++        })
+         df_rate_cfg["layer_calc_id"] = (
+             df_rate_cfg["config_name"].str.replace("leadershipRate", "").astype("int32")
+         )
+-        df_rate_cfg["honor_rate"] = df_rate_cfg["value"].astype("float64") / 100.0
++        df_rate_cfg["honor_rate"] = df_rate_cfg["honor_rate_ppm"].astype("float64") / 1_000_000.0
+         # endregion
+ 
+         # region 创建df_region_cfg -> 取出国家ID、默认大区ID和默认大区名称
+         # df_region_cfg -> config_name value type source_country_id region_default_id
+-        df_region_cfg = df_config_bonus[
+-            df_config_bonus["config_name"].str.startswith("Country")
+-        ].copy()
++        country_rows = config_snapshot.country_rows("LB")
++        df_region_cfg = cudf.DataFrame({
++            "config_name": [row["config_name"] for row in country_rows],
++            "value": [row["value"] for row in country_rows],
++            "type": [row["type"] for row in country_rows],
++        })
+         df_region_cfg["source_country_id"] = df_region_cfg["config_name"].str.replace("Country", "")
+         df_region_cfg["region_default_id"] = df_region_cfg["value"]
+         print("展示df_rate_cfg 111")
+diff --git a/User/PEBonusService.py b/User/PEBonusService.py
+index 0504b88b6311d9523e424751630bbdf2660d2613..4550bb524e1e968f1efa1d132c6ab495a96ef563 100644
+--- a/User/PEBonusService.py
++++ b/User/PEBonusService.py
+@@ -6,6 +6,8 @@ import pandas as pd
+ from typing import Dict, List, Optional
+ from dask.distributed import get_client, wait as dask_wait, futures_of
+ 
++from Common.BonusConfig import ConfigSnapshot
++
+ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
+ logger = logging.getLogger("Bonus.PEBonusBatchServiceGPU")
+ 
+@@ -26,9 +28,14 @@ SOURCE_COLUMNS = ['PERIOD_NUM', 'CALC_MONTH', 'BONUS_USER_ID', 'BONUS_USER_NAME'
+ 
+ 
+ class PEBonusService:
+-    def __init__(self):
++    def __init__(self, config_snapshot: ConfigSnapshot):
++        if not isinstance(config_snapshot, ConfigSnapshot):
++            raise TypeError("PEBonusService requires an explicit frozen ConfigSnapshot")
+         self._max_compression_depth = 1000
+-        self._pro_elite_rate_ppm = 150000
++        self.config_snapshot = config_snapshot
++        self._pro_elite_rate_ppm = config_snapshot.require_ppm(
++            "proEliteRate", award="PE"
++        )
+ 
+     @staticmethod
+     def _generate_uuids(df: cudf.DataFrame, id_col_name: str = 'ID') -> cudf.DataFrame:
+@@ -346,7 +353,8 @@ class PEBonusService:
+                       ddf_user: dask_cudf.DataFrame,
+                       ddf_user_perf: Optional[dask_cudf.DataFrame] = None) -> Dict[str, dask_cudf.DataFrame]:
+ 
+-        # region 参数验证
++        # region 参数与配置快照验证
++        self.config_snapshot.assert_run(period_num, calc_month)
+         client = get_client()
+         logger.info(f"启动期数: {period_num}, 月份: {calc_month} 奖金流...")
+         self._require_columns(ddf_user, REQUIRED_USER_COLS, 'UserInfo维表')
+diff --git a/User/SuperEliteBonusService.py b/User/SuperEliteBonusService.py
+index fe22615dad0394913f6e5cb862eb005033dc173d..12f0858857af4cee3ac4a2950246e75682569db3 100644
+--- a/User/SuperEliteBonusService.py
++++ b/User/SuperEliteBonusService.py
+@@ -1,10 +1,12 @@
+ import logging
+ import time
+-from decimal import Decimal, ROUND_DOWN, InvalidOperation
++from decimal import Decimal, ROUND_DOWN
+ import dask.dataframe as dd
+ import pandas as pd
+ from typing import Any
+ 
++from Common.BonusConfig import ConfigSnapshot, ensure_config_snapshot
++
+ logger = logging.getLogger("User.SuperEliteBonusService")
+ 
+ # 统一的"非法/空"字符串集合（小写）
+@@ -37,6 +39,8 @@ class SuperEliteBonusService:
+     # =====================================================================
+     @staticmethod
+     def _to_local_pandas(df, name: str) -> pd.DataFrame:
++        if isinstance(df, ConfigSnapshot):
++            return df.to_pandas()
+         if hasattr(df, "result"):
+             df = df.result()
+         if hasattr(df, "compute"):
+@@ -91,54 +95,20 @@ class SuperEliteBonusService:
+     # 配置解析
+     # =====================================================================
+     def _parse_se_rate(self, df_config) -> Decimal:
+-        df_cfg = self._lower_columns(self._to_local_pandas(df_config, "df_config").copy(), "df_config")
+-        self._require_config_cols(df_cfg, "df_config")
+-
+-        # region 获取配置名字和类型
+-        name_norm = df_cfg['config_name'].astype(str).str.strip()
+-        type_norm = df_cfg['type'].astype(str).str.strip().str.lower()
+-        # endregion
+-
+-        # 筛选出汇率
+-        df_rate = df_cfg[(name_norm == 'superEliteRate') & (type_norm == 'bonus')]
+-
+-        # region 验证
+-        if df_rate.empty:
+-            raise ValueError("[阻断] df_config 中 superEliteRate(type='bonus') 配置缺失")
+-        if len(df_rate) > 1:
+-            raise ValueError(f"[阻断] superEliteRate 配置不唯一，当前行数: {len(df_rate)}")
+-        # endregion
+-
+-        # 获取数据
+-        value = df_rate.iloc[0]['value']
+-
+-        # region 验证
+-        if value is None or pd.isna(value):
+-            raise ValueError("[阻断] superEliteRate 配置缺失 value 值")
+-        # endregion
+-
+-        # region 转成decimal
+-        try:
+-            rate_val = Decimal(str(value).strip())
+-        except InvalidOperation:
+-            raise ValueError(f"[阻断] superEliteRate 的 value 不是合法数值: {value!r}")
+-        if rate_val <= 0:
+-            raise ValueError(f"[阻断] superEliteRate 拨出比例必须大于0，当前值: {rate_val}")
+-        # endregion
+-
+-        return rate_val / Decimal('100')
++        snapshot = ensure_config_snapshot(df_config)
++        return snapshot.rate_decimal("superEliteRate", award="SE")
+ 
+     def _parse_country_mapping(self, df_config) -> pd.DataFrame:
+         df_cfg = self._lower_columns(self._to_local_pandas(df_config, "df_config").copy(), "df_config")
+         self._require_config_cols(df_cfg, "df_config")
+ 
+         # region 获取名称和类型
+-        df_cfg['__name'] = df_cfg['config_name'].astype(str).str.strip()
+-        df_cfg['__type'] = df_cfg['type'].astype(str).str.strip().str.lower()
++        df_cfg['__name'] = df_cfg['config_name']
++        df_cfg['__type'] = df_cfg['type']
+         # endregion
+ 
+         # region 创造df_country -> 从df_cfg筛选出来
+-        is_country = df_cfg['__name'].str.lower().str.startswith('country')
++        is_country = df_cfg['__name'].apply(lambda value: isinstance(value, str) and value.startswith('Country'))
+         df_country = df_cfg[is_country].copy()
+         # endregion
+ 
+@@ -146,10 +116,11 @@ class SuperEliteBonusService:
+         if df_country.empty:
+             return pd.DataFrame(columns=['source_country_id', 'region_default_id'])
+ 
+-        too_short = df_country['__name'].str.len() <= self._COUNTRY_PREFIX_LEN
+-        if too_short.any():
+-            bad = df_country.loc[too_short, '__name'].tolist()
+-            raise ValueError(f"[阻断] Country 配置名非法或过短: {bad}")
++        non_exact_names = df_country[df_country['__name'] != df_country['__name'].str.strip()]
++        if not non_exact_names.empty:
++            raise ValueError(
++                f"[阻断] Country 配置名不符合 exact raw: {non_exact_names['__name'].tolist()}"
++            )
+ 
+         bad_types = df_country[df_country['__type'] != 'bonus']
+         if not bad_types.empty:
+@@ -169,12 +140,6 @@ class SuperEliteBonusService:
+             source_country = config_name[self._COUNTRY_PREFIX_LEN:].strip().upper()
+             target_region = str(row['value']).strip().upper()
+ 
+-            # region 验证
+-            if not source_country or source_country.lower() in _INVALID_STR_TOKENS:
+-                raise ValueError(f"[阻断] 解析后源国家ID非法或为空: {config_name} -> {source_country}")
+-            if not target_region or target_region.lower() in _INVALID_STR_TOKENS:
+-                raise ValueError(f"[阻断] 目标大区 value 非法或为空: {target_region}")
+-            # endregion
+ 
+             mapping.append({"source_country_id": source_country, "region_default_id": target_region})
+             target_regions.add(target_region)
+@@ -193,7 +158,7 @@ class SuperEliteBonusService:
+         # endregion
+ 
+         # region 验证
+-        bad_self_maps = [region for region in target_regions if mapping_dict.get(region) != region]
++        bad_self_maps = [region for region in target_regions if region not in {"", "0"} and mapping_dict.get(region) != region]
+         if bad_self_maps:
+             raise ValueError(
+                 f"[阻断] 目标大区主国未自映射: {bad_self_maps}。\n"
+@@ -232,8 +197,13 @@ class SuperEliteBonusService:
+         # endregion
+ 
+         # region 获取汇率和国家信息
+-        se_rate = self._parse_se_rate(df_config)
+-        country_mapping = self._parse_country_mapping(df_config)
++        config_snapshot = ensure_config_snapshot(
++            df_config,
++            period_num=period_int,
++            calc_month=calc_month_int,
++        )
++        se_rate = self._parse_se_rate(config_snapshot)
++        country_mapping = self._parse_country_mapping(config_snapshot)
+         # endregion
+ 
+         # ==========================================
+diff --git a/User/Test/test_bonus_config.py b/User/Test/test_bonus_config.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..a24d91f05ad5ceba344dbb0cbc1ba3eddfca7bc9
+--- /dev/null
++++ b/User/Test/test_bonus_config.py
+@@ -0,0 +1,243 @@
++from __future__ import annotations
++
++import importlib.util
++from decimal import Decimal
++import sys
++from pathlib import Path
++
++import pytest
++import pandas as pd
++
++
++from Common.BonusConfig import (
++    CONFIG_REQUIREMENT_MATRIX,
++    ConfigSnapshot,
++    ConfigSnapshotLoader,
++    ensure_config_snapshot,
++    parse_signed_percent_to_ppm,
++    requirement_matrix_manifest,
++)
++
++from User.team_bonus_tb import TeamBonusCalculator
++
++ROOT = Path(__file__).resolve().parents[2]
++
++
++@pytest.mark.parametrize(
++    ("raw", "expected"),
++    [
++        ("15", 150_000),
++        (Decimal("-15"), -150_000),
++        ("0", 0),
++        ("4.5", 45_000),
++    ],
++)
++def test_signed_percent_to_ppm(raw, expected):
++    assert parse_signed_percent_to_ppm(raw) == expected
++
++
++@pytest.mark.parametrize(
++    "raw,expected_exception",
++    [
++        (15.0, TypeError),
++        ("1e1", TypeError),
++        ("NaN", TypeError),
++        (Decimal("Infinity"), ValueError),
++        ("0.00001", ValueError),
++    ],
++)
++def test_signed_percent_to_ppm_rejects_noncanonical_or_too_precise(raw, expected_exception):
++    with pytest.raises(expected_exception):
++        parse_signed_percent_to_ppm(raw)
++
++
++def test_parser_does_not_add_business_maximum():
++    assert parse_signed_percent_to_ppm("101") == 1_010_000
++
++
++def test_snapshot_checksum_is_stable_across_row_and_field_order():
++    rows_a = [
++        {"config_name": "proEliteRate", "type": "bonus", "value": "15"},
++        {"config_name": "eliteRate", "type": "bonus", "value": "10"},
++    ]
++    rows_b = [
++        {"value": "10", "type": "bonus", "config_name": "eliteRate"},
++        {"value": "15", "config_name": "proEliteRate", "type": "bonus"},
++    ]
++
++    first = ConfigSnapshot.from_rows(rows_a, loaded_at="2026-08-12T00:00:00+00:00")
++    second = ConfigSnapshot.from_rows(rows_b, loaded_at="2026-08-12T00:01:00+00:00")
++
++    assert first.raw_rows_checksum == second.raw_rows_checksum
++    assert first.canonical_checksum == second.canonical_checksum
++    assert first.snapshot_id == second.snapshot_id
++
++
++def test_snapshot_is_frozen_from_mutable_source():
++    source = [{"config_name": "proEliteRate", "type": "bonus", "value": "15"}]
++    loader = ConfigSnapshotLoader(source)
++    snapshot = loader.load(period_num=202608, calc_month=8)
++    source[0]["value"] = "99"
++    source.append({"config_name": "eliteRate", "type": "bonus", "value": "20"})
++    next_snapshot = loader.load(period_num=202609, calc_month=9)
++
++    assert snapshot.require_ppm("proEliteRate", award="PE") == 150_000
++    assert snapshot.raw_row_count == 1
++    assert next_snapshot.require_ppm("proEliteRate", award="PE") == 990_000
++    assert next_snapshot.snapshot_id != snapshot.snapshot_id
++    assert ensure_config_snapshot(snapshot, period_num=202608, calc_month=8) is snapshot
++    snapshot.assert_run(202608, 8)
++    with pytest.raises(ValueError):
++        snapshot.assert_run(202607, 8)
++
++
++def test_sql_missing_zero_and_min_duplicate_semantics():
++    missing = ConfigSnapshot.from_rows([])
++    duplicate = ConfigSnapshot.from_rows([
++        {"config_name": "eliteRate", "type": "bonus", "value": "20"},
++        {"config_name": "eliteRate", "type": "bonus", "value": "-5"},
++    ])
++    assert list(missing.to_pandas().columns) == ["config_name", "type", "value"]
++
++    assert missing.require_ppm("eliteRate", award="ELITE") == 0
++    assert duplicate.require_ppm("eliteRate", award="ELITE") == -50_000
++
++
++def test_se_name_and_type_are_exact_raw():
++    canonical = ConfigSnapshot.from_rows([
++        {"config_name": "superEliteRate", "type": "bonus", "value": "-10"},
++    ])
++    name_with_space = ConfigSnapshot.from_rows([
++        {"config_name": " superEliteRate", "type": "bonus", "value": "10"},
++    ])
++    type_with_case_change = ConfigSnapshot.from_rows([
++        {"config_name": "superEliteRate", "type": "BONUS", "value": "10"},
++    ])
++
++    assert canonical.require_ppm("superEliteRate", award="SE") == -100_000
++    assert name_with_space.require_ppm("superEliteRate", award="SE") == 0
++    assert type_with_case_change.require_ppm("superEliteRate", award="SE") == 0
++
++def test_se_country_prefix_allows_multiple_keys_but_rejects_same_key_duplicates():
++    valid = ConfigSnapshot.from_rows([
++        {"config_name": "Country1", "type": "bonus", "value": "1"},
++        {"config_name": "Country3", "type": "bonus", "value": "1"},
++    ])
++    duplicate = ConfigSnapshot.from_rows([
++        {"config_name": "Country1", "type": "bonus", "value": "1"},
++        {"config_name": "Country1", "type": "bonus", "value": "2"},
++    ])
++
++    assert len(valid.country_rows("SE")) == 2
++    with pytest.raises(ValueError, match="duplicate config rows"):
++        duplicate.country_rows("SE")
++
++
++def test_nonexact_awards_export_canonical_views_without_mutating_raw_rows():
++    snapshot = ConfigSnapshot.from_rows([
++        {"config_name": " leadershipRate10 ", "type": " BONUS ", "value": "4.5"},
++        {"config_name": " country1 ", "type": " BONUS ", "value": "0"},
++    ])
++
++    assert snapshot.iter_ppm_rows("LB", "leadershipRate*") == (
++        ("leadershipRate10", 45_000),
++    )
++    assert snapshot.country_rows("EAB") == (
++        {"config_name": "Country1", "type": "bonus", "value": "0"},
++    )
++    assert snapshot.raw_rows[0].get("config_name") == " leadershipRate10 "
++    assert snapshot.raw_rows[1].get("type") == " BONUS "
++
++
++def test_country_empty_and_literal_zero_remain_visible_to_upstream_owned_policy():
++    snapshot = ConfigSnapshot.from_rows([
++        {"config_name": "Country", "type": "bonus", "value": ""},
++        {"config_name": "Country0", "type": "bonus", "value": "0"},
++    ])
++
++    assert snapshot.country_rows("EAB") == (
++        {"config_name": "Country", "type": "bonus", "value": ""},
++        {"config_name": "Country0", "type": "bonus", "value": "0"},
++    )
++
++
++def test_eab_and_lb_nonbonus_country_rows_are_ignored_without_global_rejection():
++    snapshot = ConfigSnapshot.from_rows([
++        {"config_name": "Country1", "type": "upstream", "value": "0"},
++        {"config_name": "Country2", "type": "bonus", "value": ""},
++    ])
++
++    assert snapshot.country_rows("EAB") == (
++        {"config_name": "Country2", "type": "bonus", "value": ""},
++    )
++    assert snapshot.country_rows("LB") == snapshot.country_rows("EAB")
++
++
++def test_matrix_is_machine_readable_and_covers_current_awards():
++    assert set(CONFIG_REQUIREMENT_MATRIX) == {"PE", "ELITE", "SE", "EAB", "LB", "TB"}
++    manifest = requirement_matrix_manifest()
++    assert manifest["PE"][0]["config_name"] == "proEliteRate"
++    assert manifest["SE"][0]["exact_raw_name"] is True
++    assert manifest["SE"][0]["exact_raw_type"] is True
++
++
++def test_snapshot_manifest_is_serializable_and_round_trips():
++    module_path = ROOT / "Model" / "Config" / "ConfigSnapshot.py"
++    spec = importlib.util.spec_from_file_location("pvam_config_snapshot_manifest", module_path)
++    assert spec is not None and spec.loader is not None
++    module = importlib.util.module_from_spec(spec)
++    sys.modules[spec.name] = module
++    spec.loader.exec_module(module)
++
++    snapshot = ConfigSnapshot.from_rows(
++        [{"config_name": "eliteRate", "type": "bonus", "value": "15"}],
++        period_num=202608,
++        calc_month=8,
++        source="uat-fixture",
++        source_version="sha256:abc",
++    )
++    manifest = module.ConfigSnapshotManifest.from_snapshot(snapshot)
++    restored = module.ConfigSnapshotManifest.from_mapping(manifest.to_dict())
++
++    assert restored == manifest
++
++    assert restored.raw_row_count == 1
++    assert restored.snapshot_id == snapshot.snapshot_id
++
++
++def test_team_bonus_oracle_accepts_snapshot_fixture_without_changing_values():
++    snapshot = ensure_config_snapshot([
++        {"CONFIG_NAME": "teamBisectRate", "TYPE": "bonus", "VALUE": "24"},
++        {"CONFIG_NAME": "teamTouchRate10", "TYPE": "bonus", "VALUE": "10"},
++        {"CONFIG_NAME": "teamTouchCapping10", "TYPE": "bonus", "VALUE": "0"},
++    ])
++    fixture = snapshot.to_pandas(uppercase_columns=True)
++    calculator = TeamBonusCalculator(
++        perf_month=pd.DataFrame(columns=["PERIOD_NUM"]),
++        user=pd.DataFrame(columns=["ID", "MEMBER_LV", "COUNTRY_ID"]),
++        member_level=pd.DataFrame(columns=["ID", "CALC_ID"]),
++        config=snapshot,
++        user_perf=pd.DataFrame(columns=["USER_ID"]),
++    )
++
++    assert calculator.bisect_rate() == Decimal("0.24")
++
++
++    assert list(fixture["CONFIG_NAME"]) == [
++        "teamBisectRate",
++        "teamTouchRate10",
++        "teamTouchCapping10",
++    ]
++    assert list(fixture["VALUE"]) == ["24", "10", "0"]
++
++
++@pytest.mark.parametrize(
++    ("relative_path", "forbidden"),
++    [
++        ("User/PEBonusService.py", "_pro_elite_rate_ppm = 150000"),
++        ("User/EliteBonusService.py", "self.elite_rate = Decimal('0.15')"),
++        ("User/GlobalEliteBonusRecalculationService.py", "elite_rate: float = 0.15"),
++    ],
++)
++def test_production_rate_fallbacks_are_removed(relative_path, forbidden):
++    assert forbidden not in (ROOT / relative_path).read_text(encoding="utf-8")
+diff --git a/User/team_bonus_tb.py b/User/team_bonus_tb.py
+index ff63686a7c1e83d532e16b468be1a4b206fdc761..db2f4a01c4d5d8f8247a1baa79bce1504a5fef32 100644
+--- a/User/team_bonus_tb.py
++++ b/User/team_bonus_tb.py
+@@ -29,6 +29,8 @@ from typing import Optional
+ 
+ import pandas as pd
+ 
++from Common.BonusConfig import ConfigSnapshot
++
+ # DECIMAL(16,6) 的中间精度足够，留足余量防止链路上溢出有效位
+ getcontext().prec = 50
+ 
+@@ -124,6 +126,9 @@ class TeamBonusCalculator:
+         self.perf_month = perf_month.copy().reset_index(drop=True)
+         self.user = user.copy().reset_index(drop=True)
+         self.member_level = member_level.copy().reset_index(drop=True)
++        # snapshot 仅作为受控 fixture 适配；本模块仍是 SQL oracle，不接生产链路。
++        if isinstance(config, ConfigSnapshot):
++            config = config.to_pandas(uppercase_columns=True)
+         self.config = config.copy().reset_index(drop=True)
+         # user_perf 会被原地结转刷新，保留为可写状态
+         self.user_perf = user_perf.copy().reset_index(drop=True)

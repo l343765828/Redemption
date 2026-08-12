@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "record_type": "WORK_APPROVAL_RECORD",
+  "work_id": "WORK-PVAM-03",
+  "approval": "APPROVED",
+  "decision": "APPROVED",
+  "root_baseline_sha": "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
+  "work_commit_sha": "4e4742c2f504bfb8d37585e408c6c777f5e43018",
+  "work_tree_sha": "612518f98db825a11067aea52d5e40a69749c86a",
+  "source_registry_sha256": "d4ab1ca9303cbf0da11e26ecfc9731ef1e356fd12fe9989c5a6068c9394ff513",
+  "approval_scope": "WORK-PVAM-03 commit 4e4742c2f504bfb8d37585e408c6c777f5e43018, tree 612518f98db825a11067aea52d5e40a69749c86a and its formal patch/DEV evidence registration",
+  "allowed_wave": "WORK-PVAM-03 DEV_VERIFIED and approved prerequisite use by WORK-PVAM-02",
+  "approver_identity": "343765828@qq.com",
+  "approver_role": "技术负责人",
+  "authority_basis": "User explicit approval in current Codex task on 2026-08-12",
+  "signature_original": "对 WORK-03 提交执行 commit 级 DEV 验证并完成批准注册",
+  "approved_at": "2026-08-12T10:38:11Z",
+  "limitations": [
+    "This approval does not constitute Gate C closure.",
+    "This approval does not constitute production deployment approval.",
+    "This approval does not convert DEV evidence into UAT evidence.",
+    "WORK-PVAM-08A remains blocked on production call-chain evidence and is not closed by this approval.",
+    "WORK-PVAM-02 must use a parent that includes the approved WORK-PVAM-03 commit; its earlier parent at WORK-PVAM-01 alone is not sufficient after the dependency-governance revision."
+  ],
+  "evidence": {
+    "patch": {
+      "path": "evidence/WORK-PVAM-03/attempt-20260812-102919/dev/patch_gate/WORK-PVAM-03.patch",
+      "sha256": "c4f13eab41f6108b5dc877e6764056d931ca03b5e3e5015da4a86eba10c095ce"
+    },
+    "scope_result": {
+      "path": "evidence/WORK-PVAM-03/attempt-20260812-102919/dev/patch_gate/scope_result.json",
+      "sha256": "a5e75d132499b235804e40ba557676edcc83c4e789443d12c1cd4769e7ae0a59"
+    },
+    "parent_provenance": {
+      "path": "evidence/WORK-PVAM-03/attempt-20260812-102919/dev/patch_gate/parent_provenance_validation.json",
+      "sha256": "316f3fcb0e5b5e49d47c35c19fd57204ef3f8f0059b6183e6a7412194c9ed0c4"
+    },
+    "patch_validation": {
+      "path": "evidence/WORK-PVAM-03/attempt-20260812-102919/dev/patch_gate/patch_validation.json",
+      "sha256": "a32173e5ccbe33bac6a1120edc56674424b3fb53df3c5d4cd789cfe5dd1b6d18"
+    },
+    "dev_validation": {
+      "path": "evidence/WORK-PVAM-03/attempt-20260812-102919/dev/dev_validation.json",
+      "sha256": "f10a7cf5c353513a4a52524214163a0966f0a8a40dfb54457b4eb387035f6323"
+    },
+    "junit": {
+      "path": "evidence/WORK-PVAM-03/attempt-20260812-102919/dev/junit.xml",
+      "sha256": "2c24c9a1e8faa93b2a1ffeea35a34f60d3d58fb80b500f6f784bdfc644c178c2"
+    }
+  }
+}

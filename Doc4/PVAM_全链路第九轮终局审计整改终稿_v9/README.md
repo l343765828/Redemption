@@ -7,10 +7,10 @@
 - 组织授权：`PENDING_ORGANIZATIONAL_APPROVAL`
 - 实施状态：`BLOCKED`
 - 代码审计：`REJECTED`
-- 真实 patch/DEV/UAT：WORK-PVAM-01C、WORK-PVAM-01 patch/DEV 已执行并 PASS；UAT 仍为 `PENDING_TEST_ENV`
+- 真实 patch/DEV/UAT：WORK-PVAM-01C、WORK-PVAM-01、WORK-PVAM-03 patch/DEV 已执行并 PASS；UAT 仍为 `PENDING_TEST_ENV`
 - DEC-013 / Gate C：OPEN / OPEN`r
 - BLOCK-PVAM-01-FLAG-CONTRACT：CLOSED_GOVERNANCE_ONLY（三个主 validator 与全控制自测均 0 退出；仅允许进入 WORK-01C 实现）
-- 包级闭包：289 个普通文件；根 `SHA256SUMS.txt` 覆盖其余 288 个文件
+- 包级闭包：433 个普通文件；根 `SHA256SUMS.txt` 覆盖其余 432 个文件
 
 历史文档生成来源仍为 `B7-01～B7-06` 对应的 `全链路项目工程文档七轮终局审查与核验报告.md` 与 `00_B7-01-B7-06_真实性核验与反驳表.md`；本次治理整改输入为《全链路项目工程文档九轮终局审查与核验报告》，范围为 `P0-TRACE-CHAIN-09-01 + P1-WORK-INDEX-09-02 + P2-DELIVERY-NAME-09-03`。
 
@@ -26,7 +26,7 @@ E8 定点修补包括：registry/evidence 全路径链 no-follow 门禁；根 SH
 
 r10 flag contract 补丁新增 Redis infrastructure/config 层 Provider 与 MANUAL_BOOTSTRAP 的独立施工卡；AR_CONFIG 仍为业务 Source of Truth，Redis 为唯一 runtime Provider，配置缺失或非法一律 fail-loud，run 内冻结；00/01/10/11 admission、TEST-ONLY 域、严格单调 config_version 与原子 CAS 均由 DEC-019 和 TC-FLAG-01～23 约束。生产实现仍须在治理 validator 全绿后按新 WORK allowlist 施工。
 
-canonical registry：`05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json`，SHA-256=`d4ab1ca9303cbf0da11e26ecfc9731ef1e356fd12fe9989c5a6068c9394ff513`。该摘要同时绑定于根 `DOCUMENT_MANIFEST.json` 与 `VERSION_REFERENCE_MANIFEST.json`；WORK-PVAM-01C、WORK-PVAM-01 已登记为 `APPROVED`；其余 registry 条目保持 `PENDING`。
+canonical registry：`05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json`，SHA-256=`60007f2da4588909ef84c96db53111a6ce20d0ae4cc79f0e9c072b668b3d0127`。该摘要同时绑定于根 `DOCUMENT_MANIFEST.json` 与 `VERSION_REFERENCE_MANIFEST.json`；WORK-PVAM-01C、WORK-PVAM-01、WORK-PVAM-03 已登记为 `APPROVED`；其余 registry 条目保持 `PENDING`。
 
 内嵌归档：
 

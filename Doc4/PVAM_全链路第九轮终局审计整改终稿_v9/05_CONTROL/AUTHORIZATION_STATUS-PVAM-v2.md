@@ -9,11 +9,11 @@
 - `DEC-013=OPEN`
 - `Gate C=OPEN`
 
-包内文档与控制资产已达到 `document_technical_readiness=APPROVED_FOR_CONSTRUCTION`，可以作为受控施工设计基线下发。全项目组织授权仍保持 `PENDING_ORGANIZATIONAL_APPROVAL`；WORK-PVAM-01C 仅按下述范围授权记录完成单项批准，不构成 Gate C、UAT、部署或生产发布批准。
+包内文档与控制资产已达到 `document_technical_readiness=APPROVED_FOR_CONSTRUCTION`，可以作为受控施工设计基线下发。全项目组织授权仍保持 `PENDING_ORGANIZATIONAL_APPROVAL`；WORK-PVAM-01C、WORK-PVAM-01、WORK-PVAM-03 仅按下述范围授权记录完成单项批准，不构成 Gate C、UAT、部署或生产发布批准。
 
 ## 第八轮技术就绪声明
 
-E8-01～E8-06 的包内文档治理与控制门禁修补已纳入受控终稿；内部文档与控制程序技术就绪度为 `APPROVED_FOR_CONSTRUCTION`。代码审计仍为 `REJECTED`，DEV/UAT 仍为 `PENDING_TEST_ENV`，Gate C 仍为 `OPEN`；正式执行仍要求可识别批准人、角色、范围、签名和允许 Wave。
+E8-01～E8-06 的包内文档治理与控制门禁修补已纳入受控终稿；内部文档与控制程序技术就绪度为 `APPROVED_FOR_CONSTRUCTION`。代码审计仍为 `REJECTED`，除已登记单项外的 DEV 及全部 UAT 仍为 `PENDING_TEST_ENV`，Gate C 仍为 `OPEN`；正式执行仍要求可识别批准人、角色、范围、签名和允许 Wave。
 
 ## WORK-PVAM-01C 范围授权登记
 
@@ -43,3 +43,20 @@ E8-01～E8-06 的包内文档治理与控制门禁修补已纳入受控终稿；
 - approval record：`evidence/WORK-PVAM-01/attempt-20260810-143426/approval/approval_record.json`
 - approval record SHA-256：`bf3b1db1c4b6a3da40cde52e609d956b818312f2b8296e47893cf61b1c782136`
 - UAT：`PENDING_TEST_ENV`，继续由 `WORK-PVAM-08 / DEC-013` 管理
+
+## WORK-PVAM-03 范围授权登记
+
+- approval：`APPROVED`
+- commit：`4e4742c2f504bfb8d37585e408c6c777f5e43018`
+- tree：`612518f98db825a11067aea52d5e40a69749c86a`
+- DEV：`PASS`（24 tests，0 failures，0 errors，0 skipped）
+- approver：`343765828@qq.com`
+- role：`技术负责人`
+- authority basis：`User explicit approval in current Codex task on 2026-08-12`
+- approved at：`2026-08-12T10:38:11Z`
+- approval scope：`WORK-PVAM-03 commit 4e4742c2f504bfb8d37585e408c6c777f5e43018、tree 612518f98db825a11067aea52d5e40a69749c86a 及其正式 patch/DEV 证据登记`
+- allowed wave：`WORK-PVAM-03 DEV_VERIFIED and approved prerequisite use by WORK-PVAM-02`
+- approval record：`evidence/WORK-PVAM-03/attempt-20260812-102919/approval/approval_record.json`
+- approval record SHA-256：`517dce947bee5ba0554280eccfbe34782f751b6fc7d3750ac9a2a2646a249967`
+- UAT：`PENDING_TEST_ENV`，继续由 `WORK-PVAM-08 / DEC-013` 管理
+- 限制：不构成 Gate C、部署或生产发布批准；WORK-PVAM-08A 的生产调用链证据阻断仍未关闭。

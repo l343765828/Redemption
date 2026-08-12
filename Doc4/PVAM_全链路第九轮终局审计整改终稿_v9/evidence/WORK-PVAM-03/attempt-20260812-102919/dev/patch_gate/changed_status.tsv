@@ -1,0 +1,10 @@
+A	Common/BonusConfig.py
+A	Model/Config/ConfigSnapshot.py
+M	User/EliteAchievementBonusService.py
+M	User/EliteBonusService.py
+M	User/GlobalEliteBonusRecalculationService.py
+M	User/LeadershipBonusGPUService.py
+M	User/PEBonusService.py
+M	User/SuperEliteBonusService.py
+A	User/Test/test_bonus_config.py
+M	User/team_bonus_tb.py
