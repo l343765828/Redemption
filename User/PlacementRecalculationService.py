@@ -13,7 +13,14 @@ from dask.distributed import Client, wait as dask_wait
 
 import Model.User.UserLevel as UserLevel
 from Model.User.UserStats import UserStats
-from Common.AmountModelAdapter import build_factory_amount_fields
+from Common.AmountModelAdapter import build_factory_amount_fields, require_v2_amount_record
+from Common.PeriodResolver import PeriodSnapshot
+from Common.PvAmount import (
+    assert_integer_amount_dtype,
+    checked_add_int64,
+    require_amount_version,
+    require_units_int,
+)
 from Redishelper.PVAmountConfigProvider import (
     PVAmountConfigProvider,
     PVAmountRunConfig,
@@ -49,23 +56,31 @@ class PlacementRecalculationService(UserStatsService):
     def _status_key(cls, period: str) -> str:
         return f"system:placement_recalc_status:{period}"
 
-    @classmethod
-    def _get_prev_period(cls, period: str) -> Optional[str]:
-        if len(period) == 6 and period.isdigit():
-            y, m = int(period[:4]), int(period[4:])
-            if not (1 <= m <= 12):
-                raise ValueError(f"严重错误：期号 {period} 月份非法，必须在 01-12 之间！")
-            return f"{y - 1}12" if m == 1 else f"{y}{m - 1:02d}"
+    @staticmethod
+    def _get_prev_period(period: str, period_snapshot: PeriodSnapshot) -> Optional[str]:
+        """从 AR_PERIOD 快照读取真实上一期，不再猜测 YYYYMM 或执行减一。"""
+        if not isinstance(period_snapshot, PeriodSnapshot):
+            raise TypeError("period_snapshot must be PeriodSnapshot")
+        if str(period_snapshot.period_num) != str(period):
+            raise ValueError("period_snapshot 与入口 period 不一致")
+        return (
+            None
+            if period_snapshot.previous_period_num is None
+            else str(period_snapshot.previous_period_num)
+        )
 
-        elif period.isdigit() and not period.startswith('0'):
-            prev_num = int(period) - 1
-            return str(prev_num) if prev_num > 0 else None
-
-        else:
-            raise ValueError(f"严重错误：不支持的期号格式 [{period}]。仅支持 YYYYMM 或非 0 开头的正整数！")
-
-    def settle_placement_period(self, period: str, write_zero_nodes: bool = True) -> None:
+    def settle_placement_period(
+        self,
+        period: str,
+        write_zero_nodes: bool = True,
+        *,
+        period_snapshot: PeriodSnapshot,
+    ) -> None:
         period = str(period)
+        if not isinstance(period_snapshot, PeriodSnapshot):
+            raise TypeError("settle_placement_period 必须注入 PeriodSnapshot")
+        if str(period_snapshot.period_num) != period:
+            raise ValueError("period_snapshot 与 settle_placement_period period 不一致")
         run_id = str(uuid.uuid4())
         status_key = self._status_key(period)
         # region 加载并冻结本次业务运行配置
@@ -75,7 +90,7 @@ class PlacementRecalculationService(UserStatsService):
         ).config
         # endregion
 
-        prev_period = self._get_prev_period(period)
+        prev_period = self._get_prev_period(period, period_snapshot)
         if prev_period:
             prev_status_raw = redis_conn.get(self._status_key(prev_period))
             if prev_status_raw:
@@ -119,7 +134,9 @@ class PlacementRecalculationService(UserStatsService):
 
             self._refresh_lock(lock)
             self._set_status(redis_conn, status_key, self.STATUS_RUNNING, run_id, {"phase": "extracting_redis_data"})
-            active_pv_dict, existing_placement_users, df_pv_local = self._extract_period_data(redis_conn, period)
+            active_pv_dict, existing_placement_users, df_pv_local = self._extract_period_data(
+                redis_conn, period, period_snapshot
+            )
 
             gpu_res_dict = {}
             if not df_pv_local.empty:
@@ -148,6 +165,7 @@ class PlacementRecalculationService(UserStatsService):
                 run_id=run_id,
                 write_zero_nodes=write_zero_nodes,
                 run_config=run_config,
+                period_snapshot=period_snapshot,
                 lock=lock
             )
 
@@ -177,7 +195,12 @@ class PlacementRecalculationService(UserStatsService):
     # 数据提取与降级防线
     # =====================================================================
 
-    def _extract_period_data(self, redis_conn, period: str) -> Tuple[Dict[str, float], Set[str], cudf.DataFrame]:
+    def _extract_period_data(
+        self,
+        redis_conn,
+        period: str,
+        period_snapshot: PeriodSnapshot,
+    ) -> Tuple[Dict[str, int], Set[str], cudf.DataFrame]:
         active_pv_dict = {}
         existing_placement_users = set()
 
@@ -193,7 +216,7 @@ class PlacementRecalculationService(UserStatsService):
             self._process_extract_batch(redis_conn, keys_batch, active_pv_dict, existing_placement_users,
                                         is_prev_period=False)
 
-        prev_period = self._get_prev_period(period)
+        prev_period = self._get_prev_period(period, period_snapshot)
         if prev_period:
             prev_pattern = f"{UserStats.make_key('')}{prev_period}:*"
             prev_keys_batch = []
@@ -208,13 +231,13 @@ class PlacementRecalculationService(UserStatsService):
                                             is_prev_period=True)
 
         if not active_pv_dict:
-            df_pv = cudf.DataFrame({"user_id": cudf.Series(dtype="str"), "pv": cudf.Series(dtype="float64")})
+            df_pv = cudf.DataFrame({"user_id": cudf.Series(dtype="str"), "pv": cudf.Series(dtype="int64")})
         else:
             df_pv = cudf.DataFrame({"user_id": list(active_pv_dict.keys()), "pv": list(active_pv_dict.values())})
 
         return active_pv_dict, existing_placement_users, df_pv
 
-    def _process_extract_batch(self, redis_conn, keys: List[bytes], active_pv_dict: Dict[str, float],
+    def _process_extract_batch(self, redis_conn, keys: List[bytes], active_pv_dict: Dict[str, int],
                                existing_placement_users: Set[str], is_prev_period: bool):
         if not keys: return
 
@@ -240,18 +263,30 @@ class PlacementRecalculationService(UserStatsService):
             if payload_user_id is None or str(payload_user_id) != actual_uid:
                 raise RuntimeError(f"提取阶段发现严重脏数据：Key={key_str}, 内部 user_id={payload_user_id}")
 
+            require_amount_version(raw_data.get("amount_encoding_version"))
             if is_prev_period:
-                remain_1l = float(raw_data.get("remain_surplus_1l") or 0.0)
-                remain_2l = float(raw_data.get("remain_surplus_2l") or 0.0)
-                if remain_1l != 0.0 or remain_2l != 0.0:
+                remain_1l = require_units_int(
+                    raw_data.get("remain_surplus_1l") or 0,
+                    "remain_surplus_1l",
+                )
+                remain_2l = require_units_int(
+                    raw_data.get("remain_surplus_2l") or 0,
+                    "remain_surplus_2l",
+                )
+                if remain_1l != 0 or remain_2l != 0:
                     existing_placement_users.add(actual_uid)
             else:
-                pv_val = float(raw_data.get("pv") or 0.0)
-                if pv_val != 0.0:
+                pv_val = require_units_int(raw_data.get("pv") or 0, "pv")
+                if pv_val != 0:
                     active_pv_dict[actual_uid] = pv_val
 
-                if any(float(raw_data.get(f) or 0.0) != 0.0 for f in
-                       ["pv_1l", "pv_2l", "pre_surplus_1l", "pre_surplus_2l", "total_1l", "total_2l"]):
+                if any(
+                    require_units_int(raw_data.get(field) or 0, field) != 0
+                    for field in [
+                        "pv_1l", "pv_2l", "pre_surplus_1l",
+                        "pre_surplus_2l", "total_1l", "total_2l",
+                    ]
+                ):
                     existing_placement_users.add(actual_uid)
 
     def _mget_prev_surplus(self, user_ids: List[str], prev_period: str) -> Dict[str, Dict[str, int]]:
@@ -282,8 +317,15 @@ class PlacementRecalculationService(UserStatsService):
                     raise RuntimeError(
                         f"提取上期结余时发现脏数据：user_id 错位 (expected={uid}, actual={actual_user_id})")
 
-                out[uid]["1l"] = int(round(float(raw_data.get("remain_surplus_1l") or 0.0)))
-                out[uid]["2l"] = int(round(float(raw_data.get("remain_surplus_2l") or 0.0)))
+                require_amount_version(raw_data.get("amount_encoding_version"))
+                out[uid]["1l"] = require_units_int(
+                    raw_data.get("remain_surplus_1l") or 0,
+                    "remain_surplus_1l",
+                )
+                out[uid]["2l"] = require_units_int(
+                    raw_data.get("remain_surplus_2l") or 0,
+                    "remain_surplus_2l",
+                )
         return out
 
     def _mget_users_with_exists(
@@ -332,6 +374,8 @@ class PlacementRecalculationService(UserStatsService):
             if raw_period is not None and str(raw_period) != period:
                 raise RuntimeError(f"发现严重脏数据：UserStats period 错位 (expected={period}, actual={raw_period})")
 
+            # V2 全量重算禁止把 legacy 整数静默解释为 micro-units。
+            require_v2_amount_record(raw_data)
             raw_data["pk"] = expected_pk
             raw_data["period"] = period
 
@@ -459,7 +503,9 @@ class PlacementRecalculationService(UserStatsService):
     def _calculate_placement_pv(self, closure_ddf: dask_cudf.DataFrame, df_pv_local: cudf.DataFrame) -> cudf.DataFrame:
         df_pv = df_pv_local[["user_id", "pv"]].copy()
         df_pv["user_id"] = df_pv["user_id"].astype("str")
+        assert_integer_amount_dtype(df_pv, ["pv"], "placement input")
         df_pv = df_pv.groupby("user_id").agg({"pv": "sum"}).reset_index()
+        assert_integer_amount_dtype(df_pv, ["pv"], "placement grouped input")
 
         nparts = getattr(closure_ddf, "npartitions", 1)
         ddf_pv = dask_cudf.from_cudf(df_pv, npartitions=nparts)
@@ -467,6 +513,7 @@ class PlacementRecalculationService(UserStatsService):
         joined = closure_ddf.merge(
             ddf_pv, left_on="descendant", right_on="user_id", how="inner"
         )
+        assert_integer_amount_dtype(joined, ["pv"], "placement joined input")
 
         joined["PV_1L"] = joined["pv"].where(joined["leg"] == 1, 0)
         joined["PV_2L"] = joined["pv"].where(joined["leg"] == 2, 0)
@@ -475,8 +522,19 @@ class PlacementRecalculationService(UserStatsService):
             "PV_1L": "sum",
             "PV_2L": "sum"
         }).reset_index()
+        assert_integer_amount_dtype(
+            agg_ddf,
+            ["PV_1L", "PV_2L"],
+            "placement grouped output",
+        )
 
-        return agg_ddf.compute().to_pandas()
+        result = agg_ddf.compute().to_pandas()
+        assert_integer_amount_dtype(
+            result,
+            ["PV_1L", "PV_2L"],
+            "placement computed output",
+        )
+        return result
 
     # =====================================================================
     # Redis 回写与对账事件
@@ -486,15 +544,16 @@ class PlacementRecalculationService(UserStatsService):
             self,
             redis_conn,
             target_list: List[str],
-            gpu_res_dict: Dict[str, Dict[str, float]],
-            active_pv_dict: Dict[str, float],
+            gpu_res_dict: Dict[str, Dict[str, int]],
+            active_pv_dict: Dict[str, int],
             period: str,
             run_id: str,
             write_zero_nodes: bool,
             run_config: PVAmountRunConfig,
+            period_snapshot: PeriodSnapshot,
             lock
     ) -> None:
-        prev_period = self._get_prev_period(period)
+        prev_period = self._get_prev_period(period, period_snapshot)
 
         for i in range(0, len(target_list), self.PARENT_PAGE_SIZE):
             self._refresh_lock(lock)
@@ -507,34 +566,40 @@ class PlacementRecalculationService(UserStatsService):
             outbox_events: List[Dict[str, Any]] = []
 
             for uid in batch_ids:
-                pv_1l_new = int(round(gpu_res_dict.get(uid, {}).get('PV_1L', 0.0)))
-                pv_2l_new = int(round(gpu_res_dict.get(uid, {}).get('PV_2L', 0.0)))
+                pv_1l_new = require_units_int(
+                    gpu_res_dict.get(uid, {}).get('PV_1L', 0),
+                    "PV_1L",
+                )
+                pv_2l_new = require_units_int(
+                    gpu_res_dict.get(uid, {}).get('PV_2L', 0),
+                    "PV_2L",
+                )
 
                 pre_surplus_1l = prev_surplus_lookup[uid]["1l"]
                 pre_surplus_2l = prev_surplus_lookup[uid]["2l"]
 
                 node, existed_before = user_lookup[uid]
-                gpv = int(round(getattr(node, "gpv", 0.0) or 0.0))
+                gpv = require_units_int(getattr(node, "gpv", 0) or 0, "gpv")
 
                 has_current_activity = (uid in active_pv_dict) or (pv_1l_new != 0) or (pv_2l_new != 0) or (gpv != 0)
 
                 if has_current_activity:
-                    total_1l_new = pv_1l_new + pre_surplus_1l
-                    total_2l_new = pv_2l_new + pre_surplus_2l
-                    remain_surplus_1l_new = int(round(getattr(node, "remain_surplus_1l", 0.0) or 0.0))
-                    remain_surplus_2l_new = int(round(getattr(node, "remain_surplus_2l", 0.0) or 0.0))
+                    total_1l_new = checked_add_int64(pv_1l_new, pre_surplus_1l)
+                    total_2l_new = checked_add_int64(pv_2l_new, pre_surplus_2l)
+                    remain_surplus_1l_new = require_units_int(getattr(node, "remain_surplus_1l", 0) or 0, "remain_surplus_1l")
+                    remain_surplus_2l_new = require_units_int(getattr(node, "remain_surplus_2l", 0) or 0, "remain_surplus_2l")
                 else:
                     total_1l_new = 0
                     total_2l_new = 0
                     remain_surplus_1l_new = pre_surplus_1l
                     remain_surplus_2l_new = pre_surplus_2l
 
-                old_pv_1l = int(round(getattr(node, "pv_1l", 0.0) or 0.0))
-                old_pv_2l = int(round(getattr(node, "pv_2l", 0.0) or 0.0))
-                old_total_1l = int(round(getattr(node, "total_1l", 0.0) or 0.0))
-                old_total_2l = int(round(getattr(node, "total_2l", 0.0) or 0.0))
-                old_remain_1l = int(round(getattr(node, "remain_surplus_1l", 0.0) or 0.0))
-                old_remain_2l = int(round(getattr(node, "remain_surplus_2l", 0.0) or 0.0))
+                old_pv_1l = require_units_int(getattr(node, "pv_1l", 0) or 0, "pv_1l")
+                old_pv_2l = require_units_int(getattr(node, "pv_2l", 0) or 0, "pv_2l")
+                old_total_1l = require_units_int(getattr(node, "total_1l", 0) or 0, "total_1l")
+                old_total_2l = require_units_int(getattr(node, "total_2l", 0) or 0, "total_2l")
+                old_remain_1l = require_units_int(getattr(node, "remain_surplus_1l", 0) or 0, "remain_surplus_1l")
+                old_remain_2l = require_units_int(getattr(node, "remain_surplus_2l", 0) or 0, "remain_surplus_2l")
 
                 has_drift = (
                         (old_pv_1l != pv_1l_new) or (old_pv_2l != pv_2l_new) or

@@ -2,15 +2,16 @@ import json
 import logging
 import time
 import uuid
-from decimal import Decimal, ROUND_DOWN
+
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from dask.distributed import Client
 from redis_om import NotFoundError
 
 from Model.User.EliteBonusStats import EliteBonusStats
-from Common.AmountModelAdapter import build_factory_amount_fields
+from Common.AmountModelAdapter import build_factory_amount_fields, require_v2_amount_record
 from Common.BonusConfig import ConfigSnapshot
+from Common.PvAmount import PV_SCALE, checked_add_int64, units_ppm_to_bonus_cents
 from Redishelper.PVAmountConfigProvider import (
     PVAmountConfigProvider,
     PVAmountRunConfig,
@@ -32,7 +33,7 @@ class GlobalEliteBonusRecalculationService:
     4. 【幽灵节点中和 & 输入保护】：绝不物理删除 EliteBonusStats（死保 pv_pcs）。期初通过批量复位派生字段使历史幽灵节点自然失效。
     5. 【大表扫描防漂移】：在全表 Reset 和 Cleanup 的游标扫描中加入锁续期，防止超大网体下锁 TTL 过期。
     6. 【运行期动态内存回收】：子节点未吸收业绩上推并被父节点读取后，立即销毁临时键；期末回收根节点残余，防止内存泄漏。
-    7. 【正式产出落库】：重算完成后，把本期 EliteBonusStats(gpv_real>0 且 estimated_bonus>0) 写入 AR_CALC_BONUS_E，
+    7. 【正式产出落库】：重算完成后，把本期 EliteBonusStats(gpv_real>0 且 estimated_bonus_cents>0) 写入 AR_CALC_BONUS_E，
        把 eb_source 写入 AR_CALC_BONUS_E_SOURCE。该步骤【复用增量版 EliteBonusService.snapshot_period_to_db】，
        确保全量与增量的 "Redis → 关系库" 落库口径 100% 一致，不产生两套实现的漂移。
        - 提供 db_executor 时：settle_period 在进程内、持锁状态、发哨兵前完成落库（自包含模式），哨兵 persisted=True。
@@ -60,7 +61,7 @@ class GlobalEliteBonusRecalculationService:
 
     GLOBAL_RECALC_LOCK_KEY = "system:global_eb_recalc_lock"
     OUTBOX_STREAM_KEY = "system:recalc_outbox_stream"
-    ELITE_MARK = 1000
+    ELITE_MARK = 1000 * PV_SCALE
 
     STATUS_RUNNING = "RUNNING"
     STATUS_DONE = "DONE"
@@ -103,7 +104,7 @@ class GlobalEliteBonusRecalculationService:
             )
         self.config_snapshot = config_snapshot
         self.elite_rate_ppm = config_snapshot.require_ppm("eliteRate", award="ELITE")
-        self.elite_rate = Decimal(self.elite_rate_ppm) / Decimal(1_000_000)
+
         self.calc_month = calc_month
         self.db_executor = db_executor
         self.user_info_resolver = user_info_resolver
@@ -282,7 +283,8 @@ class GlobalEliteBonusRecalculationService:
             p_node.gpv_real = 0
             p_node.is_qualified = False
             p_node.qualifying_path = None
-            p_node.estimated_bonus = 0.0
+            p_node.estimated_bonus_cents = 0
+            p_node.estimated_bonus = None
 
             unabsorbed_sources: Dict[str, int] = {}
             if (p_node.pv_pcs or 0) > 0:
@@ -314,7 +316,10 @@ class GlobalEliteBonusRecalculationService:
 
                     # 汇总未合格子节点继续上贡的 GPV
                     if (c_node.contrib_to_parent or 0) > 0:
-                        p_node.gpv += c_node.contrib_to_parent
+                        p_node.gpv = checked_add_int64(
+                            p_node.gpv,
+                            c_node.contrib_to_parent,
+                        )
 
                         child_unabsorbed_key = f"eb_unabsorbed:{period}:{cid}"
                         child_sources = redis_conn.hgetall(child_unabsorbed_key)
@@ -373,13 +378,15 @@ class GlobalEliteBonusRecalculationService:
         node.contrib_to_parent = 0 if node.is_qualified else node.gpv
 
         if (node.gpv_real or 0) > 0:
-            gpv_real_dec = Decimal(str(node.gpv_real))
-            bonus_dec = (gpv_real_dec * self.elite_rate).quantize(
-                Decimal('0.01'), rounding=ROUND_DOWN,
+            node.estimated_bonus_cents = units_ppm_to_bonus_cents(
+                node.gpv_real,
+                self.elite_rate_ppm,
+                "TRUNCATE",
             )
-            node.estimated_bonus = float(bonus_dec)
         else:
-            node.estimated_bonus = 0.0
+            node.estimated_bonus_cents = 0
+        # V2 只写整数分；legacy float 字段保留为空，禁止形成双写事实源。
+        node.estimated_bonus = None
 
     def _track_bonus_source(self, redis_conn, period: str, source_user_id: str, bonus_user_id: str, layer: int, pipe) -> None:
         """
@@ -428,6 +435,7 @@ class GlobalEliteBonusRecalculationService:
                 continue
 
             try:
+                require_v2_amount_record(raw_data)
                 if "pk" in raw_data and raw_data["pk"] != expected_pk:
                     raise ValueError(f"PK 冲突 expected={expected_pk}, actual={raw_data['pk']}")
                 raw_data["pk"] = expected_pk
@@ -458,6 +466,7 @@ class GlobalEliteBonusRecalculationService:
         for uid in uid_list:
             try:
                 node = EliteBonusStats.get(f"{period}:{uid}")
+                require_v2_amount_record(node)
                 out[uid] = (node, True)
             except NotFoundError:
                 out[uid] = (self._new_blank_stats(uid, period, run_config), False)
@@ -484,8 +493,8 @@ class GlobalEliteBonusRecalculationService:
         实现策略：直接复用增量服务 EliteBonusService.snapshot_period_to_db，
         确保全量与增量的 "Redis → 关系库" 落库口径 100% 一致，杜绝两套实现漂移。
 
-        正确性依赖：期初 _reset_all_derived_stats 已把图外幽灵节点的 gpv_real / estimated_bonus 清零，
-        因此 snapshot 的 find(period_num) + (gpv_real>0 且 estimated_bonus>0) 过滤只会捞到本期真实得奖人，
+        正确性依赖：期初 _reset_all_derived_stats 已把图外幽灵节点的 gpv_real / estimated_bonus_cents 清零，
+        因此 snapshot 的 find(period_num) + (gpv_real>0 且 estimated_bonus_cents>0) 过滤只会捞到本期真实得奖人，
         不会误发已不在当前图中的历史幽灵节点。
 
         :return: {"bonus_count": N, "source_count": M}
@@ -524,7 +533,8 @@ class GlobalEliteBonusRecalculationService:
         for key in redis_conn.scan_iter(match=stats_prefix, count=2000):
             # 通过 JSON.SET 直接修改底层值，绕开读取和 save，安全保留 pv_pcs 和原始 ID
             pipe.set(key, "$.gpv_real", 0)
-            pipe.set(key, "$.estimated_bonus", 0.0)
+            pipe.set(key, "$.estimated_bonus_cents", 0)
+            pipe.set(key, "$.estimated_bonus", None)
             pipe.set(key, "$.is_qualified", False)
             pipe.set(key, "$.contrib_to_parent", 0)
             pipe.set(key, "$.qualifying_path", None)

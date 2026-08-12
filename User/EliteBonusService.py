@@ -13,7 +13,7 @@ EliteBonusService - Elite Bonus 增量结算服务 (v4)
 
 【三档关键设计】
 - 双路径合格(A:GPV>=1000;B:任一直属下线已合格)统一在 _evaluate_node。
-- 财务精度: Decimal + ROUND_DOWN,严格对齐 SQL TRUNCATE(.., 2)。
+- 财务精度: V2 units × ppm 一次落奖金分,严格对齐 SQL TRUNCATE(.., 2)。
 - 并发: 源用户 + BFS 路径上每个祖先都加 Redis 锁;锁顺序在树结构上单调,
   不会形成环路死锁;锁 TTL=30s 给深树留余量,容忍锁过期 release。
 
@@ -24,16 +24,22 @@ EliteBonusService - Elite Bonus 增量结算服务 (v4)
 若业务要求与 SQL 完全对齐,在 _propagate_upward 末尾补 fallback 即可。
 """
 
-from decimal import Decimal, ROUND_DOWN
+
 from typing import Tuple, Optional, Callable, Dict, List, Any, Iterable
+import json
 import time
 import logging
 
 from dask.distributed import Client
 from redis_om import NotFoundError
 from Model.User.EliteBonusStats import EliteBonusStats
-from Common.AmountModelAdapter import build_factory_amount_fields
+from Common.AmountModelAdapter import build_factory_amount_fields, require_v2_amount_record
 from Common.BonusConfig import ConfigSnapshot
+from Common.PvAmount import (
+    PV_SCALE,
+    checked_add_int64,
+    units_ppm_to_bonus_cents,
+)
 from Redishelper.PVAmountConfigProvider import (
     PVAmountConfigProvider,
     PVAmountRunConfig,
@@ -44,7 +50,7 @@ from Redishelper.PVAmountConfigProvider import (
 logger = logging.getLogger(__name__)
 
 # ---------- 业务常量 ----------
-ELITE_MARK = 1000  # 合格小组业绩阈值(SQL 的 VV_ARRIVE_PV1)
+ELITE_MARK_UNITS = 1000 * PV_SCALE  # SQL VV_ARRIVE_PV1=1000 的 V2 micro-units
 
 # ---------- 基础设施常量 ----------
 DEFAULT_DASK_ADDRESS = "tcp://127.0.0.1:8786"
@@ -61,6 +67,7 @@ UserInfoResolver = Callable[[List[str]], Dict[str, Dict[str, Any]]]
 
 # 落盘执行器: db_executor(table_name, rows) 由调用方提供事务与批量 INSERT
 DbExecutor = Callable[[str, List[Dict[str, Any]]], None]
+
 
 
 def _default_user_info_resolver(user_ids: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -112,7 +119,6 @@ class EliteBonusService:
         config_snapshot.assert_run(period_num, calc_month)
         self.config_snapshot = config_snapshot
         self.elite_rate_ppm = config_snapshot.require_ppm("eliteRate", award="ELITE")
-        self.elite_rate = Decimal(self.elite_rate_ppm) / Decimal(1_000_000)
         logger.info(
             "Period %s 期初锁定 elite_rate_ppm=%s snapshot=%s",
             period_num,
@@ -153,7 +159,7 @@ class EliteBonusService:
         # endregion
 
         # region 判断资格状态以及哪种方式获取的
-        if (node.gpv or 0) >= ELITE_MARK:
+        if (node.gpv or 0) >= ELITE_MARK_UNITS:
             node.is_qualified = True
             node.qualifying_path = 'A'
         elif len(node.qualified_downlines) > 0:
@@ -172,17 +178,21 @@ class EliteBonusService:
         # endregion
 
         # 计算贡献差值
-        delta_contrib = (node.contrib_to_parent or 0) - prev_contrib
+        delta_contrib = checked_add_int64(
+            node.contrib_to_parent or 0,
+            -prev_contrib,
+        )
 
-        # region 计算奖金 财务精度: 严格 TRUNCATE(.., 2)
+        # region 计算奖金分：仅在最终分边界执行一次 SQL TRUNCATE(.., 2)
         if (node.gpv_real or 0) > 0:
-            gpv_real_dec = Decimal(str(node.gpv_real))
-            bonus_dec = (gpv_real_dec * self.elite_rate).quantize(
-                Decimal('0.01'), rounding=ROUND_DOWN,
+            node.estimated_bonus_cents = units_ppm_to_bonus_cents(
+                node.gpv_real,
+                self.elite_rate_ppm,
+                "TRUNCATE",
             )
-            node.estimated_bonus = float(bonus_dec)
         else:
-            node.estimated_bonus = 0.0
+            node.estimated_bonus_cents = 0
+        node.estimated_bonus = None
         # endregion
 
         status_changed = (
@@ -227,13 +237,55 @@ class EliteBonusService:
     # 增量主入口
     # =================================================================
 
-    def update_elite_bonus_incremental(self, user_id: str, pv_delta: int) -> None:
+    def update_elite_bonus_incremental(
+        self,
+        user_id: str,
+        pv_delta: Optional[int] = None,
+        *,
+        normalized_event: Optional[Any] = None,
+    ) -> None:
         """
         单笔订单触发的增量计算与传导。pv_delta 可正可负(负数 = 退单)。
 
         并发: 源用户 + BFS 路径上每个祖先都加锁。树结构保证锁顺序单调,无环路死锁。
         异常: 锁等待超时 / Dask 失败 → 上抛,由调用方决定重试或入死信。
         """
+        # region 归一化事件合同
+        event_done_key: Optional[str] = None
+        event_done_payload: Optional[str] = None
+        event_lock_key: Optional[str] = None
+        if normalized_event is not None:
+            from Model.Order.NormalizedPvEvent import require_normalized_pv_event
+
+            event = require_normalized_pv_event(normalized_event)
+            if event.period_snapshot.period_num != self.period_num:
+                raise ValueError("normalized event period 与 EliteBonusService period 不一致")
+            pv_delta = event.effective_pv_delta_units
+            event_done_key = (
+                f"system:idempotency:elite:{self.period_num}:{event.identity}:done"
+            )
+            event_lock_key = (
+                f"system:idempotency:elite:{self.period_num}:{event.identity}:lock"
+            )
+            event_done_payload = json.dumps(
+                {
+                    "period_num": self.period_num,
+                    "identity": event.identity,
+                    "business_revision": event.business_revision,
+                    "payload_hash": event.payload_hash,
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        elif not isinstance(pv_delta, int) or isinstance(pv_delta, bool):
+            raise TypeError("legacy pv_delta must already be strict units int")
+
+        if pv_delta == 0:
+            logger.info("Elite Bonus 增量为 0，跳过 stage 写入: user_id=%s", user_id)
+            return
+        # endregion
+
         # region 加载并冻结本次业务运行配置
         run_config = PVAmountRunSession.start(
             PVAmountConfigProvider(self.redis_conn)
@@ -242,6 +294,25 @@ class EliteBonusService:
 
         acquired_locks: List[Any] = []
         try:
+            # region normalized event 排他锁与完成态校验
+            # 完成键与节点写入由同一 pipeline 提交；拿锁后复核可阻止同事件重复累计。
+            if event_lock_key is not None:
+                event_lock = self.redis_conn.lock(
+                    event_lock_key,
+                    timeout=LOCK_TIMEOUT,
+                    blocking_timeout=LOCK_BLOCKING_TIMEOUT,
+                )
+                if not event_lock.acquire():
+                    raise RuntimeError(f"获取 Elite 事件幂等锁失败: {event_lock_key}")
+                acquired_locks.append(event_lock)
+                if self._is_normalized_event_done(
+                    self.redis_conn,
+                    event_done_key,
+                    event_done_payload,
+                ):
+                    logger.info("Elite Bonus 检测到已完成事件，安全跳过: %s", event_done_key)
+                    return
+            # endregion
 
             # region 锁源用户
             src_lock = self.redis_conn.lock(
@@ -259,7 +330,8 @@ class EliteBonusService:
             # endregion
 
             # region 边界保护: 防退单 / 重复退单导致 pv 穿透到负
-            if (current_user.pv_pcs or 0) + pv_delta < 0:
+            next_pv_pcs = checked_add_int64(current_user.pv_pcs or 0, pv_delta)
+            if next_pv_pcs < 0:
                 logger.warning(
                     "用户 %s pv_pcs 穿透负值(当前 %s, 增量 %s),本次跳过",
                     user_id, current_user.pv_pcs, pv_delta,
@@ -268,8 +340,8 @@ class EliteBonusService:
             # endregion
 
             # region 计算gpv
-            current_user.pv_pcs = (current_user.pv_pcs or 0) + pv_delta
-            current_user.gpv = (current_user.gpv or 0) + pv_delta
+            current_user.pv_pcs = next_pv_pcs
+            current_user.gpv = checked_add_int64(current_user.gpv or 0, pv_delta)
             # endregion
 
             # 获取贡献差值和状态是否改变
@@ -295,7 +367,7 @@ class EliteBonusService:
                 )
 
             # ---- 统一原子化写入 ----
-            self._batch_save(models_to_save)
+            self._batch_save(models_to_save, event_done_key, event_done_payload)
 
         finally:
             # 逆序释放;锁可能因超时被自动释放,故全部 try/except
@@ -357,7 +429,7 @@ class EliteBonusService:
 
             # region 计算父级的gpv
             ancestor = self._get_or_create_node(ancestor_id, run_config)
-            ancestor.gpv = (ancestor.gpv or 0) + delta_update
+            ancestor.gpv = checked_add_int64(ancestor.gpv or 0, delta_update)
             # endregion
 
             # region 获取leg_node
@@ -365,6 +437,7 @@ class EliteBonusService:
             if leg_node is None:
                 try:
                     leg_node = EliteBonusStats.get(f"{self.period_num}:{leg_id}")
+                    require_v2_amount_record(leg_node)
                 except NotFoundError:
                     leg_node = self._build_blank_node(leg_id, run_config)
             # endregion
@@ -399,7 +472,9 @@ class EliteBonusService:
     def _get_or_create_node(self, user_id: str, run_config: PVAmountRunConfig) -> EliteBonusStats:
         node_id = f"{self.period_num}:{user_id}"
         try:
-            return EliteBonusStats.get(node_id)
+            node = EliteBonusStats.get(node_id)
+            require_v2_amount_record(node)
+            return node
         except NotFoundError:
             return self._build_blank_node(user_id, run_config)
 
@@ -414,13 +489,39 @@ class EliteBonusService:
             ),
         )
 
-    def _batch_save(self, models: List[EliteBonusStats]) -> None:
-        if not models:
+    @staticmethod
+    def _is_normalized_event_done(
+        redis_conn: Any,
+        done_key: Optional[str],
+        expected_payload: Optional[str],
+    ) -> bool:
+        """完成键存在时必须与当前 identity/revision/hash 完全一致。"""
+        if done_key is None:
+            return False
+        raw = redis_conn.get(done_key)
+        if raw is None:
+            return False
+        actual = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        if actual != expected_payload:
+            raise RuntimeError(f"Elite event completion record conflict: {done_key}")
+        return True
+
+    def _batch_save(
+        self,
+        models: List[EliteBonusStats],
+        done_key: Optional[str] = None,
+        done_payload: Optional[str] = None,
+    ) -> None:
+        if not models and done_key is None:
             return
-        db = EliteBonusStats.db()
-        pipe = db.pipeline()
+        if (done_key is None) != (done_payload is None):
+            raise ValueError("Elite done_key and done_payload must be provided together")
+        # 完成键与模型必须绑定到服务持有的同一 Redis 连接和事务。
+        pipe = self.redis_conn.pipeline(transaction=True)
         for m in models:
             m.save(pipeline=pipe)
+        if done_key is not None:
+            pipe.set(done_key, done_payload)
         pipe.execute()
 
     # =================================================================
@@ -441,7 +542,7 @@ class EliteBonusService:
         run_config: PVAmountRunConfig,
     ) -> Dict[str, int]:
         """
-        本期结束后调用一次,把所有 estimated_bonus > 0 的节点固化到 AR_CALC_BONUS_E,
+        本期结束后调用一次,把所有 estimated_bonus_cents > 0 的节点固化到 AR_CALC_BONUS_E,
         把 eb_source 链路固化到 AR_CALC_BONUS_E_SOURCE。
 
         :param db_executor: 调用方实现的事务批量插入函数,签名:
@@ -464,7 +565,7 @@ class EliteBonusService:
         )
         bonus_records = [
             r for r in all_records
-            if (r.gpv_real or 0) > 0 and (r.estimated_bonus or 0) > 0
+            if (r.gpv_real or 0) > 0 and (r.estimated_bonus_cents or 0) > 0
         ]
 
         # 收集所有需要 JOIN 用户信息的 user_id
@@ -508,8 +609,8 @@ class EliteBonusService:
                 "parent_uid": info.get("parent_uid", "0"),
                 "top_deep": info.get("top_deep", 0),
                 "gpv_real": r.gpv_real,
-                "e_rate": float(self.elite_rate),
-                "bonus_e": r.estimated_bonus,
+                "e_rate": self.elite_rate_ppm,
+                "bonus_e": r.estimated_bonus_cents,
                 "country_id": info.get("country_id", "-1"),
             })
 

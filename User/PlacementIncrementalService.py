@@ -13,7 +13,13 @@ from redis_om import NotFoundError
 import Model.User.UserLevel as UserLevel
 from Model.Config import SCHEDULE_ADDRESS
 from Model.User.UserStats import UserStats
-from Common.AmountModelAdapter import build_factory_amount_fields
+from Common.AmountModelAdapter import build_factory_amount_fields, require_v2_amount_record
+from Common.PeriodResolver import PeriodResolver, PeriodSnapshot
+from Common.PvAmount import checked_add_int64, require_units_int
+from Model.Order.NormalizedPvEvent import (
+    NormalizedPvEvent,
+    require_normalized_pv_event,
+)
 from Redishelper.PVAmountConfigProvider import (
     PVAmountConfigProvider,
     PVAmountRunConfig,
@@ -66,21 +72,37 @@ class PlacementIncrementalService(UserStatsService):
     def _status_key(cls, period: str) -> str:
         return f"system:placement_recalc_status:{period}"
 
-    @classmethod
-    def _get_prev_period(cls, period: str) -> str:
-        """与 GlobalRecalculationService 强对齐期号推导口径，恒定返回 str"""
-        try:
-            period_int = int(period)
-        except (ValueError, TypeError):
-            raise ValueError(f"非法 period={period!r}，期数必须是连续自增整数")
+    def __init__(self, period_resolver: Optional[PeriodResolver] = None):
+        self._period_resolver = period_resolver
 
-        if period_int < 1:
-            raise ValueError(f"非法 period={period!r}，期数必须 >= 1")
+    def _resolve_period_snapshot(
+        self,
+        period: str,
+        period_snapshot: Optional[PeriodSnapshot] = None,
+    ) -> PeriodSnapshot:
+        snapshot = period_snapshot
+        if snapshot is None:
+            if self._period_resolver is None:
+                raise RuntimeError("生产 period 入口必须注入 PeriodResolver 或 PeriodSnapshot")
+            try:
+                period_num = int(period)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"非法 period={period!r}") from exc
+            snapshot = self._period_resolver.resolve_current(period_num)
+        if not isinstance(snapshot, PeriodSnapshot):
+            raise TypeError("period_snapshot must be PeriodSnapshot")
+        if str(snapshot.period_num) != str(period):
+            raise ValueError("period_snapshot 与入口 period 不一致")
+        return snapshot
 
-        if period_int == 1:
-            return ""
-
-        return str(period_int - 1)
+    def _get_prev_period(
+        self,
+        period: str,
+        period_snapshot: Optional[PeriodSnapshot] = None,
+    ) -> str:
+        """从已解析的 AR_PERIOD 快照读取真实上一期，不执行本地算术。"""
+        snapshot = self._resolve_period_snapshot(period, period_snapshot)
+        return "" if snapshot.previous_period_num is None else str(snapshot.previous_period_num)
 
     def _assert_no_recalc_conflict(self, redis_conn, period: str) -> None:
         """集中抽取 TOCTOU 防御检查与封期闸门"""
@@ -139,14 +161,20 @@ class PlacementIncrementalService(UserStatsService):
             if owns_client and client is not None:
                 client.close()
 
-    def _load_prev_surplus(self, period: str, user_id: str) -> Tuple[int, int]:
+    def _load_prev_surplus(
+        self,
+        period: str,
+        user_id: str,
+        period_snapshot: PeriodSnapshot,
+    ) -> Tuple[int, int]:
         """加载上一期结余，消除 float 默认值。"""
-        prev_period = self._get_prev_period(period)
+        prev_period = self._get_prev_period(period, period_snapshot)
         if not prev_period:
             return 0, 0
 
         try:
             prev_node = UserStats.get(f"{prev_period}:{user_id}")
+            require_v2_amount_record(prev_node)
             if not getattr(prev_node, "placement_settled", False):
                 logger.warning("时序穿透：period=%s user=%s 继承了上期未结算 remain，待全量对账修正。", period, user_id)
             return (
@@ -161,6 +189,7 @@ class PlacementIncrementalService(UserStatsService):
         period: str,
         user_id: str,
         run_config: PVAmountRunConfig,
+        period_snapshot: PeriodSnapshot,
     ) -> Tuple[UserStats, bool, bool]:
         """
         带跨期结转机制的节点获取。
@@ -172,10 +201,11 @@ class PlacementIncrementalService(UserStatsService):
         existed_before = True
         changed = False
 
-        pre_1l, pre_2l = self._load_prev_surplus(period, user_id)
+        pre_1l, pre_2l = self._load_prev_surplus(period, user_id, period_snapshot)
 
         try:
             u = UserStats.get(record_pk)
+            require_v2_amount_record(u)
             self._normalize_qualified_legs(u)
 
             # 如果记录是由推荐网增量服务先行创建的，它的 pre_surplus 必为默认的 0。
@@ -222,14 +252,14 @@ class PlacementIncrementalService(UserStatsService):
         【安置网 MID8 计算逻辑】：融合 PV 新增与结余。
         若有活动，结余进入 TOTAL 供对碰。增量服务不碰 remain，保障下游对碰结果不被覆盖冲刷。
         """
-        pv_1l = int(node.pv_1l or 0)
-        pv_2l = int(node.pv_2l or 0)
-        pre_1l = int(node.pre_surplus_1l or 0)
-        pre_2l = int(node.pre_surplus_2l or 0)
+        pv_1l = require_units_int(node.pv_1l or 0, "pv_1l")
+        pv_2l = require_units_int(node.pv_2l or 0, "pv_2l")
+        pre_1l = require_units_int(node.pre_surplus_1l or 0, "pre_surplus_1l")
+        pre_2l = require_units_int(node.pre_surplus_2l or 0, "pre_surplus_2l")
 
         if has_activity or (node.pv or 0) != 0 or pv_1l != 0 or pv_2l != 0:
-            node.total_1l = pv_1l + pre_1l
-            node.total_2l = pv_2l + pre_2l
+            node.total_1l = checked_add_int64(pv_1l, pre_1l)
+            node.total_2l = checked_add_int64(pv_2l, pre_2l)
         else:
             node.total_1l = 0
             node.total_2l = 0
@@ -269,15 +299,63 @@ class PlacementIncrementalService(UserStatsService):
     # =================================================================
     # 核心：双轨制增量更新逻辑
     # =================================================================
-    def update_placement_performance(self, period: str, user_id: str, bv: int, order_id: str):
+    def update_placement_performance(
+        self,
+        period: Optional[str] = None,
+        user_id: Optional[str] = None,
+        bv: Optional[int] = None,
+        order_id: Optional[str] = None,
+        *,
+        normalized_event: Optional[NormalizedPvEvent] = None,
+    ):
+        """处理安置网增量；生产 v2 入口必须传入同一 normalized event。"""
+        # region 归一化事件合同
+        if normalized_event is not None:
+            event = require_normalized_pv_event(normalized_event)
+            if user_id is None:
+                raise ValueError("normalized event stage 必须传入 user_id")
+            return self._update_placement_performance_units(
+                period=str(event.period_snapshot.period_num),
+                user_id=str(user_id),
+                bv=event.effective_pv_delta_units,
+                order_id=event.identity,
+                period_snapshot=event.period_snapshot,
+            )
+        # endregion
+
+        # region 旧入口兼容适配
+        if period is None or user_id is None or order_id is None:
+            raise ValueError("legacy adapter requires period, user_id and order_id")
+        if not isinstance(bv, int) or isinstance(bv, bool):
+            raise TypeError("legacy bv must already be strict units int")
+        done_key = f"system:idempotency:placement:{period}:{order_id}:done"
+        redis_conn = UserStats.db()
+        if redis_conn.exists(done_key):
+            logger.warning("检测到双轨重复订单 %s，忽略本次请求。", order_id)
+            return
+        snapshot = self._resolve_period_snapshot(str(period))
+        return self._update_placement_performance_units(
+            str(period), str(user_id), bv, str(order_id), snapshot
+        )
+        # endregion
+
+    def _update_placement_performance_units(
+        self,
+        period: str,
+        user_id: str,
+        bv: int,
+        order_id: str,
+        period_snapshot: PeriodSnapshot,
+    ):
         if not order_id:
             raise ValueError("双轨增量处理必须传入 order_id 以保证幂等")
 
         if not isinstance(bv, int) or isinstance(bv, bool):
             raise ValueError(
-                f"【契约声明（待全链路迁移批次生效）】BV 必须为最小单位整数(BV×100)，拒绝静默转换: bv={bv!r} ({type(bv).__name__})")
+                f"BV 必须为公共金额层定义的 strict units int，拒绝静默转换: bv={bv!r} ({type(bv).__name__})")
 
         period = str(period)
+        period_snapshot = self._resolve_period_snapshot(period, period_snapshot)
         user_id = str(user_id)
         done_key = f"system:idempotency:placement:{period}:{order_id}:done"
         lock_key = f"system:idempotency:placement:{period}:{order_id}:lock"
@@ -339,7 +417,9 @@ class PlacementIncrementalService(UserStatsService):
                     # ---------------------------------------------------------
                     # Step A: 激活本人 (源节点) 的对碰合并状态
                     # ---------------------------------------------------------
-                    node_self, existed_self, dirty_self = self._get_or_init_user_with_surplus(period, user_id, run_config)
+                    node_self, existed_self, dirty_self = self._get_or_init_user_with_surplus(
+                        period, user_id, run_config, period_snapshot
+                    )
                     processed_nodes[user_id] = node_self
 
                     old_t1, old_t2 = node_self.total_1l, node_self.total_2l
@@ -384,7 +464,9 @@ class PlacementIncrementalService(UserStatsService):
                             existed_anc = True
                             dirty_anc = False
                         else:
-                            anc_node, existed_anc, dirty_anc = self._get_or_init_user_with_surplus(period, anc_id, run_config)
+                            anc_node, existed_anc, dirty_anc = self._get_or_init_user_with_surplus(
+                                period, anc_id, run_config, period_snapshot
+                            )
                             processed_nodes[anc_id] = anc_node
 
                         o_pv1, o_pv2 = anc_node.pv_1l, anc_node.pv_2l
@@ -392,9 +474,9 @@ class PlacementIncrementalService(UserStatsService):
                         was_settled_anc = bool(getattr(anc_node, "placement_settled", False))
 
                         if leg == 1:
-                            anc_node.pv_1l = (anc_node.pv_1l or 0) + bv
+                            anc_node.pv_1l = checked_add_int64(anc_node.pv_1l or 0, bv)
                         elif leg == 2:
-                            anc_node.pv_2l = (anc_node.pv_2l or 0) + bv
+                            anc_node.pv_2l = checked_add_int64(anc_node.pv_2l or 0, bv)
                         else:
                             raise ValueError(f"非法的安置区 leg={leg}")
 

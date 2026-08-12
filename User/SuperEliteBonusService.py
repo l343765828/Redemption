@@ -1,11 +1,18 @@
 import logging
 import time
-from decimal import Decimal, ROUND_DOWN
+
 import dask.dataframe as dd
 import pandas as pd
 from typing import Any
 
 from Common.BonusConfig import ConfigSnapshot, ensure_config_snapshot
+from Common.PvAmount import (
+    BONUS_CENT_SCALE,
+    PV_SCALE,
+    RATE_PPM_SCALE,
+    assert_integer_amount_dtype,
+    require_int64,
+)
 
 logger = logging.getLogger("User.SuperEliteBonusService")
 
@@ -23,7 +30,7 @@ class SuperEliteBonusService:
     本服务不持有 config_service / user_info_service 等任何外部 I/O 依赖。
     所有前置数据均由调用方备好后以 DataFrame 注入：
         - ddf_elite_users : CPU dask.DataFrame，需含 user_id, period_num, calc_month, rank (30 = Super Elite)
-        - ddf_orders      : CPU dask.DataFrame，需含 period_num, country_id, pv
+        - ddf_orders      : CPU dask.DataFrame，需含 period_num, country_id, pv_units（PV micro-units）
         - ddf_user_perf   : CPU dask.DataFrame，需含 user_id, is_active（单用户单行）
         - df_config       : 需含 config_name, value, type（即 AR_CONFIG 快照）
         - df_user_info    : 需含 id, country_id（用户维表快照）
@@ -87,16 +94,39 @@ class SuperEliteBonusService:
     def _empty_result_df(self) -> dd.DataFrame:
         empty_df = pd.DataFrame(columns=[
             'id', 'period_num', 'calc_month', 'user_id',
-            'bonus_se', 'country_id', 'is_active', 'bonus_country'
+            'bonus_se', 'bonus_se_cents', 'country_id', 'is_active', 'bonus_country'
         ])
         return dd.from_pandas(empty_df, npartitions=1)
 
     # =====================================================================
     # 配置解析
     # =====================================================================
-    def _parse_se_rate(self, df_config) -> Decimal:
+    def _parse_se_rate(self, df_config) -> int:
         snapshot = ensure_config_snapshot(df_config)
-        return snapshot.rate_decimal("superEliteRate", award="SE")
+        return snapshot.require_ppm("superEliteRate", award="SE")
+
+    @staticmethod
+    def _bonus_cents_to_decimal_string(cents: int) -> str:
+        sign = '-' if cents < 0 else ''
+        whole, fraction = divmod(abs(int(cents)), BONUS_CENT_SCALE)
+        return f"{sign}{whole}.{fraction:02d}"
+
+    @staticmethod
+    def _units_ppm_count_to_bonus_cents(total_units: int, rate_ppm: int, count: int) -> int:
+        """按 SQL 公式只在最终奖金分边界向零截断。"""
+        if count <= 0:
+            raise ZeroDivisionError("SE bonus member count must be positive")
+
+        denominator = RATE_PPM_SCALE * (PV_SCALE // BONUS_CENT_SCALE) * count
+        sign = -1 if (total_units < 0) ^ (rate_ppm < 0) else 1
+        amount_magnitude = abs(int(total_units))
+        rate_magnitude = abs(int(rate_ppm))
+        quotient, remainder = divmod(amount_magnitude, denominator)
+        bonus_cents = sign * (
+            quotient * rate_magnitude
+            + (remainder * rate_magnitude) // denominator
+        )
+        return require_int64(bonus_cents, field_name="SE bonus cents")
 
     def _parse_country_mapping(self, df_config) -> pd.DataFrame:
         df_cfg = self._lower_columns(self._to_local_pandas(df_config, "df_config").copy(), "df_config")
@@ -202,7 +232,7 @@ class SuperEliteBonusService:
             period_num=period_int,
             calc_month=calc_month_int,
         )
-        se_rate = self._parse_se_rate(config_snapshot)
+        se_rate_ppm = self._parse_se_rate(config_snapshot)
         country_mapping = self._parse_country_mapping(config_snapshot)
         # endregion
 
@@ -223,7 +253,7 @@ class SuperEliteBonusService:
 
         # 严格要求 rank 字段
         required_elite = {"user_id", "period_num", "calc_month", "rank"}
-        required_orders = {"period_num", "country_id", "pv"}
+        required_orders = {"period_num", "country_id", "pv_units"}
         required_perf = {"user_id", "is_active"}
         required_info = {"id", "country_id"}
 
@@ -236,6 +266,7 @@ class SuperEliteBonusService:
             missing = required - set(df.columns)
             if missing:
                 raise ValueError(f"[阻断] {name} 缺少必需参与计算的字段: {sorted(missing)}")
+        assert_integer_amount_dtype(ddf_orders._meta, ['pv_units'], 'ddf_orders')
         # endregion
 
         # ==========================================
@@ -358,34 +389,28 @@ class SuperEliteBonusService:
         # ==========================================
         # Step 3: 组装分子
         # ==========================================
-        # region 筛选当前的国家总业绩
+        # region 筛选并校验当前期整数业绩
         orders = ddf_orders[dd.to_numeric(ddf_orders['period_num'], errors='coerce') == period_int]
-        orders['pv'] = dd.to_numeric(orders['pv'], errors='coerce')
+        assert_integer_amount_dtype(orders._meta, ['pv_units'], 'target-period orders')
         orders = orders.persist()
         # endregion
 
-        # region 验证
-        bad_pv_count = orders['pv'].isna().sum().compute()
-        if bad_pv_count > 0:
-            raise ValueError(f"[阻断] 订单底表存在非数值或不可解析的 PV: 发现 {int(bad_pv_count)} 条，禁止入池计算。")
-        # endregion
-
         # region order联查mapping_ddf 补充source_country_id region_default_id
-        orders['pv_mills'] = (orders['pv'] * 1000).round().astype('int64')
         orders['country_id'] = self._normalize_id_series(orders['country_id'])
-
         orders = orders.merge(
             mapping_ddf, left_on='country_id', right_on='source_country_id', how='left'
         )
+        assert_integer_amount_dtype(orders._meta, ['pv_units'], 'mapped SE orders')
         orders['bonus_country'] = orders['region_default_id'].fillna(orders['country_id'])
-        orders = orders.drop(columns=['source_country_id', 'region_default_id', 'pv'], errors='ignore')
+        orders = orders.drop(columns=['source_country_id', 'region_default_id'], errors='ignore')
         # endregion
 
-        # region 创造numerator -> 按大区（bonus_country）汇总当期的总订单业绩（PV）
+        # region 创造numerator -> 按大区（bonus_country）汇总当期的总订单业绩（units）
         numerator = (
-            orders.groupby('bonus_country')['pv_mills'].sum()
-            .to_frame(name='vv_total_pv_mills').reset_index()
+            orders.groupby('bonus_country')['pv_units'].sum()
+            .to_frame(name='vv_total_pv_units').reset_index()
         )
+        assert_integer_amount_dtype(numerator._meta, ['vv_total_pv_units'], 'SE region aggregate')
         # endregion
 
         # ==========================================
@@ -396,32 +421,35 @@ class SuperEliteBonusService:
         pool = pool[pool['vv_count'] > 0]
         # endregion
 
-        # region 计算se奖金=大区总 PV × 比例 ÷ 大区内 SE 总人数
-        def calc_bonus_decimal(df_partition, rate_dec: Decimal):
-            bonuses = []
-            for pv_mills, count in zip(df_partition['vv_total_pv_mills'], df_partition['vv_count']):
-                pv_dec = Decimal(int(pv_mills)) / Decimal('1000')
-                count_dec = Decimal(int(count))
-                val = (pv_dec * rate_dec / count_dec).quantize(Decimal('0.00'), rounding=ROUND_DOWN)
-                bonuses.append(str(val))
-
+        # region 计算se奖金=大区总units × 比例 ÷ 大区内 SE 总人数
+        def calc_bonus_cents(df_partition, rate_ppm: int):
             df_partition = df_partition.copy()
-            df_partition['bonus_se'] = bonuses
-            mask = pd.to_numeric(df_partition['bonus_se'], errors='coerce').fillna(0) > 0
-            return df_partition[mask]
+            df_partition['bonus_se_cents'] = [
+                self._units_ppm_count_to_bonus_cents(int(total_units), rate_ppm, int(count))
+                for total_units, count in zip(
+                    df_partition['vv_total_pv_units'], df_partition['vv_count']
+                )
+            ]
+            df_partition['bonus_se_cents'] = df_partition['bonus_se_cents'].astype('int64')
+            df_partition['bonus_se'] = df_partition['bonus_se_cents'].map(
+                self._bonus_cents_to_decimal_string
+            )
+            return df_partition[df_partition['bonus_se_cents'] > 0]
         # endregion
 
         # region 算出每个大区的每个人的bonus_se
+        assert_integer_amount_dtype(pool._meta, ['vv_total_pv_units'], 'SE bonus pool')
         meta_df = pool._meta.copy()
+        meta_df['bonus_se_cents'] = pd.Series(dtype='int64')
         meta_df['bonus_se'] = pd.Series(dtype='object')
-        pool = pool.map_partitions(calc_bonus_decimal, rate_dec=se_rate, meta=meta_df)
+        pool = pool.map_partitions(calc_bonus_cents, rate_ppm=se_rate_ppm, meta=meta_df)
         # endregion
 
         # ==========================================
         # Step 5: 回挂明细与写出
         # ==========================================
         # region 创造result_df -> se_users联查pool联查ddf_user_perf
-        result_df = se_users.merge(pool[['bonus_country', 'bonus_se']], on='bonus_country', how='inner')
+        result_df = se_users.merge(pool[['bonus_country', 'bonus_se', 'bonus_se_cents']], on='bonus_country', how='inner')
         result_df = result_df.merge(ddf_user_perf[['user_id', 'is_active']], on='user_id', how='left')
         # endregion
 
@@ -451,7 +479,7 @@ class SuperEliteBonusService:
 
         output_columns = [
             'id', 'period_num', 'calc_month', 'user_id',
-            'bonus_se', 'country_id', 'is_active', 'bonus_country'
+            'bonus_se', 'bonus_se_cents', 'country_id', 'is_active', 'bonus_country'
         ]
         return result_df[output_columns]
 
@@ -485,7 +513,8 @@ def main():
     pdf_orders = pd.DataFrame({
         'period_num': [period_num] * 3,
         'country_id': ['MY', 'SG', 'TW'],
-        'pv': [1000.50, 2000.00, 1000.00]
+        # DEV 演示入口也必须使用 micro-units，避免示例重新引入 float 金额合同。
+        'pv_units': [1_000_500_000, 2_000_000_000, 1_000_000_000]
     })
     ddf_orders = dd.from_pandas(pdf_orders, npartitions=2)
 

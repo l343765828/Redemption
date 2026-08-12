@@ -46,6 +46,7 @@ from redis_om import NotFoundError
 import Model.User.UserLevel as UserLevel
 from Model.User.UserStats import UserStats
 from Model.User.UserPeriodHighestRank import UserPeriodHighestRank
+from Common.PeriodResolver import PeriodSnapshot
 from User.GlobalRecalculationService import GlobalRecalculationService
 from User.UserStatsService import SCHEDULE_ADDRESS
 
@@ -146,9 +147,30 @@ def _inject_pv(period: str, user_id: str, pv: int) -> None:
 
 
 def _run(period: str, *, write_zero_nodes: bool = True) -> None:
-    """触发单期结算。"""
+    """使用显式 AR_PERIOD 测试快照触发单期结算。"""
+    snapshots = {
+        BASE_PREV_PERIOD: PeriodSnapshot(
+            period_num=202603, calc_year=2026, calc_month=3,
+            first_period_num=202603, previous_period_num=None,
+            source_checksum="global-recalc-test-202603",
+        ),
+        PREV_PERIOD: PeriodSnapshot(
+            period_num=202604, calc_year=2026, calc_month=4,
+            first_period_num=202603, previous_period_num=202603,
+            source_checksum="global-recalc-test-202604",
+        ),
+        TEST_PERIOD: PeriodSnapshot(
+            period_num=202605, calc_year=2026, calc_month=5,
+            first_period_num=202603, previous_period_num=202604,
+            source_checksum="global-recalc-test-202605",
+        ),
+    }
     svc = GlobalRecalculationService()
-    svc.settle_period(period=period, write_zero_nodes=write_zero_nodes)
+    svc.settle_period(
+        period=period,
+        period_snapshot=snapshots[period],
+        write_zero_nodes=write_zero_nodes,
+    )
 
 
 def _get_stats(period: str, user_id: str) -> UserStats:

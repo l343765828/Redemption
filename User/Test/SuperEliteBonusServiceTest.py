@@ -6,6 +6,7 @@ from decimal import Decimal
 import logging
 import warnings
 from User.SuperEliteBonusService import SuperEliteBonusService
+from Common.PvAmount import PV_SCALE
 
 # 关闭底层警告日志输出，保持测试控制台整洁
 logging.getLogger("User.SuperEliteBonusService").setLevel(logging.CRITICAL)
@@ -36,7 +37,7 @@ class SuperEliteBonusServiceTest(unittest.TestCase):
             'calc_month': [self.calc_month] * 2, 'rank': [30, 30]
         })
         self.base_orders = pd.DataFrame({
-            'period_num': [self.period], 'country_id': ['TW'], 'pv': [1000.00]
+            'period_num': [self.period], 'country_id': ['TW'], 'pv_units': [1000 * PV_SCALE]
         })
         self.base_perf = pd.DataFrame({
             'user_id': ['U001', 'U002'], 'is_active': [1, 1]
@@ -80,7 +81,7 @@ class SuperEliteBonusServiceTest(unittest.TestCase):
             'calc_month': [self.calc_month] * 3, 'rank': [30, 30, 30]
         })
         orders = pd.DataFrame(
-            {'period_num': [self.period] * 3, 'country_id': ['MY', 'SG', 'BN'], 'pv': [1000, 2000, 0]})
+            {'period_num': [self.period] * 3, 'country_id': ['MY', 'SG', 'BN'], 'pv_units': [1000 * PV_SCALE, 2000 * PV_SCALE, 0]})
         perf = pd.DataFrame({'user_id': ['U001', 'U002', 'U003'], 'is_active': [1, 1, 1]})
 
         res_df = self.service.calculate_se_bonus(
@@ -137,7 +138,7 @@ class SuperEliteBonusServiceTest(unittest.TestCase):
         """TC-1.5 强健性验证：大小写混杂与前后空格自适应归一"""
         elite = pd.DataFrame(
             {'user_id': [' u001  '], 'period_num': [self.period], 'calc_month': [self.calc_month], 'rank': [30]})
-        orders = pd.DataFrame({'period_num': [self.period], 'country_id': [' tw '], 'pv': [1000]})
+        orders = pd.DataFrame({'period_num': [self.period], 'country_id': [' tw '], 'pv_units': [1000 * PV_SCALE]})
         user_info = pd.DataFrame({'id': ['U001'], 'country_id': ['Tw']})
         perf = pd.DataFrame({'user_id': ['u001'], 'is_active': [1]})
 
@@ -161,7 +162,7 @@ class SuperEliteBonusServiceTest(unittest.TestCase):
         })
         user_info = pd.DataFrame({'id': ['U001', 'U002', 'U003'], 'country_id': ['TW', 'TW', 'TW']})
         perf = pd.DataFrame({'user_id': ['U001', 'U002', 'U003'], 'is_active': [1, 0, 1]})  # U002 不活跃
-        orders = pd.DataFrame({'period_num': [self.period], 'country_id': ['TW'], 'pv': [3000]})
+        orders = pd.DataFrame({'period_num': [self.period], 'country_id': ['TW'], 'pv_units': [3000 * PV_SCALE]})
 
         res_df = self.service.calculate_se_bonus(
             self.period, self.calc_month, self._build_dask(elite), self._build_dask(orders),
@@ -205,7 +206,7 @@ class SuperEliteBonusServiceTest(unittest.TestCase):
         """TC-2.3b 特定大区无 SE 会员被跳过"""
         elite = pd.DataFrame(
             {'user_id': ['U001'], 'period_num': [self.period], 'calc_month': [self.calc_month], 'rank': [30]})
-        orders = pd.DataFrame({'period_num': [self.period] * 2, 'country_id': ['TW', 'MY'], 'pv': [1000, 2000]})
+        orders = pd.DataFrame({'period_num': [self.period] * 2, 'country_id': ['TW', 'MY'], 'pv_units': [1000 * PV_SCALE, 2000 * PV_SCALE]})
         user_info = pd.DataFrame({'id': ['U001'], 'country_id': ['TW']})
         perf = pd.DataFrame({'user_id': ['U001'], 'is_active': [1]})
 
@@ -230,7 +231,7 @@ class SuperEliteBonusServiceTest(unittest.TestCase):
 
     def test_tc2_4_zero_pv_filtered(self):
         """TC-2.4 无有效业绩 (PV=0) 被直接剔除"""
-        orders = pd.DataFrame({'period_num': [self.period], 'country_id': ['TW'], 'pv': [0]})
+        orders = pd.DataFrame({'period_num': [self.period], 'country_id': ['TW'], 'pv_units': [0]})
         res_df = self.service.calculate_se_bonus(
             self.period, self.calc_month, self._build_dask(self.base_elite), self._build_dask(orders),
             self._build_dask(self.base_perf), self.base_config, self.base_user_info
@@ -242,62 +243,58 @@ class SuperEliteBonusServiceTest(unittest.TestCase):
     # =====================================================================
 
     def test_tc3_1_missing_rate_config(self):
-        """TC-3.1 奖金拨出比例缺失"""
+        """TC-3.1 SQL 合同：SE 拨出比例缺失时按 0 处理。"""
         config = pd.DataFrame({"config_name": ["otherConfig"], "value": ["10"], "type": ["bonus"]})
-        with self.assertRaisesRegex(ValueError, r"\[阻断\] df_config 中 superEliteRate\(type='bonus'\) 配置缺失"):
-            self.service.calculate_se_bonus(
-                self.period, self.calc_month, self._build_dask(self.base_elite), self._build_dask(self.base_orders),
-                self._build_dask(self.base_perf), config, self.base_user_info
-            )
-
+        result = self.service.calculate_se_bonus(
+            self.period, self.calc_month, self._build_dask(self.base_elite), self._build_dask(self.base_orders),
+            self._build_dask(self.base_perf), config, self.base_user_info
+        ).compute()
+        self.assertEqual(len(result), 0)
     def test_tc3_2_duplicate_rate_config(self):
-        """TC-3.2 奖金拨出比例重复"""
+        """TC-3.2 SQL 合同：SE 重复拨出比例取最小值。"""
         config = pd.DataFrame({
             "config_name": ["superEliteRate", "superEliteRate"],
             "value": ["10", "15"], "type": ["bonus", "bonus"]
         })
-        with self.assertRaisesRegex(ValueError, r"\[阻断\] superEliteRate 配置不唯一"):
-            self.service.calculate_se_bonus(
-                self.period, self.calc_month, self._build_dask(self.base_elite), self._build_dask(self.base_orders),
-                self._build_dask(self.base_perf), config, self.base_user_info
-            )
-
+        result = self.service.calculate_se_bonus(
+            self.period, self.calc_month, self._build_dask(self.base_elite), self._build_dask(self.base_orders),
+            self._build_dask(self.base_perf), config, self.base_user_info
+        ).compute()
+        self.assertEqual(len(result), 2)
+        self.assertTrue((result["bonus_se"].map(Decimal) == Decimal("50.00")).all())
     def test_tc3_3a_invalid_rate_value_string(self):
-        """TC-3.3a 比例数值非法 (空串/乱码)"""
+        """TC-3.3a 非规范十进制字符串必须 fail-loud。"""
         for invalid_val in ["abc", ""]:
             with self.subTest(invalid_val=invalid_val):
                 config = pd.DataFrame({"config_name": ["superEliteRate"], "value": [invalid_val], "type": ["bonus"]})
-                with self.assertRaisesRegex(ValueError, r"\[阻断\] superEliteRate 的 value 不是合法数值"):
+                with self.assertRaisesRegex(TypeError, "canonical decimal string"):
                     self.service.calculate_se_bonus(
                         self.period, self.calc_month, self._build_dask(self.base_elite),
                         self._build_dask(self.base_orders),
                         self._build_dask(self.base_perf), config, self.base_user_info
                     )
-
     def test_tc3_3b_missing_rate_value_nan(self):
-        """TC-3.3b 比例数值缺失 (None/NaN)"""
+        """TC-3.3b None/NaN 不是规范百分数字符串。"""
         for missing_val in [None, np.nan, pd.NA, float('nan')]:
             with self.subTest(missing_val=missing_val):
                 config = pd.DataFrame({"config_name": ["superEliteRate"], "value": [missing_val], "type": ["bonus"]})
-                with self.assertRaisesRegex(ValueError, r"\[阻断\] superEliteRate 配置缺失 value 值"):
+                with self.assertRaisesRegex(TypeError, "canonical decimal string"):
                     self.service.calculate_se_bonus(
                         self.period, self.calc_month, self._build_dask(self.base_elite),
                         self._build_dask(self.base_orders),
                         self._build_dask(self.base_perf), config, self.base_user_info
                     )
-
     def test_tc3_3c_rate_value_negative_or_zero(self):
-        """TC-3.3c 比例置零或负数防线拦截"""
-        for bad_rate in ["0", "-10", "0.0"]:
-            with self.subTest(bad_rate=bad_rate):
-                config = pd.DataFrame({"config_name": ["superEliteRate"], "value": [bad_rate], "type": ["bonus"]})
-                with self.assertRaisesRegex(ValueError, r"\[阻断\] superEliteRate 拨出比例必须大于0"):
-                    self.service.calculate_se_bonus(
-                        self.period, self.calc_month, self._build_dask(self.base_elite),
-                        self._build_dask(self.base_orders),
-                        self._build_dask(self.base_perf), config, self.base_user_info
-                    )
-
+        """TC-3.3c SQL 合同：SE 允许零/负费率，非正奖金不写出。"""
+        for rate in ["0", "-10", "0.0"]:
+            with self.subTest(rate=rate):
+                config = pd.DataFrame({"config_name": ["superEliteRate"], "value": [rate], "type": ["bonus"]})
+                result = self.service.calculate_se_bonus(
+                    self.period, self.calc_month, self._build_dask(self.base_elite),
+                    self._build_dask(self.base_orders),
+                    self._build_dask(self.base_perf), config, self.base_user_info
+                ).compute()
+                self.assertEqual(len(result), 0)
     def test_tc3_4_missing_self_mapping(self):
         """TC-3.4 大区映射主国缺失自身映射 (全局体检拦截)"""
         config = pd.DataFrame({
@@ -436,17 +433,16 @@ class SuperEliteBonusServiceTest(unittest.TestCase):
             )
 
     def test_tc4_6_invalid_pv_in_target_period(self):
-        """TC-4.6 目标期订单底表 PV 异常 (乱码 或 NaN)"""
+        """TC-4.6 目标期订单底表必须已经是 signed int64 units。"""
         invalid_pvs = ['NAN_STRING', np.nan, pd.NA, float('nan')]
         for pv in invalid_pvs:
             with self.subTest(pv=pv):
-                orders = pd.DataFrame({'period_num': [self.period], 'country_id': ['TW'], 'pv': [pv]})
-                with self.assertRaisesRegex(ValueError, r"\[阻断\] 订单底表存在非数值或不可解析的 PV"):
+                orders = pd.DataFrame({'period_num': [self.period], 'country_id': ['TW'], 'pv_units': [pv]})
+                with self.assertRaisesRegex(TypeError, "signed int64 dtype"):
                     self.service.calculate_se_bonus(
                         self.period, self.calc_month, self._build_dask(self.base_elite), self._build_dask(orders),
                         self._build_dask(self.base_perf), self.base_config, self.base_user_info
                     )
-
     def test_tc4_7_duplicate_se_user_in_elite(self):
         """TC-4.7 同一 SE 用户在评级表中出现多行 (防污染分母阻断)"""
         elite = pd.DataFrame({

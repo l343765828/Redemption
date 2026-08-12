@@ -30,8 +30,8 @@ PE 奖金计算 —— 独立运行入口（测试环境用）。
       （execute_batch 自身就有 driver 侧 cudf 操作，这是硬要求）。
 
 用法：
-    python pe_bonus_main.py --period 5 --month 202504
-    python3 -m User.PEBonusService_Main --period 202605 --month 202605 --mget
+    python pe_bonus_main.py --period 5 --month 202504 --pe-rate-percent 15
+    python3 -m User.PEBonusService_Main --period 202605 --month 202605 --pe-rate-percent 15 --mget
     # 或改下面 __main__ 里的默认值直接运行
 """
 
@@ -43,6 +43,8 @@ import dask_cudf
 from dask.distributed import Client
 
 # —— 按你们的包路径调整下面两个 import ——
+from Common.BonusConfig import ConfigSnapshot
+from Common.AmountModelAdapter import require_v2_amount_record
 from Model.User.UserStats import UserStats
 from User.PEBonusService import PEBonusService
 
@@ -66,11 +68,12 @@ def build_ddf_stats_from_redis(period_num, npartitions: int = 8) -> dask_cudf.Da
     period = str(period_num)
     rows = []
     for s in UserStats.find(UserStats.period == period).all():
+        require_v2_amount_record(s)
         rows.append({
             "user_id":    int(s.user_id if s.user_id is not None else s.id),  # Redis 里是字符串 -> int64
             "rank":       int(s.rank or 0),
             "is_elite":   bool(s.is_elite),
-            "gpv_real":   int(s.gpv_real or 0),     # 都是整数 BV
+            "gpv_real":   int(s.gpv_real or 0),     # WORK-02 后金额链统一为 PV micro-units
             "gpv_unreal": int(s.gpv_unreal or 0),
             "pv":         int(s.pv or 0),
         })
@@ -103,6 +106,7 @@ def _build_ddf_stats_via_mget(period_num, key_chunk: int = 5000, npartitions: in
         for d in docs:
             if d is None:                                   # 过期/缺失，跳过（缺失节点紧缩时按 rank 0 处理，正确）
                 continue
+            require_v2_amount_record(d)
             rows.append({
                 "user_id":    int(d.get("user_id") or d.get("id")),
                 "rank":       int(d.get("rank") or 0),
@@ -168,8 +172,15 @@ def fetch_ddf_user(userinfo_actor) -> dask_cudf.DataFrame:
 # ============================================================
 # 主流程
 # ============================================================
-def main(period_num: int, calc_month: int, schedule_address: str = SCHEDULE_ADDRESS,
+def main(period_num: int, calc_month: int, config_snapshot: ConfigSnapshot,
+         schedule_address: str = SCHEDULE_ADDRESS,
          use_mget: bool = False, dump_dir: str = "/tmp"):
+    # region 验证本次奖金配置快照
+    if not isinstance(config_snapshot, ConfigSnapshot):
+        raise TypeError("PE test entry requires an explicit frozen ConfigSnapshot")
+    config_snapshot.assert_run(period_num, calc_month)
+    # endregion
+
     client = Client(schedule_address)   # 注册为本进程默认 client，execute_batch 内部 get_client() 会拿到它
     log.info("已连接 Dask: %s", schedule_address)
     try:
@@ -188,7 +199,7 @@ def main(period_num: int, calc_month: int, schedule_address: str = SCHEDULE_ADDR
         ddf_user_perf = None   # None -> 按 UserStats.pv>=30 内部派生 IS_ACTIVE
 
         # 3) 跑奖金
-        svc = PEBonusService()
+        svc = PEBonusService(config_snapshot)
         result = svc.execute_batch(
             period_num=period_num,
             calc_month=calc_month,
@@ -204,8 +215,8 @@ def main(period_num: int, calc_month: int, schedule_address: str = SCHEDULE_ADDR
         pe_pdf     = ar_pe.compute().to_pandas()
         source_pdf = ar_pe_source.compute().to_pandas()
 
-        total_bonus = float(pe_pdf["BONUS_PE"].sum()) if len(pe_pdf) else 0.0
-        log.info("AR_CALC_BONUS_PE 行数=%d，BONUS_PE 合计=%.2f", len(pe_pdf), total_bonus)
+        total_bonus_cents = int(pe_pdf["BONUS_PE_CENTS"].sum()) if len(pe_pdf) else 0
+        log.info("AR_CALC_BONUS_PE 行数=%d，BONUS_PE_CENTS 合计=%d", len(pe_pdf), total_bonus_cents)
         log.info("AR_CALC_BONUS_PE_SOURCE 行数=%d", len(source_pdf))
 
         print("\n=== AR_CALC_BONUS_PE (head 20) ===")
@@ -236,6 +247,24 @@ if __name__ == "__main__":
     parser.add_argument("--month", type=int, default=202504, help="计算月份 CALC_MONTH")
     parser.add_argument("--addr", type=str, default=SCHEDULE_ADDRESS, help="Dask scheduler 地址")
     parser.add_argument("--mget", action="store_true", help="用 JSON.MGET 分批读 UserStats（大规模时）")
+    parser.add_argument(
+        "--pe-rate-percent",
+        required=True,
+        help="测试环境显式传入 proEliteRate 百分数原值，例如 15",
+    )
     args = parser.parse_args()
 
-    main(period_num=args.period, calc_month=args.month, schedule_address=args.addr, use_mget=args.mget)
+    config_snapshot = ConfigSnapshot.from_rows(
+        [{"config_name": "proEliteRate", "type": "bonus", "value": args.pe_rate_percent}],
+        period_num=args.period,
+        calc_month=args.month,
+        source="manual-pe-test-cli",
+        source_version="WORK-PVAM-02",
+    )
+    main(
+        period_num=args.period,
+        calc_month=args.month,
+        config_snapshot=config_snapshot,
+        schedule_address=args.addr,
+        use_mget=args.mget,
+    )

@@ -28,6 +28,14 @@ import cudf
 import cupy as cp
 
 from Common.BonusConfig import ensure_config_snapshot
+from Common.PvAmount import (
+    BONUS_CENT_SCALE,
+    INT64_MAX,
+    INT64_MIN,
+    PV_SCALE,
+    RATE_PPM_SCALE,
+    assert_integer_amount_dtype,
+)
 
 LOG = logging.getLogger("Bonus.LeadershipBonusGPUService")
 
@@ -49,19 +57,131 @@ class LeadershipBonusGPUService:
     # ==================================================================
     # 工具函数
     # ==================================================================
-    def _truncate_gpu(self, series: cudf.Series, decimals: int) -> cudf.Series:
-        """
-        实现 SQL TRUNCATE(val, decimals) 的严格截断，并尽量修复浮点乘法导致的
-        例如 10.01 * 100 -> 1000.9999999999999 这类“略微下沉”问题。
+    def _abs_int64_gpu(self, values, field_name: str):
+        """拒绝无法在 int64 中表示绝对值的最小负数。"""
+        if bool(cp.any(values == INT64_MIN)):
+            raise OverflowError(f"{field_name} 包含 INT64_MIN，无法执行安全绝对值运算")
+        return cp.abs(values)
 
-        关键策略：
-        - 不再固定加 1e-9，避免极端边界值被误抬升；
-        - 仅对非负数做 1 ULP 的 nextafter(+inf) 微调，然后再 cp.trunc。
-        """
-        factor = 10 ** decimals
-        scaled = series.values.astype("float64") * factor
-        nudged = cp.where(scaled >= 0, cp.nextafter(scaled, cp.inf), scaled)
-        return cudf.Series(cp.trunc(nudged) / factor, index=series.index)
+    def _checked_mul_nonnegative_gpu(self, left, right, field_name: str):
+        """在 GPU int64 乘法前检查非负操作数与上溢。"""
+        left_values = cp.asarray(left, dtype="int64")
+        right_values = cp.asarray(right, dtype="int64")
+        if bool(cp.any(left_values < 0)) or bool(cp.any(right_values < 0)):
+            raise ValueError(f"{field_name} 的受检乘法只接受非负操作数")
+        safe_right = cp.where(right_values > 0, right_values, 1)
+        if bool(cp.any(left_values > INT64_MAX // safe_right)):
+            raise OverflowError(f"{field_name} 超出 int64 范围")
+        return left_values * right_values
+
+    def _checked_add_nonnegative_gpu(self, left, right, field_name: str):
+        """在 GPU int64 加法前检查非负操作数与上溢。"""
+        left_values = cp.asarray(left, dtype="int64")
+        right_values = cp.asarray(right, dtype="int64")
+        if bool(cp.any(left_values < 0)) or bool(cp.any(right_values < 0)):
+            raise ValueError(f"{field_name} 的受检加法只接受非负操作数")
+        if bool(cp.any(left_values > INT64_MAX - right_values)):
+            raise OverflowError(f"{field_name} 超出 int64 范围")
+        return left_values + right_values
+
+    def _truncate_gpu(self, series: cudf.Series, decimals: int) -> cudf.Series:
+        """以 PV micro-units 实现 SQL ``TRUNCATE(value, decimals)``。"""
+        if decimals < 0 or decimals > 6:
+            raise ValueError("Leadership 截断位数必须在 0 到 6 之间")
+        unit_factor = PV_SCALE // (10 ** decimals)
+        values = series.values.astype("int64")
+        magnitude = self._abs_int64_gpu(values, "Leadership truncate input")
+        truncated = (magnitude // unit_factor) * unit_factor
+        signed = cp.where(values < 0, -truncated, truncated)
+        return cudf.Series(signed, index=series.index)
+
+    def _mul_units_by_ppm(self, units: cudf.Series, ppm: cudf.Series) -> cudf.Series:
+        """金额 micro-units × ppm，按 SQL TRUNCATE 保留至 micro-units。"""
+        unit_values = units.values.astype("int64")
+        ppm_values = ppm.values.astype("int64")
+        sign_negative = (unit_values < 0) ^ (ppm_values < 0)
+        unit_abs = self._abs_int64_gpu(unit_values, "Leadership PV units")
+        ppm_abs = self._abs_int64_gpu(ppm_values, "Leadership rate ppm")
+        whole_term = self._checked_mul_nonnegative_gpu(
+            unit_abs // RATE_PPM_SCALE,
+            ppm_abs,
+            "Leadership units × ppm whole term",
+        )
+        remainder_product = self._checked_mul_nonnegative_gpu(
+            unit_abs % RATE_PPM_SCALE,
+            ppm_abs,
+            "Leadership units × ppm remainder",
+        )
+        result = self._checked_add_nonnegative_gpu(
+            whole_term,
+            remainder_product // RATE_PPM_SCALE,
+            "Leadership units × ppm result",
+        )
+        return cudf.Series(cp.where(sign_negative, -result, result), index=units.index)
+
+    def _units_ppm_to_cents(self, units: cudf.Series, ppm: cudf.Series) -> cudf.Series:
+        """金额 micro-units × ppm 后，在单行奖金点严格截断为整数分。"""
+        unit_values = units.values.astype("int64")
+        ppm_values = ppm.values.astype("int64")
+        denominator = RATE_PPM_SCALE * (PV_SCALE // BONUS_CENT_SCALE)
+        sign_negative = (unit_values < 0) ^ (ppm_values < 0)
+        unit_abs = self._abs_int64_gpu(unit_values, "Leadership row PV units")
+        ppm_abs = self._abs_int64_gpu(ppm_values, "Leadership row rate ppm")
+        whole_term = self._checked_mul_nonnegative_gpu(
+            unit_abs // denominator,
+            ppm_abs,
+            "Leadership row bonus whole cents",
+        )
+        remainder_product = self._checked_mul_nonnegative_gpu(
+            unit_abs % denominator,
+            ppm_abs,
+            "Leadership row bonus remainder",
+        )
+        result = self._checked_add_nonnegative_gpu(
+            whole_term,
+            remainder_product // denominator,
+            "Leadership row bonus cents",
+        )
+        return cudf.Series(cp.where(sign_negative, -result, result), index=units.index)
+
+    def _divide_units_to_ppm(self, numerator_units: cudf.Series, denominator_units: cudf.Series) -> cudf.Series:
+        """以整数 ppm 表示奖金单价，并在 6 位比例精度点向零截断。"""
+        numerator = numerator_units.values.astype("int64")
+        denominator = denominator_units.values.astype("int64")
+        valid = denominator > 0
+        safe_denominator = cp.where(valid, denominator, 1)
+        numerator_abs = self._abs_int64_gpu(numerator, "Leadership rate numerator")
+        whole = numerator_abs // safe_denominator
+        remainder = numerator_abs % safe_denominator
+        whole_term = self._checked_mul_nonnegative_gpu(
+            whole,
+            RATE_PPM_SCALE,
+            "Leadership rate whole ppm",
+        )
+        remainder_product = self._checked_mul_nonnegative_gpu(
+            remainder,
+            RATE_PPM_SCALE,
+            "Leadership rate remainder",
+        )
+        magnitude = self._checked_add_nonnegative_gpu(
+            whole_term,
+            remainder_product // safe_denominator,
+            "Leadership rate ppm",
+        )
+        ppm = cp.where(valid, cp.where(numerator < 0, -magnitude, magnitude), 0)
+        return cudf.Series(ppm.astype("int64"), index=numerator_units.index)
+
+    def _cents_to_units_gpu(self, cents: cudf.Series) -> cudf.Series:
+        """将整数分安全放大为 PV micro-units，供比例计算复用。"""
+        cent_values = cents.values.astype("int64")
+        magnitude = self._abs_int64_gpu(cent_values, "Leadership bonus cents")
+        unit_magnitude = self._checked_mul_nonnegative_gpu(
+            magnitude,
+            PV_SCALE // BONUS_CENT_SCALE,
+            "Leadership bonus cents to units",
+        )
+        signed = cp.where(cent_values < 0, -unit_magnitude, unit_magnitude)
+        return cudf.Series(signed, index=cents.index)
 
     def _empty_frame(self, schema: Dict[str, object]) -> cudf.DataFrame:
         return cudf.DataFrame({col: cudf.Series(dtype=dtype) for col, dtype in schema.items()})
@@ -180,8 +300,8 @@ class LeadershipBonusGPUService:
         snap["parent_uid"] = snap["parent_uid"].fillna(0).astype("int64")
         snap["parent_se_id"] = snap["parent_se_id"].fillna(0).astype("int64")
         snap["grandpa_se_id"] = snap["grandpa_se_id"].fillna(0).astype("int64")
-        snap["gpv_real"] = snap["gpv_real"].fillna(0.0).astype("float64")
-        snap["gpv_unreal"] = snap["gpv_unreal"].fillna(0.0).astype("float64")
+        snap["gpv_real"] = snap["gpv_real"].fillna(0).astype("int64")
+        snap["gpv_unreal"] = snap["gpv_unreal"].fillna(0).astype("int64")
         snap["ori_honor_calc_id"] = snap["ori_honor_calc_id"].fillna(0).astype("int32")
         snap["bonus_honor_calc_id"] = snap["bonus_honor_calc_id"].fillna(0).astype("int32")
         snap["last_honor_calc_id"] = snap["last_honor_calc_id"].fillna(0).astype("int32")
@@ -290,6 +410,11 @@ class LeadershipBonusGPUService:
         self._require_columns(df_users, "df_users", {"user_id", "country_id", "is_active"})
         self._require_columns(df_perf_month, "df_perf_month", {"period_num", "country_id", "pv_pcs"})
         self._require_columns(df_honor_levels, "df_honor_levels", {"calc_id", "honor_lv"})
+        # region 固定精度输入校验
+        # PVAM V2 约定金额在进入 GPU 前已经是 PV micro-units；拒绝浮点回退。
+        assert_integer_amount_dtype(df_honor_snapshot, ["gpv_real", "gpv_unreal"], "Leadership honor snapshot")
+        assert_integer_amount_dtype(df_perf_month, ["pv_pcs"], "Leadership period performance")
+        # endregion
         config_snapshot = ensure_config_snapshot(
             df_config,
             period_num=iv_period_num,
@@ -322,7 +447,7 @@ class LeadershipBonusGPUService:
         df_rate_cfg["layer_calc_id"] = (
             df_rate_cfg["config_name"].str.replace("leadershipRate", "").astype("int32")
         )
-        df_rate_cfg["honor_rate"] = df_rate_cfg["honor_rate_ppm"].astype("float64") / 1_000_000.0
+
         # endregion
 
         # region 创建df_region_cfg -> 取出国家ID、默认大区ID和默认大区名称
@@ -358,7 +483,7 @@ class LeadershipBonusGPUService:
         df_u = df_base[mask_u][["user_id", "parent_se_id", "country_id", "gpv_unreal"]].rename(
             columns={"user_id": "source_user_id", "parent_se_id": "se_id"}
         )
-        df_u["gpv_real"] = 0.0
+        df_u["gpv_real"] = 0
         # endregion
 
         # region 创建df_r -> gpv_real>0且有上级节点 并且se_id=parent_uid==parent_se_id？grandpa_se_id:parent_se_id
@@ -371,7 +496,7 @@ class LeadershipBonusGPUService:
         df_r = df_r[["user_id", "se_id", "country_id", "gpv_real"]].rename(
             columns={"user_id": "source_user_id"}
         )
-        df_r["gpv_unreal"] = 0.0
+        df_r["gpv_unreal"] = 0
         # endregion
 
         # df_mid2_1 计算出每个se用户的lb_pv
@@ -381,9 +506,9 @@ class LeadershipBonusGPUService:
                 "source_user_id": df_users["user_id"].dtype,
                 "se_id": df_users["user_id"].dtype,
                 "country_id": df_users["country_id"].dtype,
-                "gpv_unreal": "float64",
-                "gpv_real": "float64",
-                "lb_pv": "float64",
+                "gpv_unreal": "int64",
+                "gpv_real": "int64",
+                "lb_pv": "int64",
             })
         else:
             df_mid2_1 = cudf.concat([df_u, df_r], ignore_index=True)
@@ -400,6 +525,7 @@ class LeadershipBonusGPUService:
         # region 创建df_active_links -> 创建lb_pv>0的用户关系list
         # region 创建df_global_pv -> 聚合se_id 对lb_pv汇总
         df_global_pv = df_mid2_1.groupby("se_id").agg({"lb_pv": "sum"}).reset_index()
+        assert_integer_amount_dtype(df_global_pv, ["lb_pv"], "Leadership first-layer grouped PV")
         # endregion
 
         # region 创建df_active_links（"lookup_user_id", "lookup_parent_se_id"） -> 根据active_ses取出活跃的se节点
@@ -492,7 +618,7 @@ class LeadershipBonusGPUService:
                 "bonus_user_id": df_users["user_id"].dtype,
                 "layer_calc_id": "int32",
                 "country_id": df_users["country_id"].dtype,
-                "seed_lb_pv": "float64",
+                "seed_lb_pv": "int64",
             })
         # endregion
 
@@ -502,6 +628,7 @@ class LeadershipBonusGPUService:
         ).agg({"seed_lb_pv": "sum"}).reset_index().rename(
             columns={"bonus_user_id": "user_id", "seed_lb_pv": "lb_pv"}
         )
+        assert_integer_amount_dtype(df_mid5_agg, ["lb_pv"], "Leadership recursive grouped PV")
         # endregion
         # endregion
 
@@ -540,6 +667,7 @@ class LeadershipBonusGPUService:
         # region 创建df_pool -> df_pv_1聚合calc_country_id、layer_calc_id，对lb_pv（total_lb_pv）求和
         df_pool = df_pv_1.groupby(["calc_country_id", "layer_calc_id"]).agg({"lb_pv": "sum"}).reset_index()
         df_pool = df_pool.rename(columns={"lb_pv": "total_lb_pv"})
+        assert_integer_amount_dtype(df_pool, ["total_lb_pv"], "Leadership pool grouped PV")
         # endregion
 
         # region 创建df_total_perf -> 算出当前区域的总业绩 total_pv
@@ -560,34 +688,31 @@ class LeadershipBonusGPUService:
         df_total_perf = df_perf_mapped.groupby("calc_country_id").agg({"pv_pcs": "sum"}).reset_index().rename(
             columns={"pv_pcs": "total_pv"}
         )
+        assert_integer_amount_dtype(df_total_perf, ["total_pv"], "Leadership country performance")
         # endregion
         # endregion
 
         # region 创建df_rate -> df_pool联查df_total_perf 获取total_pv
         df_rate = df_pool.merge(df_total_perf, on="calc_country_id", how="left")
-        df_rate["total_pv"] = df_rate["total_pv"].fillna(0.0)
+        df_rate["total_pv"] = df_rate["total_pv"].fillna(0).astype("int64")
+        assert_integer_amount_dtype(df_rate, ["total_lb_pv", "total_pv"], "Leadership rate merge")
         # endregion
 
         # region 更新df_rate -> df_rate联查df_rate_cfg 获取honor_rate
         print("展示df_rate_cfg")
         print(df_rate_cfg)
-        df_rate = df_rate.merge(df_rate_cfg[["layer_calc_id", "honor_rate"]], on="layer_calc_id", how="left")
-        df_rate["honor_rate"] = df_rate["honor_rate"].fillna(0.0)
+        df_rate = df_rate.merge(df_rate_cfg[["layer_calc_id", "honor_rate_ppm"]], on="layer_calc_id", how="left")
+        df_rate["honor_rate_ppm"] = df_rate["honor_rate_ppm"].fillna(0).astype("int64")
         # endregion
 
         # region 计算honor_bonus（此级别所在区域的总奖⾦）=total_pv*honor_rate
         # 此级别区域的总奖⾦=区域的⽉BV × 每层的比例
-        df_rate["honor_bonus"] = self._truncate_gpu(df_rate["honor_rate"] * df_rate["total_pv"], 6)
+        df_rate["honor_bonus"] = self._mul_units_by_ppm(df_rate["total_pv"], df_rate["honor_rate_ppm"])
         # endregion
 
         # region 计算lb_rate（此级别所在区域的⽐例）=honor_bonus/total_lb_pv
         # 此级别所在区域的⽐例 = 此级别区域的总奖⾦ ÷ 此级别所有符合者总lb_pv
-        safe_lb_rate = cp.where(
-            df_rate["total_lb_pv"].values > 0,
-            df_rate["honor_bonus"].values / df_rate["total_lb_pv"].values,
-            0.0,
-        )
-        df_rate["lb_rate"] = self._truncate_gpu(cudf.Series(safe_lb_rate, index=df_rate.index), 6)
+        df_rate["lb_rate_ppm"] = self._divide_units_to_ppm(df_rate["honor_bonus"], df_rate["total_lb_pv"])
         # endregion
 
         # --------------------------------------------------------------
@@ -598,7 +723,8 @@ class LeadershipBonusGPUService:
         # 计算row_bonus（此级别国家的个⼈奖⾦）= lb_pv*lb_rate
         # region 此级别区域的个⼈奖⾦ = 此区域的每个用户每个级别的lb_pv ×此级别国家的⽐例
         df_detail1 = df_pv_1.merge(df_rate, on=["calc_country_id", "layer_calc_id"], how="inner")
-        df_detail1["row_bonus"] = self._truncate_gpu(df_detail1["lb_pv"] * df_detail1["lb_rate"], 2)
+        assert_integer_amount_dtype(df_detail1, ["lb_pv", "honor_bonus", "lb_rate_ppm"], "Leadership detail merge")
+        df_detail1["row_bonus_cents"] = self._units_ppm_to_cents(df_detail1["lb_pv"], df_detail1["lb_rate_ppm"])
         # endregion
 
         # 创建df_detail_agg -> df_detail1聚合"user_id", "layer_calc_id", "calc_country_id"
@@ -607,17 +733,17 @@ class LeadershipBonusGPUService:
         df_detail_agg = df_detail1.groupby(["user_id", "layer_calc_id", "calc_country_id"]).agg(
             {
                 "lb_pv": "sum",
-                "row_bonus": "sum",
+                "row_bonus_cents": "sum",
                 "bonus_honor_lv": "first",
                 "bonus_honor_calc_id": "max",
                 "total_lb_pv": "max",
                 "total_pv": "max",
-                "honor_rate": "max",
+                "honor_rate_ppm": "max",
                 "honor_bonus": "max",
-                "lb_rate": "max",
+                "lb_rate_ppm": "max",
                 "layer_lv": "first",
             }
-        ).reset_index().rename(columns={"row_bonus": "bonus_lb"})
+        ).reset_index().rename(columns={"row_bonus_cents": "bonus_lb_cents"})
         # endregion
 
         # region 更新df_detail_agg -> 通过user_id，df_detail_agg联查df_users获取country_id（user_country）
@@ -653,7 +779,7 @@ class LeadershipBonusGPUService:
         df_detail_country_out = df_detail_agg[[
             "period_num", "calc_month", "user_id", "layer_lv", "layer_calc_id", "lb_pv",
             "bonus_honor_lv", "bonus_honor_calc_id", "total_lb_pv", "total_pv",
-            "honor_rate", "honor_bonus", "lb_rate", "bonus_lb", "bonus_country_id",
+            "honor_rate_ppm", "honor_bonus", "lb_rate_ppm", "bonus_lb_cents", "bonus_country_id",
         ]].rename(columns={"bonus_country_id": "country_id"})
         # endregion
 
@@ -663,22 +789,24 @@ class LeadershipBonusGPUService:
 
         # region 保留符合层级条件的层级奖金，降不符合条件的层级奖金赋值0
         is_payout_valid = (df_detail_agg["layer_calc_id"] <= df_detail_agg["bonus_honor_calc_id"]).fillna(False)
-        df_detail_agg["valid_bonus_lb"] = df_detail_agg["bonus_lb"].where(is_payout_valid, 0.0)
+        df_detail_agg["valid_bonus_lb_cents"] = df_detail_agg["bonus_lb_cents"].where(is_payout_valid, 0).astype("int64")
         # endregion
 
         # 创建df_bonus_country -> 对"user_id", "bonus_country_id"聚合
         # 对bonus_lb（理论获得的钱）、valid_bonus_lb（实际获得的钱）求和
         # region 得出理论上拿的奖金和实际到手的奖金
         df_bonus_country = df_detail_agg.groupby(["user_id", "bonus_country_id"]).agg(
-            {"bonus_lb": "sum", "valid_bonus_lb": "sum"}
+            {"bonus_lb_cents": "sum", "valid_bonus_lb_cents": "sum"}
         ).reset_index()
 
-        df_bonus_country["bonus_lb"] = self._truncate_gpu(df_bonus_country["bonus_lb"], 2)
-        df_bonus_country["valid_bonus_lb"] = self._truncate_gpu(df_bonus_country["valid_bonus_lb"], 2)
+        df_bonus_country["bonus_lb_cents"] = df_bonus_country["bonus_lb_cents"].astype("int64")
+        df_bonus_country["valid_bonus_lb_cents"] = df_bonus_country["valid_bonus_lb_cents"].astype("int64")
+        # SQL 的国家级 TRUNCATE(SUM(BONUS_LB), 2) 在整数分聚合后等价为保持分值不变。
+        assert_integer_amount_dtype(df_bonus_country, ["bonus_lb_cents", "valid_bonus_lb_cents"], "Leadership country bonus grouped")
         # endregion
 
         # region 筛选出有奖金的数据
-        df_bonus_country = df_bonus_country[df_bonus_country["valid_bonus_lb"] > 0].copy()
+        df_bonus_country = df_bonus_country[df_bonus_country["valid_bonus_lb_cents"] > 0].copy()
         # endregion
 
         # region 更新df_bonus_country -> 联查df_honor_last 展示last_honor_lv（历史最高）
@@ -708,8 +836,8 @@ class LeadershipBonusGPUService:
 
         df_bonus_country_out = df_bonus_country[[
             "id", "period_num", "calc_month", "user_id", "last_honor_lv", "last_honor_calc_id",
-            "bonus_lb", "valid_bonus_lb", "country_id", "bonus_country_id", "is_active",
-        ]].rename(columns={"bonus_lb": "ori_bonus_lb", "valid_bonus_lb": "bonus_lb"})
+            "bonus_lb_cents", "valid_bonus_lb_cents", "country_id", "bonus_country_id", "is_active",
+        ]].rename(columns={"bonus_lb_cents": "ori_bonus_lb_cents", "valid_bonus_lb_cents": "bonus_lb_cents"})
         # endregion
 
         # --------------------------------------------------------------
@@ -724,21 +852,20 @@ class LeadershipBonusGPUService:
                 "bonus_honor_calc_id": "max",
                 "total_lb_pv": "sum",
                 "total_pv": "sum",
-                "honor_rate": "max",
+                "honor_rate_ppm": "max",
                 "honor_bonus": "sum",
-                "bonus_lb": "sum",
+                "bonus_lb_cents": "sum",
                 "layer_lv": "first",
             }
         ).reset_index()
         # endregion
 
-        # region 创建df_global_detail中的lb_rate：bonus_lb（总奖金）/lb_pv（总业绩）
-        safe_global_lb_rate = cp.where(
-            df_global_detail["lb_pv"].values > 0,
-            df_global_detail["bonus_lb"].values / df_global_detail["lb_pv"].values,
-            0.0,
+        # region 创建df_global_detail中的lb_rate：bonus_lb_cents（总奖金分）/lb_pv（总业绩 micro-units）
+        # 先把整数分安全还原为 micro-units，再统一走 6 位 ppm 向零截断，避免漏乘比例尺度。
+        global_bonus_units = self._cents_to_units_gpu(df_global_detail["bonus_lb_cents"])
+        df_global_detail["lb_rate_ppm"] = self._divide_units_to_ppm(
+            global_bonus_units, df_global_detail["lb_pv"]
         )
-        df_global_detail["lb_rate"] = cudf.Series(safe_global_lb_rate, index=df_global_detail.index)
         # endregion
 
         # region 创建df_global_detail_out 统计出当期该用户在每一代贡献了多少钱 不区分区域
@@ -747,13 +874,13 @@ class LeadershipBonusGPUService:
         df_global_detail_out = df_global_detail[[
             "period_num", "calc_month", "user_id", "layer_lv", "layer_calc_id", "lb_pv",
             "bonus_honor_lv", "bonus_honor_calc_id", "total_lb_pv", "total_pv",
-            "honor_rate", "honor_bonus", "lb_rate", "bonus_lb",
+            "honor_rate_ppm", "honor_bonus", "lb_rate_ppm", "bonus_lb_cents",
         ]]
         # endregion
 
         # region 创建df_global_summary
         df_global_summary = df_bonus_country_out.groupby("user_id").agg(
-            {"ori_bonus_lb": "sum", "bonus_lb": "sum"}
+            {"ori_bonus_lb_cents": "sum", "bonus_lb_cents": "sum"}
         ).reset_index()
         df_global_summary = df_global_summary.merge(
             df_honor_last[["user_id", "last_honor_lv", "last_honor_calc_id"]],
@@ -777,7 +904,7 @@ class LeadershipBonusGPUService:
         # region 创建df_bonus_country_out 统计出当期该用户的全球业绩
         df_global_summary_out = df_global_summary[[
             "id", "period_num", "calc_month", "user_id", "last_honor_lv", "last_honor_calc_id",
-            "ori_bonus_lb", "bonus_lb", "country_id", "is_active",
+            "ori_bonus_lb_cents", "bonus_lb_cents", "country_id", "is_active",
         ]]
         # endregion
 
@@ -796,8 +923,8 @@ class LeadershipBonusGPUService:
                 "source_user_name": df_users["user_name"].dtype if "user_name" in df_users.columns else "object",
                 "source_real_name": df_users["real_name"].dtype if "real_name" in df_users.columns else "object",
                 "bonus_layer": "int32",
-                "source_gpv_real": "float64",
-                "source_gpv_unreal": "float64",
+                "source_gpv_real": "int64",
+                "source_gpv_unreal": "int64",
                 "is_active": df_users["is_active"].dtype if "is_active" in df_users.columns else "int32",
                 "source_country_id": df_users["country_id"].dtype,
                 "bonus_country_id": df_users["country_id"].dtype,
@@ -1002,14 +1129,14 @@ def main():
         "parent_se_id": [0, 1001, 1002, 1003, 1004, 1005],
         "grandpa_se_id": [0, 0, 1001, 1002, 1003, 1004],
         # --- 业绩拆分 ---
-        "gpv_real": [1000.0, 1000.0, 1500.0, 1000.0, 1200.0, 0.0],
-        "gpv_unreal": [1500.0, 2000.0, 0.0, 1000.0, 0.0, 0.0],
+        "gpv_real": [1000, 1000, 1500, 1000, 1200, 0],
+        "gpv_unreal": [1500, 2000, 0, 1000, 0, 0],
         # --- 奖衔等级 ---
         "ori_honor_calc_id": [40, 30, 20, 10, 10, 0],
         "bonus_honor_calc_id": [40, 30, 20, 10, 10, 0],
         "last_honor_calc_id": [40, 30, 20, 10, 10, 0],
         # --- 以下为 df_f 中的其他列（Leadership 不直接使用，但带着没关系）---
-        "lb_pv": [3500.0, 1000.0, 2200.0, 0.0, 0.0, 0.0],
+        "lb_pv": [3500, 1000, 2200, 0, 0, 0],
         "legs_max_calc_id": [40, 30, 20, 10, 10, 0],
         "honor90_legs": [0, 0, 0, 0, 0, 0],
         "honor80_legs": [0, 0, 0, 0, 0, 0],
@@ -1034,7 +1161,7 @@ def main():
     df_perf_month = cudf.DataFrame({
         "period_num": [12, 12, 12],
         "country_id": ["MY", "SG", "BN"],
-        "pv_pcs": [300000.0, 150000.0, 50000.0],
+        "pv_pcs": [300000, 150000, 50000],
     })
 
     # ══════════════════════════════════════════════════════════════

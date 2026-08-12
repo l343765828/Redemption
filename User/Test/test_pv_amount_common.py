@@ -39,9 +39,10 @@ from Common.PvAmount import (
 
 
 class _DType:
-    def __init__(self, name, kind):
+    def __init__(self, name, kind, itemsize):
         self.name = name
         self.kind = kind
+        self.itemsize = itemsize
 
     def __str__(self):
         return self.name
@@ -293,15 +294,17 @@ class PvAmountCommonTests(unittest.TestCase):
 
         self.assertEqual(7, require_units_int(numpy.int64(7)))
 
-    def test_assert_integer_amount_dtype_accepts_signed_and_unsigned_integer(self):
-        frame = _Frame(
-            {"pv": _DType("int64", "i"), "gpv": _DType("uint64", "u")}
-        )
-        assert_integer_amount_dtype(frame, ["pv", "gpv"], "amounts")
+    def test_assert_integer_amount_dtype_accepts_signed_and_rejects_unsigned(self):
+        signed_frame = _Frame({"pv": _DType("int64", "i", 8)})
+        assert_integer_amount_dtype(signed_frame, ["pv"], "amounts")
+
+        unsigned_frame = _Frame({"gpv": _DType("uint64", "u", 8)})
+        with self.assertRaisesRegex(TypeError, "signed int64 dtype"):
+            assert_integer_amount_dtype(unsigned_frame, ["gpv"], "amounts")
 
     def test_assert_integer_amount_dtype_rejects_float_and_missing_columns(self):
-        frame = _Frame({"pv": _DType("float64", "f")})
-        with self.assertRaisesRegex(TypeError, "integer dtype"):
+        frame = _Frame({"pv": _DType("float64", "f", 8)})
+        with self.assertRaisesRegex(TypeError, "signed int64 dtype"):
             assert_integer_amount_dtype(frame, ["pv"], "amounts")
         with self.assertRaisesRegex(KeyError, "amounts.gpv is missing"):
             assert_integer_amount_dtype(frame, ["gpv"], "amounts")

@@ -1,10 +1,11 @@
 import logging
 import sys
-import math
+
 import cudf
 import dask_cudf
 import pandas as pd
 import numpy as np
+from Common.BonusConfig import ConfigSnapshot
 from unittest.mock import patch
 from dask_cuda import LocalCUDACluster
 from dask.distributed import Client
@@ -32,6 +33,17 @@ def _dummy_graph_inputs():
     return dummy_users, dummy_stats
 
 
+def _pe_config_snapshot(period_num: int, calc_month: int) -> ConfigSnapshot:
+    """为 GPU UAT 固定显式费率输入，避免测试入口绕过 WORK-03 快照合同。"""
+    return ConfigSnapshot.from_rows(
+        [{"config_name": "proEliteRate", "type": "bonus", "value": "15"}],
+        period_num=period_num,
+        calc_month=calc_month,
+        source="pe-gpu-uat-fixture",
+        source_version="WORK-PVAM-02",
+    )
+
+
 def _get_test_data():
     """构造契约要求的上游数据源（覆盖用例 1-4、5a/5b）。"""
     period_num = 202606
@@ -39,22 +51,22 @@ def _get_test_data():
 
     # 1. 模拟网体紧缩产出 (AR_CALC_LV_ELITE)
     pdf_elite = pd.DataFrame([
-        # 用例1 & 4：截断差异 (1500.99 * 0.15 = 225.1485 -> 截断 225.14)
-        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 100, 'PARENT_UID': 0, 'GPV_REAL': 0.0,
-         'GPV_UNREAL': 500.55, 'LAST_ELITE_CALC_ID': 20},
-        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 101, 'PARENT_UID': 100, 'GPV_REAL': 1000.44,
-         'GPV_UNREAL': 0.0, 'LAST_ELITE_CALC_ID': 10},
+        # 用例1 & 4：1,500.99 PV 按 micro-units 进入，最终 22,514 cents。
+        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 100, 'PARENT_UID': 0, 'GPV_REAL': 0,
+         'GPV_UNREAL': 500_550_000, 'LAST_ELITE_CALC_ID': 20},
+        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 101, 'PARENT_UID': 100, 'GPV_REAL': 1_000_440_000,
+         'GPV_UNREAL': 0, 'LAST_ELITE_CALC_ID': 10},
         # 用例2：级别过滤 (Elite 未达 PE 门槛)
-        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 200, 'PARENT_UID': 0, 'GPV_REAL': 2000.0,
-         'GPV_UNREAL': 0.0, 'LAST_ELITE_CALC_ID': 10},
+        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 200, 'PARENT_UID': 0, 'GPV_REAL': 2_000_000_000,
+         'GPV_UNREAL': 0, 'LAST_ELITE_CALC_ID': 10},
         # 用例3：不活跃(300) 与 cudf-null 空值兜底(400: GPV_UNREAL=None)
-        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 300, 'PARENT_UID': 0, 'GPV_REAL': 0.0,
-         'GPV_UNREAL': 1000.0, 'LAST_ELITE_CALC_ID': 30},
-        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 400, 'PARENT_UID': 0, 'GPV_REAL': 0.0,
+        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 300, 'PARENT_UID': 0, 'GPV_REAL': 0,
+         'GPV_UNREAL': 1_000_000_000, 'LAST_ELITE_CALC_ID': 30},
+        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 400, 'PARENT_UID': 0, 'GPV_REAL': 0,
          'GPV_UNREAL': None, 'LAST_ELITE_CALC_ID': 20},
         # 挂载 401：迫使 400 进入 Source 拆分(detail_a)，使 400 的 Source fail-closed 断言非空真
-        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 401, 'PARENT_UID': 400, 'GPV_REAL': 1000.0,
-         'GPV_UNREAL': 0.0, 'LAST_ELITE_CALC_ID': 10},
+        {'PERIOD_NUM': period_num, 'CALC_MONTH': calc_month, 'USER_ID': 401, 'PARENT_UID': 400, 'GPV_REAL': 1_000_000_000,
+         'GPV_UNREAL': 0, 'LAST_ELITE_CALC_ID': 10},
     ])
 
     # 2. 模拟活跃状态 (AR_USER_PERF)
@@ -120,8 +132,8 @@ def test_execute_batch_pe_rules(service: PEBonusService, test_data: dict):
         # ========== 验证 2：截断逻辑 & 国别整型映射 ==========
         user_100_main = df_main[df_main['USER_ID'] == 100].iloc[0]
         assert user_100_main['COUNTRY_ID'] == 1, "COUNTRY_ID 维表映射/整型转换失败"
-        assert math.isclose(user_100_main['TOTAL_BASE_GPV'], 1500.99, abs_tol=1e-5), "基数累加错误"
-        assert math.isclose(user_100_main['BONUS_PE'], 225.14, abs_tol=1e-5), "截断错误：应为 225.14，不可四舍五入为 225.15"
+        assert int(user_100_main['TOTAL_BASE_GPV']) == 1_500_990_000, "基数累加错误"
+        assert int(user_100_main['BONUS_PE_CENTS']) == 22_514, "截断错误：应为 22,514 cents，不可四舍五入为 22,515 cents"
 
         # ========== 验证 3：活跃 fail-closed、周期过滤、cudf-null 兜底 ==========
         assert user_100_main['IS_ACTIVE'] == 1, "活跃状态映射错误"
@@ -129,15 +141,15 @@ def test_execute_batch_pe_rules(service: PEBonusService, test_data: dict):
         # 300：不活跃但仍计算金额 —— 证明"只打标、不拦截"
         user_300_main = df_main[df_main['USER_ID'] == 300].iloc[0]
         assert user_300_main['IS_ACTIVE'] == 0, "活跃状态未同步"
-        assert math.isclose(user_300_main['TOTAL_BASE_GPV'], 1000.0, abs_tol=1e-5)
-        assert math.isclose(user_300_main['BONUS_PE'], 150.0, abs_tol=1e-5)
+        assert int(user_300_main['TOTAL_BASE_GPV']) == 1_000_000_000
+        assert int(user_300_main['BONUS_PE_CENTS']) == 15_000
 
         # 400：仅有上期 perf → 周期过滤拦截 + fail-closed=0；GPV_UNREAL=null 不致 NaN
         user_400_main = df_main[df_main['USER_ID'] == 400].iloc[0]
         assert user_400_main['IS_ACTIVE'] == 0, "周期过滤失效：跨期活跃记录被错误继承"
-        assert not np.isnan(user_400_main['TOTAL_BASE_GPV']), "空值兜底失败：cudf-null 导致基数为 NaN"
-        assert math.isclose(user_400_main['TOTAL_BASE_GPV'], 1000.0, abs_tol=1e-5)  # 下级 401 的 1000 + 本人 null→0
-        assert math.isclose(user_400_main['BONUS_PE'], 150.0, abs_tol=1e-5)
+        assert not pd.isna(user_400_main['TOTAL_BASE_GPV']), "空值兜底失败：cudf-null 导致基数为 NaN"
+        assert int(user_400_main['TOTAL_BASE_GPV']) == 1_000_000_000  # 下级 401 的 1,000 PV micro-units + 本人 null→0
+        assert int(user_400_main['BONUS_PE_CENTS']) == 15_000
 
         # Source 表 fail-closed —— 先断非空，杜绝 .all() 在空集上的"空真"
         s100 = df_source[df_source['BONUS_USER_ID'] == 100]
@@ -152,18 +164,18 @@ def test_execute_batch_pe_rules(service: PEBonusService, test_data: dict):
         assert len(s400) > 0, "测试数据错误：400 必须至少有一条 Source"
         assert (s400['IS_ACTIVE'] == 0).all(), "Source 周期过滤 fail-closed 失败：400 应为 0"
 
-        # 费率固定为 0.15
-        assert all(math.isclose(x, 0.15, abs_tol=1e-5) for x in df_main['PE_RATE']), "主表 PE_RATE 不为 0.15"
-        assert all(math.isclose(x, 0.15, abs_tol=1e-5) for x in df_source['PE_RATE']), "Source表 PE_RATE 不为 0.15"
+        # 费率固定为 150,000 ppm。
+        assert (df_main['PE_RATE_PPM'] == 150_000).all(), "主表 PE_RATE_PPM 不为 150,000"
+        assert (df_source['PE_RATE_PPM'] == 150_000).all(), "Source 表 PE_RATE_PPM 不为 150,000"
 
         # ========== 验证 4：Source 拆分 ==========
         assert len(s100) == 2, "Source 拆分异常：下级 GPV_REAL 与本人 GPV_UNREAL 必须分拆为两行"
         src_real = s100[s100['SOURCE_USER_ID'] == 101].iloc[0]
-        assert math.isclose(src_real['SOURCE_GPV'], 1000.44, abs_tol=1e-5)
-        assert math.isclose(src_real['SOURCE_GPV_UNREAL'], 0.0, abs_tol=1e-5)
+        assert int(src_real['SOURCE_GPV']) == 1_000_440_000
+        assert int(src_real['SOURCE_GPV_UNREAL']) == 0
         src_unreal = s100[s100['SOURCE_USER_ID'] == 100].iloc[0]
-        assert math.isclose(src_unreal['SOURCE_GPV'], 0.0, abs_tol=1e-5)
-        assert math.isclose(src_unreal['SOURCE_GPV_UNREAL'], 500.55, abs_tol=1e-5)
+        assert int(src_unreal['SOURCE_GPV']) == 0
+        assert int(src_unreal['SOURCE_GPV_UNREAL']) == 500_550_000
 
 
 def test_execute_batch_perf_same_key_conflict_raise(service: PEBonusService, test_data: dict):
@@ -198,7 +210,7 @@ def test_execute_batch_elite_same_key_conflict_raise(service: PEBonusService, te
     base = test_data['ddf_elite_mock'].compute()
     conflict = cudf.DataFrame([{
         'PERIOD_NUM': 202606, 'CALC_MONTH': 6, 'USER_ID': 100, 'PARENT_UID': 0,
-        'GPV_REAL': 999.0, 'GPV_UNREAL': 999.0, 'LAST_ELITE_CALC_ID': 20,
+        'GPV_REAL': 999_000_000, 'GPV_UNREAL': 999_000_000, 'LAST_ELITE_CALC_ID': 20,
     }])
     bad_elite = dask_cudf.from_cudf(cudf.concat([base, conflict], ignore_index=True), npartitions=1)
 
@@ -224,7 +236,7 @@ def test_execute_batch_null_is_active_fail_closed(service: PEBonusService, test_
 
     pdf_elite = pd.DataFrame([
         {'PERIOD_NUM': 202606, 'CALC_MONTH': 6, 'USER_ID': 500, 'PARENT_UID': 0,
-         'GPV_REAL': 0.0, 'GPV_UNREAL': 200.0, 'LAST_ELITE_CALC_ID': 20},
+         'GPV_REAL': 0, 'GPV_UNREAL': 200_000_000, 'LAST_ELITE_CALC_ID': 20},
     ])
     # 用 np.nan 保证 IS_ACTIVE 列为 float64；nan_as_null=True 再转成真实 cudf-null
     pdf_perf = pd.DataFrame({
@@ -252,7 +264,7 @@ def test_execute_batch_null_is_active_fail_closed(service: PEBonusService, test_
 
     row = df_main[df_main['USER_ID'] == 500].iloc[0]
     assert row['IS_ACTIVE'] == 0, "IS_ACTIVE=NULL 未 fail-closed 为 0"
-    assert math.isclose(row['BONUS_PE'], 30.0, abs_tol=1e-5), "金额应照算：200 * 0.15 = 30.00"
+    assert int(row['BONUS_PE_CENTS']) == 3_000, "金额应照算：200 PV × 150,000 ppm = 3,000 cents"
 
     s500 = df_source[df_source['BONUS_USER_ID'] == 500]
     assert len(s500) > 0
@@ -260,13 +272,12 @@ def test_execute_batch_null_is_active_fail_closed(service: PEBonusService, test_
 
 
 def test_sql_truncate_does_not_preround_base(service: PEBonusService, test_data: dict):
-    """用例 7（反例 / xfail）：基数为 3 位小数时，SQL 语义 = TRUNCATE(1500.999*0.15,2)=225.14，
-    当前实现因预舍入得 225.15。本用例显式拦截此错误，属当前契约外场景。"""
+    """用例 7：1,500.999 PV 精确进入 micro-units 后，只在最终奖金分边界截断。"""
     dummy_users, dummy_stats = _dummy_graph_inputs()
 
     pdf_elite = pd.DataFrame([
         {'PERIOD_NUM': 202606, 'CALC_MONTH': 6, 'USER_ID': 600, 'PARENT_UID': 0,
-         'GPV_REAL': 0.0, 'GPV_UNREAL': 1500.999, 'LAST_ELITE_CALC_ID': 20},
+         'GPV_REAL': 0, 'GPV_UNREAL': 1_500_999_000, 'LAST_ELITE_CALC_ID': 20},
     ])
     pdf_perf = pd.DataFrame([{'PERIOD_NUM': 202606, 'USER_ID': 600, 'IS_ACTIVE': 1}])
     pdf_user = pd.DataFrame({'id': [600], 'country_id': [1], 'user_name': ['U600'], 'real_name': ['RN600']})
@@ -285,14 +296,8 @@ def test_sql_truncate_does_not_preround_base(service: PEBonusService, test_data:
     df_main = results['AR_CALC_BONUS_PE'].compute().to_pandas()
     row = df_main[df_main['USER_ID'] == 600].iloc[0]
 
-    # 我们预期它无法精准得出 225.14（因为当前实现的已知限制）。
-    # 主动捕获这个断言错误，来替代 pytest.mark.xfail。
-    try:
-        assert math.isclose(row['BONUS_PE'], 225.14, abs_tol=1e-5), f"实际值为: {row['BONUS_PE']}"
-        raise RuntimeError("此限制被修复了？期待失败的测试居然通过了！(如果修复了，请删掉外层 try...except)")
-    except AssertionError as e:
-        logger.info(f"  [XFAIL] 已知实现限制触发，拦截预期失败: {e}")
-        pass  # 测试按预期失败，允许通过
+    assert int(row['TOTAL_BASE_GPV']) == 1_500_999_000
+    assert int(row['BONUS_PE_CENTS']) == 22_514
 
 
 # =====================================================================
@@ -308,14 +313,17 @@ def main():
     try:
         # 生成基于 Dask 的通用测试数据
         test_data = _get_test_data()
-        service = PEBonusService()
+        config_snapshot = _pe_config_snapshot(
+            test_data['period_num'], test_data['calc_month']
+        )
+        service = PEBonusService(config_snapshot)
 
         tests = [
             ("Case 1-4: PE 规则主路径验证", test_execute_batch_pe_rules),
             ("Case 5a: AR_USER_PERF 同键冲突熔断测试", test_execute_batch_perf_same_key_conflict_raise),
             ("Case 5b: AR_CALC_LV_ELITE 同键冲突熔断测试", test_execute_batch_elite_same_key_conflict_raise),
             ("Case 6: IS_ACTIVE=NULL fail-closed 降级测试", test_execute_batch_null_is_active_fail_closed),
-            ("Case 7: SQL 截断预舍入差异测试 (预期失败场景)", test_sql_truncate_does_not_preround_base),
+            ("Case 7: SQL 最终截断边界测试", test_sql_truncate_does_not_preround_base),
         ]
 
         failed: list[tuple[str, str]] = []

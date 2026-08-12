@@ -11,7 +11,9 @@ from redis_om import NotFoundError
 
 import Model.User.UserLevel as UserLevel
 from Model.User.UserStats import UserStats
-from Common.AmountModelAdapter import build_factory_amount_fields
+from Common.AmountModelAdapter import build_factory_amount_fields, require_v2_amount_record
+from Common.PeriodResolver import PeriodSnapshot
+from Common.PvAmount import checked_add_int64
 from Redishelper.PVAmountConfigProvider import (
     PVAmountConfigProvider,
     PVAmountRunConfig,
@@ -76,37 +78,27 @@ class GlobalRecalculationService(UserStatsService):
         return f"system:global_recalc_status:{period}"
 
     @staticmethod
-    def _get_previous_period(period) -> str:
-        """
-        推导上一期期数。
-        实际 period 为 MySQL 自增整数，且连续不断：
-        1 -> 无上一期，返回空字符串
-        2 -> "1"
-        5 -> "4"
-        """
-        try:
-            period_int = int(period)
-        except (ValueError, TypeError):
-            # 拒绝静默失败：非法期数直接抛出异常，防止错误地把历史高水位记录覆盖归零
-            raise ValueError(f"非法 period={period!r}，期数必须是连续自增整数")
-
-        if period_int < 1:
-            raise ValueError(f"非法 period={period!r}，期数必须 >= 1")
-
-        if period_int == 1:
-            return ""
-
-        return str(period_int - 1)
+    def _get_previous_period(period: str, period_snapshot: PeriodSnapshot) -> str:
+        """从 AR_PERIOD 快照读取真实上一期，不执行本地 period 算术。"""
+        if not isinstance(period_snapshot, PeriodSnapshot):
+            raise TypeError("period_snapshot must be PeriodSnapshot")
+        if str(period_snapshot.period_num) != str(period):
+            raise ValueError("period_snapshot 与入口 period 不一致")
+        return (
+            ""
+            if period_snapshot.previous_period_num is None
+            else str(period_snapshot.previous_period_num)
+        )
 
     @staticmethod
     def _calc_gpv_real_unreal(gpv: int) -> Tuple[int, int]:
         """
         按 Elite/PE/SE 晋级口径拆分真实业绩与虚拟业绩。
 
-        - GPV < 2000：不启动虚拟宽度，真实业绩等于当前 GPV，虚拟业绩为 0。
-        - GPV >= 2000：真实业绩封顶 1000，超出 1000 的部分进入 gpv_unreal。
+        - GPV < 2000 PV：不启动虚拟宽度，真实业绩等于当前 micro-units，虚拟业绩为 0。
+        - GPV >= 2000 PV：真实业绩封顶 1000 PV，超出的 micro-units 进入 gpv_unreal。
 
-        注意：virtual_width 是“虚拟宽度数量”，gpv_unreal 是“虚拟业绩数值/BV”。
+        注意：virtual_width 是“虚拟宽度数量”，gpv_unreal 是“虚拟业绩 micro-units”。
         """
         gpv = int(gpv or 0)
         if gpv < 0:
@@ -124,6 +116,7 @@ class GlobalRecalculationService(UserStatsService):
             self,
             period,
             *,
+            period_snapshot: PeriodSnapshot,
             write_zero_nodes: bool = True,
     ) -> None:
         """
@@ -147,6 +140,10 @@ class GlobalRecalculationService(UserStatsService):
         """
         # 强制转换为字符串，确保下游 Redis 键名与 payload 口径 100% 统一
         period = str(period)
+        if not isinstance(period_snapshot, PeriodSnapshot):
+            raise TypeError("settle_period 必须注入 PeriodSnapshot")
+        if str(period_snapshot.period_num) != period:
+            raise ValueError("period_snapshot 与 settle_period period 不一致")
 
         # region 加载并冻结本次业务运行配置
         redis_conn = UserStats.db()
@@ -265,6 +262,7 @@ class GlobalRecalculationService(UserStatsService):
                         redis_conn=redis_conn,
                         write_zero_nodes=write_zero_nodes,
                         run_config=run_config,
+                        period_snapshot=period_snapshot,
                         lock=lock
                     )
                     # endregion
@@ -352,6 +350,7 @@ class GlobalRecalculationService(UserStatsService):
             redis_conn,
             write_zero_nodes: bool,
             run_config: PVAmountRunConfig,
+            period_snapshot: PeriodSnapshot,
             lock
     ) -> None:
         """
@@ -425,7 +424,10 @@ class GlobalRecalculationService(UserStatsService):
                     c_node, _ = child_lookup[cid]
 
                     # region 计算父节点的gpv
-                    p_node.gpv = (p_node.gpv or 0) + (c_node.contrib or 0)
+                    p_node.gpv = checked_add_int64(
+                        p_node.gpv or 0,
+                        c_node.contrib or 0,
+                    )
                     # endregion
 
                     # region 判断直属下级这条线是否合格，这条线合格的条件是：
@@ -451,7 +453,7 @@ class GlobalRecalculationService(UserStatsService):
 
             # 构建历史最高荣誉表记录（高水位 max），并按"晋衔口径"决定是否产出荣誉事件。
             honor_record, honor_event = self._build_highest_rank_record(
-                period, p_node.id, p_node.rank, run_id
+                period, p_node.id, p_node.rank, run_id, period_snapshot
             )
             honor_records.append(honor_record)
             # 荣誉变更与 UserStats 是否漂移彼此独立，故 honor_event 不受 should_persist 约束：
@@ -559,13 +561,18 @@ class GlobalRecalculationService(UserStatsService):
         )
 
     def _build_highest_rank_record(
-            self, period: str, user_id: str, current_rank: int, run_id: str
+            self,
+            period: str,
+            user_id: str,
+            current_rank: int,
+            run_id: str,
+            period_snapshot: PeriodSnapshot,
     ) -> Tuple[UserPeriodHighestRank, Optional[Dict[str, Any]]]:
         """
         构建权威荣誉表记录（高水位维护），并按"晋衔口径"决定是否产出荣誉事件。
         """
         # region 获取上期最高
-        prev_period = self._get_previous_period(period)
+        prev_period = self._get_previous_period(period, period_snapshot)
 
         # 上期最高（跨期继承）
         prev_highest = 0
@@ -658,6 +665,7 @@ class GlobalRecalculationService(UserStatsService):
                 record_pk = f"{period}:{uid}"
                 try:
                     node = UserStats.get(record_pk)
+                    require_v2_amount_record(node)
                     self._normalize_qualified_legs(node)
                     fallback_out[uid] = (node, True)
                 except NotFoundError:
@@ -710,6 +718,7 @@ class GlobalRecalculationService(UserStatsService):
 
             try:
                 model_data = raw_data
+                require_v2_amount_record(model_data)
 
                 # region 补齐pk值
                 # Redis OM 某些版本/配置下，JSON 里可能不包含 pk。
@@ -991,7 +1000,18 @@ def main():
     try:
         svc = GlobalRecalculationService()
         print(f"启动 GlobalRecalculationService 单期结算 (period={test_period})...")
-        svc.settle_period(period=test_period, write_zero_nodes=True)
+        svc.settle_period(
+            period=test_period,
+            period_snapshot=PeriodSnapshot(
+                period_num=5,
+                calc_year=2026,
+                calc_month=5,
+                first_period_num=4,
+                previous_period_num=4,
+                source_checksum="manual-global-recalculation-test-fixture",
+            ),
+            write_zero_nodes=True,
+        )
 
         print("\n=== 重算结果验证 ===")
         for uid in ["1", "2", "3", "9", "10", "13"]:

@@ -51,6 +51,7 @@ from dask.distributed import Client
 from redis_om import NotFoundError
 
 from Model.User.UserStats import UserStats
+from Common.PeriodResolver import PeriodSnapshot
 from User.PlacementRecalculationService import PlacementRecalculationService
 from Model.Config import SCHEDULE_ADDRESS
 
@@ -200,9 +201,25 @@ def _inject_prev_surplus_raw_float(prev_period: str, user_id: str, remain_1l: fl
 
 
 def _run(period: str, *, write_zero_nodes: bool = True) -> None:
-    # 替换为测试子类
+    # 使用显式 AR_PERIOD fixture，禁止测试调用方继续依赖本地 period 算术。
+    snapshots = {
+        PREV_PERIOD: PeriodSnapshot(
+            period_num=999904, calc_year=9999, calc_month=4,
+            first_period_num=999904, previous_period_num=None,
+            source_checksum="placement-recalc-test-999904",
+        ),
+        TEST_PERIOD: PeriodSnapshot(
+            period_num=999905, calc_year=9999, calc_month=5,
+            first_period_num=999904, previous_period_num=999904,
+            source_checksum="placement-recalc-test-999905",
+        ),
+    }
     svc = PlacementRecalculationServiceForTest()
-    svc.settle_placement_period(period=period, write_zero_nodes=write_zero_nodes)
+    svc.settle_placement_period(
+        period=period,
+        period_snapshot=snapshots[period],
+        write_zero_nodes=write_zero_nodes,
+    )
 
     # 【校验增强】无论哪种用例，只要跑完成功路径，锁都必须被安全释放
     assert not UserStats.db().exists(

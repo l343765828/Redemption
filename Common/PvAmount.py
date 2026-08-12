@@ -392,9 +392,9 @@ def units_ppm_to_bonus_cents(
     ppm: int,
     rounding_mode: str,
 ) -> int:
-    """按指定舍入模式将金额和 ppm 费率一次换算为奖金分。"""
+    """按指定舍入模式将金额和 signed ppm 费率一次换算为奖金分，不添加业务上限。"""
     normalized_units = require_units_int(units)
-    normalized_ppm = _require_rate_ppm(ppm)
+    normalized_ppm = require_int64(ppm, field_name="rate_ppm")
     if rounding_mode not in {
         _ROUNDING_MODE_TRUNCATE,
         _ROUNDING_MODE_HALF_UP,
@@ -428,14 +428,14 @@ def units_ppm_to_bonus_cents(
 # =====================================================================
 # region 逐列检查存在性与整数 dtype
 def assert_integer_amount_dtype(df, columns, df_name: str) -> None:
-    """进入 numpy/cuDF int64 边界前，拒绝浮点或缺失金额列。"""
+    """进入 numpy/cuDF int64 边界前，拒绝浮点、unsigned 或缺失金额列。"""
     for column in columns:
         if column not in df.columns:
             raise KeyError(f"{df_name}.{column} is missing")
 
         dtype = df[column].dtype
-        if getattr(dtype, "kind", None) not in {"i", "u"}:
+        if getattr(dtype, "kind", None) != "i" or getattr(dtype, "itemsize", None) != 8:
             raise TypeError(
-                f"{df_name}.{column} must use an integer dtype, got {dtype}"
+                f"{df_name}.{column} must use a signed int64 dtype, got {dtype}"
             )
 # endregion

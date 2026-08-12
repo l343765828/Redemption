@@ -7,6 +7,12 @@ from typing import Dict, List, Optional
 from dask.distributed import get_client, wait as dask_wait, futures_of
 
 from Common.BonusConfig import ConfigSnapshot
+from Common.PvAmount import (
+    BONUS_CENT_SCALE,
+    PV_SCALE,
+    RATE_PPM_SCALE,
+    assert_integer_amount_dtype,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
 logger = logging.getLogger("Bonus.PEBonusBatchServiceGPU")
@@ -20,11 +26,11 @@ REQUIRED_PERF_COLS = ['PERIOD_NUM', 'USER_ID', 'IS_ACTIVE']
 REQUIRED_USER_COLS = ['id', 'country_id', 'user_name', 'real_name']
 REQUIRED_STATS_COLS = ['rank', 'is_elite', 'gpv_real', 'gpv_unreal']
 
-MAIN_COLUMNS = ['ID', 'PERIOD_NUM', 'CALC_MONTH', 'USER_ID', 'TOTAL_BASE_GPV', 'PE_RATE', 'BONUS_PE', 'COUNTRY_ID',
+MAIN_COLUMNS = ['ID', 'PERIOD_NUM', 'CALC_MONTH', 'USER_ID', 'TOTAL_BASE_GPV', 'PE_RATE_PPM', 'BONUS_PE_CENTS', 'COUNTRY_ID',
                 'IS_ACTIVE']
 SOURCE_COLUMNS = ['PERIOD_NUM', 'CALC_MONTH', 'BONUS_USER_ID', 'BONUS_USER_NAME', 'BONUS_REAL_NAME',
                   'SOURCE_USER_ID', 'SOURCE_USER_NAME', 'SOURCE_REAL_NAME',
-                  'SOURCE_GPV', 'SOURCE_GPV_UNREAL', 'PE_RATE', 'IS_ACTIVE']
+                  'SOURCE_GPV', 'SOURCE_GPV_UNREAL', 'PE_RATE_PPM', 'IS_ACTIVE']
 
 
 class PEBonusService:
@@ -45,15 +51,37 @@ class PEBonusService:
     @staticmethod
     def _apply_truncate(df: cudf.DataFrame) -> cudf.DataFrame:
         import cupy as cp
-        base_cents = cp.round(df['TOTAL_BASE_GPV'] * 100).astype('int64')
+
+        # region 按 SQL 最终截断点一次换算奖金分
+        # SQL 的 TRUNCATE 只发生在“总基数 × 费率”之后；基数不得预舍入到分。
+        base_units = df['TOTAL_BASE_GPV'].astype('int64')
         rate_ppm = df['PE_RATE_PPM'].astype('int64')
-        numer = base_cents * rate_ppm
-        bonus_cents = cp.where(
-            numer >= 0,
-            numer // 1000000,
-            -((-numer) // 1000000)
-        )
-        df['BONUS_PE'] = bonus_cents / 100.0
+        units_per_cent = PV_SCALE // BONUS_CENT_SCALE
+        denominator = RATE_PPM_SCALE * units_per_cent
+
+        # CuPy 的 abs(INT64_MIN) 和后续整数乘积会溢出；金额域必须先 fail-loud。
+        int64_min = -(2 ** 63)
+        int64_max = 2 ** 63 - 1
+        if bool(((base_units == int64_min) | (rate_ppm == int64_min)).any()):
+            raise OverflowError('PE amount or rate cannot equal INT64_MIN')
+
+        amount_sign = cp.where((base_units < 0) ^ (rate_ppm < 0), -1, 1)
+        base_magnitude = cp.abs(base_units)
+        rate_magnitude = cp.abs(rate_ppm)
+        quotient = base_magnitude // denominator
+        remainder = base_magnitude % denominator
+        safe_rate = cp.maximum(rate_magnitude, 1)
+        if bool(((quotient > int64_max // safe_rate) | (remainder > int64_max // safe_rate)).any()):
+            raise OverflowError('PE bonus cents intermediate is outside signed int64')
+
+        whole_product = quotient * rate_magnitude
+        fractional_product = remainder * rate_magnitude
+        fractional_cents = fractional_product // denominator
+        if bool((whole_product > int64_max - fractional_cents).any()):
+            raise OverflowError('PE bonus cents is outside signed int64')
+        bonus_magnitude = whole_product + fractional_cents
+        df['BONUS_PE_CENTS'] = (amount_sign * bonus_magnitude).astype('int64')
+        # endregion
         return df
 
     @staticmethod
@@ -102,7 +130,7 @@ class PEBonusService:
             import cupy as cp
             # 判断是否为路径B晋升，路径B：自己业绩未达标，但是下级是elite了
             df['IS_PATH_B'] = (df['rank'] >= 20) & (~df['is_elite'])
-            df['GPV_REAL_BASE'] = cp.where(df['is_elite'], df['gpv_real'], 0.0)
+            df['GPV_REAL_BASE'] = cp.where(df['is_elite'], df['gpv_real'], 0).astype('int64')
             df['CURRENT_GPV'] = df['GPV_REAL_BASE']
             # 如果不是路径 B，默认已经结算完成；如果是路径 B，默认还没结算完成。
             df['RESOLVED'] = ~df['IS_PATH_B']
@@ -188,9 +216,9 @@ class PEBonusService:
 
             # region 执行CURRENT_GPV加减和更改RESOLVED
             def _apply_step(df):
-                df['STEP_GAIN'] = df['STEP_GAIN'].fillna(0.0)
-                df['STEP_LOSS'] = df['STEP_LOSS'].fillna(0.0)
-                df['CURRENT_GPV'] = df['CURRENT_GPV'] + df['STEP_GAIN'] - df['STEP_LOSS']
+                df['STEP_GAIN'] = df['STEP_GAIN'].fillna(0).astype('int64')
+                df['STEP_LOSS'] = df['STEP_LOSS'].fillna(0).astype('int64')
+                df['CURRENT_GPV'] = (df['CURRENT_GPV'] + df['STEP_GAIN'] - df['STEP_LOSS']).astype('int64')
                 # 依赖普通值列判空，不触碰关联键
                 is_marked = ~df['MARK_FLAG'].isnull()
                 df['RESOLVED'] = df['RESOLVED'] | is_marked
@@ -237,9 +265,14 @@ class PEBonusService:
         self._require_columns(ddf_stats, ['user_id'] + REQUIRED_STATS_COLS, 'UserStats')
 
         ddf_stats_clean = ddf_stats[['user_id'] + REQUIRED_STATS_COLS].copy()
+        assert_integer_amount_dtype(
+            ddf_stats_clean._meta, ['gpv_real', 'gpv_unreal'], 'UserStats'
+        )
         ddf_stats_clean['user_id'] = ddf_stats_clean['user_id'].astype('int64')
         ddf_stats_clean['rank'] = ddf_stats_clean['rank'].fillna(0).astype('int32')
         ddf_stats_clean['is_elite'] = ddf_stats_clean['is_elite'].fillna(False).astype('bool')
+        ddf_stats_clean['gpv_real'] = ddf_stats_clean['gpv_real'].fillna(0).astype('int64')
+        ddf_stats_clean['gpv_unreal'] = ddf_stats_clean['gpv_unreal'].fillna(0).astype('int64')
         # endregion
 
         # region ddf_edges_clean初始化
@@ -332,7 +365,7 @@ class PEBonusService:
         snapshot['CALC_MONTH'] = calc_month
         snapshot['USER_ID'] = snapshot['user_id']
         snapshot['PARENT_UID'] = snapshot['compressed_parent_id']
-        snapshot['GPV_UNREAL'] = snapshot['gpv_unreal'].fillna(0.0).astype('float64')
+        snapshot['GPV_UNREAL'] = snapshot['gpv_unreal'].fillna(0).astype('int64')
         snapshot['LAST_ELITE_CALC_ID'] = snapshot['rank']
 
         ddf_calc_lv_elite = snapshot[REQUIRED_ELITE_COLS]
@@ -372,7 +405,7 @@ class PEBonusService:
             self._require_columns(ddf_stats, ['pv'], 'UserStats (用于派生活跃)')
             ddf_perf = ddf_stats[['user_id', 'pv']].rename(columns={'user_id': 'USER_ID'}).copy()
             ddf_perf['PERIOD_NUM'] = period_num
-            ddf_perf['IS_ACTIVE'] = (ddf_perf['pv'].fillna(0) >= 30).astype('int32')
+            ddf_perf['IS_ACTIVE'] = (ddf_perf['pv'].fillna(0) >= 30 * PV_SCALE).astype('int32')
             ddf_user_perf = ddf_perf[REQUIRED_PERF_COLS]
         # endregion
 
@@ -399,29 +432,32 @@ class PEBonusService:
         eligible_users = ddf_elite[ddf_elite['LAST_ELITE_CALC_ID'] >= 20]
 
         # region 创建children_gpv_sum -> 对PARENT_UID分组 对GPV_REAL进行求和，'PARENT_UID': 'USER_ID', 'GPV_REAL': 'CHILDREN_GPV_REAL'
+        assert_integer_amount_dtype(ddf_elite._meta, ['GPV_REAL', 'GPV_UNREAL'], 'AR_CALC_LV_ELITE')
         children_all = ddf_elite[['USER_ID', 'PARENT_UID', 'GPV_REAL']]
         children_gpv_sum = children_all.groupby('PARENT_UID').agg({'GPV_REAL': 'sum'}).reset_index()
+        assert_integer_amount_dtype(children_gpv_sum._meta, ['GPV_REAL'], 'PE children aggregate')
         children_gpv_sum = children_gpv_sum.rename(columns={'PARENT_UID': 'USER_ID', 'GPV_REAL': 'CHILDREN_GPV_REAL'})
         # endregion
 
         # region 创建mid1 -> eligible_users左联children_gpv_sum
         mid1 = eligible_users.merge(children_gpv_sum, on='USER_ID', how='left')
-        mid1['CHILDREN_GPV_REAL'] = mid1['CHILDREN_GPV_REAL'].fillna(0.0)
-        mid1['GPV_UNREAL'] = mid1['GPV_UNREAL'].fillna(0.0)
+        mid1['CHILDREN_GPV_REAL'] = mid1['CHILDREN_GPV_REAL'].fillna(0).astype('int64')
+        mid1['GPV_UNREAL'] = mid1['GPV_UNREAL'].fillna(0).astype('int64')
         # endregion
 
         # ======================================================
         # 步骤二：计算基数与奖金金额 (整数截断)
         # ======================================================
         # region 计算出TOTAL_BASE_GPV -> CHILDREN_GPV_REAL+GPV_UNREAL
-        mid1['TOTAL_BASE_GPV'] = mid1['CHILDREN_GPV_REAL'] + mid1['GPV_UNREAL']
-        mid1['PE_RATE'] = self._pro_elite_rate_ppm / 1000000.0
+        mid1['TOTAL_BASE_GPV'] = (
+            mid1['CHILDREN_GPV_REAL'] + mid1['GPV_UNREAL']
+        ).astype('int64')
+        assert_integer_amount_dtype(mid1._meta, ['TOTAL_BASE_GPV'], 'PE bonus base')
         mid1['PE_RATE_PPM'] = self._pro_elite_rate_ppm
         # endregion
 
         # region 计算出奖金
         mid1 = mid1.map_partitions(self._apply_truncate)
-        mid1 = mid1.drop(columns=['PE_RATE_PPM'])
         # endregion
 
         # ======================================================
@@ -456,7 +492,7 @@ class PEBonusService:
         # ======================================================
         # region 初始化
         source_parts = []
-        static_pe_rate = self._pro_elite_rate_ppm / 1000000.0
+        static_pe_rate_ppm = self._pro_elite_rate_ppm
         # endregion
 
         # region 创造detaila -> 直属下级真实业绩
@@ -484,8 +520,8 @@ class PEBonusService:
 
             # region 补齐REAL和UNREAL相关信息
             detail_a['SOURCE_GPV'] = detail_a['GPV_REAL']
-            detail_a['SOURCE_GPV_UNREAL'] = 0.0
-            detail_a['PE_RATE'] = static_pe_rate
+            detail_a['SOURCE_GPV_UNREAL'] = 0
+            detail_a['PE_RATE_PPM'] = static_pe_rate_ppm
             # endregion
 
             # region 将detail_a添加到source_parts
@@ -523,9 +559,9 @@ class PEBonusService:
             detail_b['SOURCE_USER_NAME'] = detail_b['user_name']
             detail_b['SOURCE_REAL_NAME'] = detail_b['real_name']
 
-            detail_b['SOURCE_GPV'] = 0.0
-            detail_b['SOURCE_GPV_UNREAL'] = detail_b['GPV_UNREAL']
-            detail_b['PE_RATE'] = static_pe_rate
+            detail_b['SOURCE_GPV'] = 0
+            detail_b['SOURCE_GPV_UNREAL'] = detail_b['GPV_UNREAL'].astype('int64')
+            detail_b['PE_RATE_PPM'] = static_pe_rate_ppm
 
             detail_b = detail_b.rename(columns={'USER_ID': 'BONUS_USER_ID'})
             source_parts.append(detail_b[SOURCE_COLUMNS])
@@ -538,8 +574,8 @@ class PEBonusService:
             ar_calc_bonus_pe_source['IS_ACTIVE'] = ar_calc_bonus_pe_source['IS_ACTIVE'].fillna(0).astype('int32')
         else:
             empty_meta = pd.DataFrame(columns=SOURCE_COLUMNS)
-            for col in ['SOURCE_GPV', 'SOURCE_GPV_UNREAL', 'PE_RATE']:
-                empty_meta[col] = pd.Series(dtype='float64')
+            for col in ['SOURCE_GPV', 'SOURCE_GPV_UNREAL', 'PE_RATE_PPM']:
+                empty_meta[col] = pd.Series(dtype='int64')
             empty_meta['IS_ACTIVE'] = pd.Series(dtype='int32')
 
             empty_gdf = cudf.from_pandas(empty_meta)

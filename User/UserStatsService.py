@@ -7,7 +7,12 @@ from dask.distributed import Client
 from redis_om import NotFoundError
 import Model.User.UserLevel as UserLevel
 from Model.User.UserStats import UserStats
-from Common.AmountModelAdapter import build_factory_amount_fields
+from Common.AmountModelAdapter import build_factory_amount_fields, require_v2_amount_record
+from Common.PvAmount import PV_SCALE, checked_add_int64
+from Model.Order.NormalizedPvEvent import (
+    NormalizedPvEvent,
+    require_normalized_pv_event,
+)
 from Redishelper.PVAmountConfigProvider import (
     PVAmountConfigProvider,
     PVAmountRunConfig,
@@ -21,8 +26,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-ELITE_MARK = 1000
-VIRTUAL_MARK = 2000
+# SQL 的 1000/2000 PV 资格边界必须与 NormalizedPvEvent 的 micro-units 输入同量纲。
+ELITE_MARK = 1000 * PV_SCALE
+VIRTUAL_MARK = 2000 * PV_SCALE
 SCHEDULE_ADDRESS = "tcp://127.0.0.1:8786"
 
 # ---------- 锁配置 ----------
@@ -129,6 +135,7 @@ class UserStatsService:
 
         try:
             u = UserStats.get(record_pk)
+            require_v2_amount_record(u)
         except NotFoundError:
             u = UserStats(
                 pk=record_pk,
@@ -181,13 +188,13 @@ class UserStatsService:
         按 PE/SE 晋级口径把 GPV 拆成真实业绩和虚拟业绩。
 
         业务含义：
-        - GPV < 2000：未启动虚拟宽度，全部 GPV 都是真实业绩；
-        - GPV >= 2000：启动虚拟宽度，真实业绩封顶为 1000，
-          超出 1000 的部分作为 gpv_unreal。
+        - GPV < 2000 PV：未启动虚拟宽度，全部 micro-units 都是真实业绩；
+        - GPV >= 2000 PV：启动虚拟宽度，真实业绩封顶为 1000 PV，
+          超出 1000 PV 的 micro-units 作为 gpv_unreal。
 
         注意：
-        virtual_width = floor(gpv / 1000)，表示“虚拟宽度数量”；
-        gpv_unreal = gpv - 1000，表示“虚拟业绩数值”。
+        virtual_width = floor(gpv / (1000 * PV_SCALE))，表示“虚拟宽度数量”；
+        gpv_unreal = gpv - (1000 * PV_SCALE)，表示“虚拟业绩 micro-units”。
         二者不是同一个字段。
         """
         gpv = int(gpv or 0)
@@ -385,7 +392,50 @@ class UserStatsService:
     # =================================================================
     # 核心更新逻辑
     # =================================================================
-    def update_elite_performance(self, period: str, user_id: str, bv: int, order_id: str):
+    def update_elite_performance(
+        self,
+        period: Optional[str] = None,
+        user_id: Optional[str] = None,
+        bv: Optional[int] = None,
+        order_id: Optional[str] = None,
+        *,
+        normalized_event: Optional[NormalizedPvEvent] = None,
+    ):
+        """处理推荐网增量；生产 v2 入口必须传入同一 normalized event。"""
+        # region 归一化事件合同
+        if normalized_event is not None:
+            event = require_normalized_pv_event(normalized_event)
+            if user_id is None:
+                raise ValueError("normalized event stage 必须传入 user_id")
+            return self._update_elite_performance_units(
+                period=str(event.period_snapshot.period_num),
+                user_id=str(user_id),
+                bv=event.effective_pv_delta_units,
+                order_id=event.identity,
+            )
+        # endregion
+
+        # region 旧入口兼容适配
+        # 旧签名只为尚未切换的调用者保留；它不解析 raw 金额，也不允许隐式 int/float 洗白。
+        if period is None or user_id is None or order_id is None:
+            raise ValueError("legacy adapter requires period, user_id and order_id")
+        if not isinstance(bv, int) or isinstance(bv, bool):
+            raise TypeError("legacy bv must already be strict units int")
+        done_key = f"system:idempotency:{period}:{order_id}:done"
+        redis_conn = UserStats.db()
+        if redis_conn.exists(done_key):
+            logger.warning("检测到重复订单 %s，忽略本次请求。", order_id)
+            return
+        return self._update_elite_performance_units(period, user_id, bv, order_id)
+        # endregion
+
+    def _update_elite_performance_units(
+        self,
+        period: str,
+        user_id: str,
+        bv: int,
+        order_id: str,
+    ):
         # region 参数验证
         if not order_id:
             raise ValueError("订单增量处理必须传入 order_id 以保证幂等")
@@ -394,7 +444,8 @@ class UserStatsService:
         # region 初始化
         period = str(period)
         user_id = str(user_id)
-        bv = int(bv)
+        if not isinstance(bv, int) or isinstance(bv, bool):
+            raise TypeError("bv must already be strict units int")
         done_key = f"system:idempotency:{period}:{order_id}:done"
         lock_key = f"system:idempotency:{period}:{order_id}:lock"
         # endregion
@@ -487,18 +538,19 @@ class UserStatsService:
                     # endregion
 
                     # region 计算当前elite等级
-                    current_user.pv = (current_user.pv or 0) + bv
-                    current_user.gpv = (current_user.gpv or 0) + bv
+                    # 公共 helper 在落库前阻断 signed-int64 越界，避免 Python 大整数进入 Redis。
+                    current_user.pv = checked_add_int64(current_user.pv or 0, bv)
+                    current_user.gpv = checked_add_int64(current_user.gpv or 0, bv)
 
                     self._recalc_rank(current_user)
                     # endregion
 
                     # region 计算新的贡献度以及贡献差值
                     old_contrib = current_user.contrib or 0
-                    # 计算临时贡献度，如果当前gpv小于1000，临时贡献度为当前gpv，否则为0
+                    # 计算临时贡献度：GPV 未达 1000 PV（V2 micro-units 阈值）时向上贡献，否则为 0。
                     new_contrib = self._calc_contrib(current_user)
                     # 计算贡献差值：临时贡献度 - 当前贡献度
-                    delta_update = new_contrib - old_contrib
+                    delta_update = checked_add_int64(new_contrib, -old_contrib)
                     current_user.contrib = new_contrib
                     # endregion
 
@@ -553,7 +605,7 @@ class UserStatsService:
                         # endregion
 
                         # 计算父级节点gpv：当前gpv+下级的贡献差值
-                        ancestor.gpv = (ancestor.gpv or 0) + delta_update
+                        ancestor.gpv = checked_add_int64(ancestor.gpv or 0, delta_update)
 
                         # region 获取直推下级的信息
                         # 评估"本条分支"是否合格 -- 优先用 processed_nodes 里
@@ -585,9 +637,12 @@ class UserStatsService:
 
                         # region 计算贡献差值：临时贡献度-当前贡献度
                         old_ancestor_contrib = ancestor.contrib or 0
-                        # 计算临时贡献度，如果当前gpv小于1000，临时贡献度为当前gpv，否则为0
+                        # 计算临时贡献度：GPV 未达 1000 PV（V2 micro-units 阈值）时向上贡献，否则为 0。
                         new_ancestor_contrib = self._calc_contrib(ancestor)
-                        next_delta_update = new_ancestor_contrib - old_ancestor_contrib
+                        next_delta_update = checked_add_int64(
+                            new_ancestor_contrib,
+                            -old_ancestor_contrib,
+                        )
                         ancestor.contrib = new_ancestor_contrib
                         # endregion
 
