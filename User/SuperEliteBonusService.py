@@ -1,9 +1,11 @@
 import logging
 import time
-from decimal import Decimal, ROUND_DOWN, InvalidOperation
+from decimal import Decimal, ROUND_DOWN
 import dask.dataframe as dd
 import pandas as pd
 from typing import Any
+
+from Common.BonusConfig import ConfigSnapshot, ensure_config_snapshot
 
 logger = logging.getLogger("User.SuperEliteBonusService")
 
@@ -37,6 +39,8 @@ class SuperEliteBonusService:
     # =====================================================================
     @staticmethod
     def _to_local_pandas(df, name: str) -> pd.DataFrame:
+        if isinstance(df, ConfigSnapshot):
+            return df.to_pandas()
         if hasattr(df, "result"):
             df = df.result()
         if hasattr(df, "compute"):
@@ -91,54 +95,20 @@ class SuperEliteBonusService:
     # 配置解析
     # =====================================================================
     def _parse_se_rate(self, df_config) -> Decimal:
-        df_cfg = self._lower_columns(self._to_local_pandas(df_config, "df_config").copy(), "df_config")
-        self._require_config_cols(df_cfg, "df_config")
-
-        # region 获取配置名字和类型
-        name_norm = df_cfg['config_name'].astype(str).str.strip()
-        type_norm = df_cfg['type'].astype(str).str.strip().str.lower()
-        # endregion
-
-        # 筛选出汇率
-        df_rate = df_cfg[(name_norm == 'superEliteRate') & (type_norm == 'bonus')]
-
-        # region 验证
-        if df_rate.empty:
-            raise ValueError("[阻断] df_config 中 superEliteRate(type='bonus') 配置缺失")
-        if len(df_rate) > 1:
-            raise ValueError(f"[阻断] superEliteRate 配置不唯一，当前行数: {len(df_rate)}")
-        # endregion
-
-        # 获取数据
-        value = df_rate.iloc[0]['value']
-
-        # region 验证
-        if value is None or pd.isna(value):
-            raise ValueError("[阻断] superEliteRate 配置缺失 value 值")
-        # endregion
-
-        # region 转成decimal
-        try:
-            rate_val = Decimal(str(value).strip())
-        except InvalidOperation:
-            raise ValueError(f"[阻断] superEliteRate 的 value 不是合法数值: {value!r}")
-        if rate_val <= 0:
-            raise ValueError(f"[阻断] superEliteRate 拨出比例必须大于0，当前值: {rate_val}")
-        # endregion
-
-        return rate_val / Decimal('100')
+        snapshot = ensure_config_snapshot(df_config)
+        return snapshot.rate_decimal("superEliteRate", award="SE")
 
     def _parse_country_mapping(self, df_config) -> pd.DataFrame:
         df_cfg = self._lower_columns(self._to_local_pandas(df_config, "df_config").copy(), "df_config")
         self._require_config_cols(df_cfg, "df_config")
 
         # region 获取名称和类型
-        df_cfg['__name'] = df_cfg['config_name'].astype(str).str.strip()
-        df_cfg['__type'] = df_cfg['type'].astype(str).str.strip().str.lower()
+        df_cfg['__name'] = df_cfg['config_name']
+        df_cfg['__type'] = df_cfg['type']
         # endregion
 
         # region 创造df_country -> 从df_cfg筛选出来
-        is_country = df_cfg['__name'].str.lower().str.startswith('country')
+        is_country = df_cfg['__name'].apply(lambda value: isinstance(value, str) and value.startswith('Country'))
         df_country = df_cfg[is_country].copy()
         # endregion
 
@@ -146,10 +116,11 @@ class SuperEliteBonusService:
         if df_country.empty:
             return pd.DataFrame(columns=['source_country_id', 'region_default_id'])
 
-        too_short = df_country['__name'].str.len() <= self._COUNTRY_PREFIX_LEN
-        if too_short.any():
-            bad = df_country.loc[too_short, '__name'].tolist()
-            raise ValueError(f"[阻断] Country 配置名非法或过短: {bad}")
+        non_exact_names = df_country[df_country['__name'] != df_country['__name'].str.strip()]
+        if not non_exact_names.empty:
+            raise ValueError(
+                f"[阻断] Country 配置名不符合 exact raw: {non_exact_names['__name'].tolist()}"
+            )
 
         bad_types = df_country[df_country['__type'] != 'bonus']
         if not bad_types.empty:
@@ -169,12 +140,6 @@ class SuperEliteBonusService:
             source_country = config_name[self._COUNTRY_PREFIX_LEN:].strip().upper()
             target_region = str(row['value']).strip().upper()
 
-            # region 验证
-            if not source_country or source_country.lower() in _INVALID_STR_TOKENS:
-                raise ValueError(f"[阻断] 解析后源国家ID非法或为空: {config_name} -> {source_country}")
-            if not target_region or target_region.lower() in _INVALID_STR_TOKENS:
-                raise ValueError(f"[阻断] 目标大区 value 非法或为空: {target_region}")
-            # endregion
 
             mapping.append({"source_country_id": source_country, "region_default_id": target_region})
             target_regions.add(target_region)
@@ -193,7 +158,7 @@ class SuperEliteBonusService:
         # endregion
 
         # region 验证
-        bad_self_maps = [region for region in target_regions if mapping_dict.get(region) != region]
+        bad_self_maps = [region for region in target_regions if region not in {"", "0"} and mapping_dict.get(region) != region]
         if bad_self_maps:
             raise ValueError(
                 f"[阻断] 目标大区主国未自映射: {bad_self_maps}。\n"
@@ -232,8 +197,13 @@ class SuperEliteBonusService:
         # endregion
 
         # region 获取汇率和国家信息
-        se_rate = self._parse_se_rate(df_config)
-        country_mapping = self._parse_country_mapping(df_config)
+        config_snapshot = ensure_config_snapshot(
+            df_config,
+            period_num=period_int,
+            calc_month=calc_month_int,
+        )
+        se_rate = self._parse_se_rate(config_snapshot)
+        country_mapping = self._parse_country_mapping(config_snapshot)
         # endregion
 
         # ==========================================

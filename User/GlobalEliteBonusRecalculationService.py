@@ -10,6 +10,7 @@ from redis_om import NotFoundError
 
 from Model.User.EliteBonusStats import EliteBonusStats
 from Common.AmountModelAdapter import build_factory_amount_fields
+from Common.BonusConfig import ConfigSnapshot
 from Redishelper.PVAmountConfigProvider import (
     PVAmountConfigProvider,
     PVAmountRunConfig,
@@ -78,14 +79,14 @@ class GlobalEliteBonusRecalculationService:
 
     def __init__(
         self,
-        elite_rate: float = 0.15,
+        config_snapshot: ConfigSnapshot,
         *,
         calc_month: Optional[int] = None,
         db_executor: Optional[Callable[[str, List[Dict[str, Any]]], None]] = None,
         user_info_resolver: Optional[Callable[[List[str]], Dict[str, Dict[str, Any]]]] = None,
     ):
         """
-        :param elite_rate: 需由调用方从 AR_CONFIG 锁定传入，Decimal 转换避开二进制浮点误差。
+        :param config_snapshot: run 启动时冻结的配置快照。
         :param calc_month: IV_CALC_MONTH，写入 AR_CALC_BONUS_E / _SOURCE 的 CALC_MONTH。
             仅当提供 db_executor（自包含落库模式）时必填。
         :param db_executor: 关系库事务批量插入回调，签名 db_executor(table_name, rows)。
@@ -96,7 +97,13 @@ class GlobalEliteBonusRecalculationService:
         :param user_info_resolver: 落库时批量解析用户姓名/国家/父级/层数的回调；
             不提供则 SOURCE / BONUS_E 表的姓名/国家/父级等关联字段为空。
         """
-        self.elite_rate = Decimal(str(elite_rate))
+        if not isinstance(config_snapshot, ConfigSnapshot):
+            raise TypeError(
+                "GlobalEliteBonusRecalculationService 必须显式传入冻结 ConfigSnapshot"
+            )
+        self.config_snapshot = config_snapshot
+        self.elite_rate_ppm = config_snapshot.require_ppm("eliteRate", award="ELITE")
+        self.elite_rate = Decimal(self.elite_rate_ppm) / Decimal(1_000_000)
         self.calc_month = calc_month
         self.db_executor = db_executor
         self.user_info_resolver = user_info_resolver
@@ -109,6 +116,7 @@ class GlobalEliteBonusRecalculationService:
         """单期全量 Elite Bonus 结算重算主入口"""
         period = str(period)
         # region 加载并冻结本次业务运行配置
+        self.config_snapshot.assert_run(period, self.calc_month)
         redis_conn = EliteBonusStats.db()
         run_config = PVAmountRunSession.start(
             PVAmountConfigProvider(redis_conn)
@@ -488,11 +496,10 @@ class GlobalEliteBonusRecalculationService:
         # 懒导入，避免顶层 import 路径耦合导致整模块加载失败；路径以实际工程为准。
         from User.EliteBonusService import EliteBonusService
 
-        locked_rate = self.elite_rate  # 锁定期初比例，避免闭包捕获到后续被改写的引用
         snapshot_svc = EliteBonusService(
             period_num=int(period),
             calc_month=self.calc_month,
-            elite_rate_loader=lambda: locked_rate,
+            config_snapshot=self.config_snapshot,
             user_info_resolver=self.user_info_resolver,
         )
         return snapshot_svc._snapshot_period_to_db(self.db_executor, run_config)

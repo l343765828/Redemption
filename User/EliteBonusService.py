@@ -33,6 +33,7 @@ from dask.distributed import Client
 from redis_om import NotFoundError
 from Model.User.EliteBonusStats import EliteBonusStats
 from Common.AmountModelAdapter import build_factory_amount_fields
+from Common.BonusConfig import ConfigSnapshot
 from Redishelper.PVAmountConfigProvider import (
     PVAmountConfigProvider,
     PVAmountRunConfig,
@@ -57,9 +58,6 @@ SOURCE_TTL_SECONDS = 60 * 60 * 24 * 90  # 溯源记录 90 天兜底过期
 # 入参: user_ids 列表
 # 出参: dict[user_id] -> {"user_name", "real_name", "country_id", "parent_uid", "top_deep"}
 UserInfoResolver = Callable[[List[str]], Dict[str, Dict[str, Any]]]
-
-# 比例加载器: 期初锁定 elite_rate
-EliteRateLoader = Callable[[], Decimal]
 
 # 落盘执行器: db_executor(table_name, rows) 由调用方提供事务与批量 INSERT
 DbExecutor = Callable[[str, List[Dict[str, Any]]], None]
@@ -87,22 +85,14 @@ class EliteBonusService:
         self,
         period_num: int,
         calc_month: int,
-        elite_rate_loader: Optional[EliteRateLoader] = None,
+        config_snapshot: ConfigSnapshot,
         user_info_resolver: Optional[UserInfoResolver] = None,
         dask_address: str = DEFAULT_DASK_ADDRESS,
     ):
         """
         :param period_num:  IV_PERIOD_NUM
         :param calc_month:  IV_CALC_MONTH
-        :param elite_rate_loader:
-            从 AR_CONFIG 读取比例的函数,期初调用一次锁定,期内不刷新。
-            生产实现示例:
-                def loader():
-                    raw = db.execute(
-                        "SELECT MIN(VALUE) FROM AR_CONFIG "
-                        "WHERE CONFIG_NAME='eliteRate' AND TYPE='bonus'"
-                    ).scalar()
-                    return Decimal(str(raw or 15)) / Decimal('100')
+        :param config_snapshot: run 启动时冻结的配置快照；同一 run 不得刷新。
         :param user_info_resolver:
             期末快照时批量解析用户信息(姓名/国家/父级/层数)的回调。
             生产必须传入,否则 SOURCE / BONUS_E 表关联字段全空。
@@ -116,16 +106,20 @@ class EliteBonusService:
         self._dask_address = dask_address
         self._user_info_resolver = user_info_resolver or _default_user_info_resolver
 
-        # 期初锁定 elite_rate(必填,默认占位会出 WARN)
-        if elite_rate_loader is not None:
-            self.elite_rate = elite_rate_loader()
-            logger.info("Period %s 期初锁定 elite_rate = %s", period_num, self.elite_rate)
-        else:
-            logger.warning(
-                "elite_rate_loader 未提供,使用占位值 0.15。"
-                "生产环境必须传入从 AR_CONFIG 读取的 loader!"
-            )
-            self.elite_rate = Decimal('0.15')
+        # region 期初锁定 Elite 配置
+        if not isinstance(config_snapshot, ConfigSnapshot):
+            raise TypeError("EliteBonusService 必须显式传入冻结 ConfigSnapshot")
+        config_snapshot.assert_run(period_num, calc_month)
+        self.config_snapshot = config_snapshot
+        self.elite_rate_ppm = config_snapshot.require_ppm("eliteRate", award="ELITE")
+        self.elite_rate = Decimal(self.elite_rate_ppm) / Decimal(1_000_000)
+        logger.info(
+            "Period %s 期初锁定 elite_rate_ppm=%s snapshot=%s",
+            period_num,
+            self.elite_rate_ppm,
+            config_snapshot.snapshot_id,
+        )
+        # endregion
 
     # =================================================================
     # 基础设施: Dask 懒加载

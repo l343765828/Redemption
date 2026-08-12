@@ -29,6 +29,8 @@ from typing import Optional
 
 import pandas as pd
 
+from Common.BonusConfig import ConfigSnapshot
+
 # DECIMAL(16,6) 的中间精度足够，留足余量防止链路上溢出有效位
 getcontext().prec = 50
 
@@ -124,6 +126,9 @@ class TeamBonusCalculator:
         self.perf_month = perf_month.copy().reset_index(drop=True)
         self.user = user.copy().reset_index(drop=True)
         self.member_level = member_level.copy().reset_index(drop=True)
+        # snapshot 仅作为受控 fixture 适配；本模块仍是 SQL oracle，不接生产链路。
+        if isinstance(config, ConfigSnapshot):
+            config = config.to_pandas(uppercase_columns=True)
         self.config = config.copy().reset_index(drop=True)
         # user_perf 会被原地结转刷新，保留为可写状态
         self.user_perf = user_perf.copy().reset_index(drop=True)

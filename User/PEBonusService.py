@@ -6,6 +6,8 @@ import pandas as pd
 from typing import Dict, List, Optional
 from dask.distributed import get_client, wait as dask_wait, futures_of
 
+from Common.BonusConfig import ConfigSnapshot
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
 logger = logging.getLogger("Bonus.PEBonusBatchServiceGPU")
 
@@ -26,9 +28,14 @@ SOURCE_COLUMNS = ['PERIOD_NUM', 'CALC_MONTH', 'BONUS_USER_ID', 'BONUS_USER_NAME'
 
 
 class PEBonusService:
-    def __init__(self):
+    def __init__(self, config_snapshot: ConfigSnapshot):
+        if not isinstance(config_snapshot, ConfigSnapshot):
+            raise TypeError("PEBonusService requires an explicit frozen ConfigSnapshot")
         self._max_compression_depth = 1000
-        self._pro_elite_rate_ppm = 150000
+        self.config_snapshot = config_snapshot
+        self._pro_elite_rate_ppm = config_snapshot.require_ppm(
+            "proEliteRate", award="PE"
+        )
 
     @staticmethod
     def _generate_uuids(df: cudf.DataFrame, id_col_name: str = 'ID') -> cudf.DataFrame:
@@ -346,7 +353,8 @@ class PEBonusService:
                       ddf_user: dask_cudf.DataFrame,
                       ddf_user_perf: Optional[dask_cudf.DataFrame] = None) -> Dict[str, dask_cudf.DataFrame]:
 
-        # region 参数验证
+        # region 参数与配置快照验证
+        self.config_snapshot.assert_run(period_num, calc_month)
         client = get_client()
         logger.info(f"启动期数: {period_num}, 月份: {calc_month} 奖金流...")
         self._require_columns(ddf_user, REQUIRED_USER_COLS, 'UserInfo维表')

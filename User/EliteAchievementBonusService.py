@@ -6,6 +6,8 @@ from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from pandas.api.types import is_float_dtype, is_integer_dtype
 from typing import Any, Dict, Optional, Set, Tuple
 
+from Common.BonusConfig import ConfigSnapshot, ensure_config_snapshot
+
 logger = logging.getLogger("Bonus.EliteAchievementBonusService")
 
 _INVALID_STR_TOKENS = {"none", "nan", "null", "na", "nat", "<na>", ""}
@@ -124,6 +126,8 @@ class EliteAchievementBonusService:
     @staticmethod
     def _to_local_pandas(df, name: str) -> pd.DataFrame:
         if hasattr(df, "result"): df = df.result()
+        if isinstance(df, ConfigSnapshot):
+            return df.to_pandas()
         if hasattr(df, "compute"): df = df.compute()
         if hasattr(df, "to_pandas"): df = df.to_pandas()
         if not isinstance(df, pd.DataFrame):
@@ -215,37 +219,8 @@ class EliteAchievementBonusService:
 
     # ------------------------------------------------------------------ 配置解析
     def _parse_eab_rate(self, df_config: pd.DataFrame) -> Decimal:
-        df_cfg = self._lower_columns(self._to_local_pandas(df_config, "df_config").copy(), "df_config")
-        self._require_columns(df_cfg, "df_config", {"config_name", "value", "type"})
-        name_norm = df_cfg['config_name'].astype(str).str.strip()
-        type_norm = df_cfg['type'].astype(str).str.strip().str.lower()
-        df_rate = df_cfg[(name_norm == 'eabRate') & (type_norm == 'bonus')]
-        if df_rate.empty:
-            raise ValueError("[阻断] EAB_RATE 配置缺失 (TYPE='bonus')。")
-        if len(df_rate) > 1:
-            raise ValueError("[阻断] EAB_RATE 配置存在多条。")
-        value = df_rate.iloc[0]['value']
-        if pd.isna(value) or value is None:
-            raise ValueError("[阻断] eabRate 配置的值为空。")
-        if isinstance(value, (float, np.floating)):
-            raise ValueError(f"[阻断] eabRate 配置值为 float({value!r})，请用字符串以免精度问题。")
-        # 先 strip 判空：空串/纯空白归"配置的值为空"（而非走 Decimal 的 InvalidOperation）
-        s = str(value).strip()
-        if s == "":
-            raise ValueError("[阻断] eabRate 配置的值为空。")
-        try:
-            rate_val = Decimal(s)
-        except InvalidOperation:
-            raise ValueError(f"[阻断] eabRate 值非法: {value!r}")
-        # NaN 单独归"值非法"（Decimal('NaN') 本身合法但语义无效）；必须在 is_finite 之前判，
-        # 因为 NaN 与 Infinity 都 not is_finite，但二者归类不同。
-        if rate_val.is_nan():
-            raise ValueError(f"[阻断] eabRate 值非法: {value!r}")
-        if not rate_val.is_finite():
-            raise ValueError(f"[阻断] eabRate 配置值不是有限数值: {value!r}")
-        if rate_val <= 0 or rate_val > 100:
-            raise ValueError(f"[阻断] eabRate 必须介于 (0, 100]，当前: {rate_val}")
-        return rate_val / Decimal('100')
+        snapshot = ensure_config_snapshot(df_config)
+        return snapshot.rate_decimal("eabRate", award="EAB")
 
     def _parse_country_mapping(self, df_config: pd.DataFrame, valid_countries: Optional[set] = None) -> pd.DataFrame:
         df_cfg = self._lower_columns(self._to_local_pandas(df_config, "df_config").copy(), "df_config")
@@ -261,28 +236,19 @@ class EliteAchievementBonusService:
             mapping = []
             for _, row in df_country.iterrows():
                 config_name = row['__name']
-                if len(config_name) <= self._COUNTRY_PREFIX_LEN:
-                    raise ValueError(f"[阻断] Country 配置名过短非法: {config_name}")
                 source_country = self._normalize_id_scalar(config_name[self._COUNTRY_PREFIX_LEN:])
                 target_region = self._normalize_id_scalar(row['value'])
-                if not source_country or source_country.lower() in _INVALID_STR_TOKENS:
-                    raise ValueError(f"[阻断] 源国家ID非法: {config_name}")
-                if not target_region or target_region.lower() in _INVALID_STR_TOKENS:
-                    raise ValueError(f"[阻断] 目标大区 value 非法: {target_region}")
                 mapping.append({"source_country_id": source_country, "region_default_id": target_region})
             df_mapping = pd.DataFrame(mapping, columns=['source_country_id', 'region_default_id'])
-            if df_mapping['source_country_id'].duplicated().any():
-                duplicates = df_mapping[df_mapping['source_country_id'].duplicated()]['source_country_id'].tolist()
-                raise ValueError(f"[阻断] 重复源国家（含大小写变体）: {duplicates}")
         if self.required_region_sources:
             missing_req = self.required_region_sources - set(df_mapping['source_country_id'])
             if missing_req:
                 raise ValueError(f"[阻断] 业务要求的可合并国家缺少映射: {missing_req}")
         if valid_countries is not None and not df_mapping.empty:
-            invalid_targets = set(df_mapping['region_default_id']) - valid_countries
+            invalid_targets = {value for value in df_mapping['region_default_id'] if value not in {"", "0"}} - valid_countries
             if invalid_targets:
                 raise ValueError(f"[阻断] 目标大区不在国家主数据: {invalid_targets}")
-            invalid_sources = set(df_mapping['source_country_id']) - valid_countries
+            invalid_sources = {value for value in df_mapping['source_country_id'] if value not in {"", "0"}} - valid_countries
             if invalid_sources:
                 raise ValueError(f"[阻断] 源国家不在国家主数据: {invalid_sources}")
         return df_mapping
@@ -388,8 +354,13 @@ class EliteAchievementBonusService:
         # endregion
 
         # region 获取汇率 并将国家 大区信息放到dask中
-        eab_rate = self._parse_eab_rate(df_config)
-        mapping_ddf = dd.from_pandas(self._parse_country_mapping(df_config, valid_countries), npartitions=1)
+        config_snapshot = ensure_config_snapshot(
+            df_config,
+            period_num=period_int,
+            calc_month=calc_month_int,
+        )
+        eab_rate = self._parse_eab_rate(config_snapshot)
+        mapping_ddf = dd.from_pandas(self._parse_country_mapping(config_snapshot, valid_countries), npartitions=1)
         # endregion
 
         # region 将ddf_elite_users放到内存中

@@ -27,6 +27,8 @@ from typing import Dict, Iterable, Optional, Tuple
 import cudf
 import cupy as cp
 
+from Common.BonusConfig import ensure_config_snapshot
+
 LOG = logging.getLogger("Bonus.LeadershipBonusGPUService")
 
 
@@ -288,7 +290,11 @@ class LeadershipBonusGPUService:
         self._require_columns(df_users, "df_users", {"user_id", "country_id", "is_active"})
         self._require_columns(df_perf_month, "df_perf_month", {"period_num", "country_id", "pv_pcs"})
         self._require_columns(df_honor_levels, "df_honor_levels", {"calc_id", "honor_lv"})
-        self._require_columns(df_config, "df_config", {"config_name", "value", "type"})
+        config_snapshot = ensure_config_snapshot(
+            df_config,
+            period_num=iv_period_num,
+            calc_month=iv_calc_month,
+        )
         # endregion
 
         # region 创建df_network（用户关系）、df_pv_raw（real以及unreal）、df_honor_last（等级相关）
@@ -307,22 +313,26 @@ class LeadershipBonusGPUService:
         # 0. 配置准备（严格按 TYPE='bonus'）
         # --------------------------------------------------------------
 
-        # region 创建df_rate_cfg 等级对应的比例 例如：leadershipRate10 -> 4.5%
-        df_config_bonus = df_config[df_config["type"] == "bonus"].copy()
-        df_rate_cfg = df_config_bonus[
-            df_config_bonus["config_name"].str.startswith("leadershipRate")
-        ].copy()
+        # region 创建df_rate_cfg 等级对应的 signed ppm
+        rate_rows = config_snapshot.iter_ppm_rows("LB", "leadershipRate*")
+        df_rate_cfg = cudf.DataFrame({
+            "config_name": [name for name, _ in rate_rows],
+            "honor_rate_ppm": [ppm for _, ppm in rate_rows],
+        })
         df_rate_cfg["layer_calc_id"] = (
             df_rate_cfg["config_name"].str.replace("leadershipRate", "").astype("int32")
         )
-        df_rate_cfg["honor_rate"] = df_rate_cfg["value"].astype("float64") / 100.0
+        df_rate_cfg["honor_rate"] = df_rate_cfg["honor_rate_ppm"].astype("float64") / 1_000_000.0
         # endregion
 
         # region 创建df_region_cfg -> 取出国家ID、默认大区ID和默认大区名称
         # df_region_cfg -> config_name value type source_country_id region_default_id
-        df_region_cfg = df_config_bonus[
-            df_config_bonus["config_name"].str.startswith("Country")
-        ].copy()
+        country_rows = config_snapshot.country_rows("LB")
+        df_region_cfg = cudf.DataFrame({
+            "config_name": [row["config_name"] for row in country_rows],
+            "value": [row["value"] for row in country_rows],
+            "type": [row["type"] for row in country_rows],
+        })
         df_region_cfg["source_country_id"] = df_region_cfg["config_name"].str.replace("Country", "")
         df_region_cfg["region_default_id"] = df_region_cfg["value"]
         print("展示df_rate_cfg 111")
