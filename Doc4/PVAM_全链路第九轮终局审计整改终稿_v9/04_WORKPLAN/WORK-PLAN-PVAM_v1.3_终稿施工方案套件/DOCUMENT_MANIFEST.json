@@ -6,7 +6,7 @@
     "implementation_status":  "BLOCKED",
     "validation_status":  "PENDING_TEST_ENV",
     "baseline_commit":  "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
-    "modplan_archive_sha256":  "6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97",
+    "modplan_archive_sha256":  "a8e3027dce99013e856742e24679b7e7a7c8652132fe4b24846111182c10f644",
     "approved_commit_registry_schema":  2,
     "document_generation_audit":  "B7-01～B7-06",
     "current_audit":  "DEC-019 + GAP-PVAM-FLAG-CONTRACT + WORK-PVAM-01C + WORK-01 conditional reconciliation",

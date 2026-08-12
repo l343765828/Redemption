@@ -255,11 +255,11 @@
     "artifact_hashes":  {
                             "modplan_zip":  {
                                                 "path":  "03_MODPLAN/MODPLAN-PVAM_v1.2_终稿修改方案套件.zip",
-                                                "sha256":  "6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97"
+                                                "sha256":  "a8e3027dce99013e856742e24679b7e7a7c8652132fe4b24846111182c10f644"
                                             },
                             "workplan_zip":  {
                                                  "path":  "04_WORKPLAN/WORK-PLAN-PVAM_v1.3_终稿施工方案套件.zip",
-                                                 "sha256":  "9fcdfc7a510189c7af07cbbcdec73338d30a04337a7791c69845798864156aaf"
+                                                 "sha256":  "c33b6d9bbc33f8a790df9e593baa47d45372913bc53626b49ff6077d63734c14"
                                              },
                             "approved_commit_registry":  {
                                                              "path":  "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",

@@ -29,7 +29,7 @@
 | 复核人 | `待指派 / 架构与QA` |
 | 当前状态 | `BLOCKED` |
 | 文档治理状态 | `DRAFT`（`PENDING_ORGANIZATIONAL_APPROVAL`） |
-| 前置任务 | WORK-PVAM-01 达到 DEV_VERIFIED；WORK-PVAM-03 的配置 API 在奖金切换前可用 |
+| 前置任务 | WORK-PVAM-01、WORK-PVAM-03 均达到 DEV_VERIFIED；WORK-PVAM-03 配置 API 在奖金切换前必须可用 |
 | 功能开关 | `PV_NORMALIZER_V2 / PERIOD_RESOLVER_V2` |
 
 ### 1.1 一对一追溯摘要
@@ -62,7 +62,7 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 
 - [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-02` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
-- [ ] 前置关系满足：WORK-PVAM-01 达到 DEV_VERIFIED；WORK-PVAM-03 的配置 API 在奖金切换前可用。
+- [ ] 前置关系满足：WORK-PVAM-01、WORK-PVAM-03 均达到 DEV_VERIFIED；WORK-PVAM-03 配置 API 在奖金切换前必须可用。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
 - [ ] DEV测试依赖已安装；UAT项具备WORK-08生成的环境/数据/schema manifest。
 - [ ] 功能开关默认关闭，回滚路径已演练。
@@ -320,7 +320,7 @@ Normalized delivery必须冻结：`source_system/source_event_id/payload_hash/bu
 ### STEP-PVAM-02-06：清除生产float金额链
 
 - 目的：清除生产float金额链，落实 `TASK-PVAM-02` 的已批准目标。
-- 前置条件：WORK-01与WORK-03接口可用
+- 前置条件：WORK-PVAM-01与WORK-PVAM-03均达到DEV_VERIFIED，且WORK-PVAM-03配置接口可用
 - 修改文件：PE/SE/LB/Elite/EAB/Placement文件
 - 目标符号：金额符号
 - 精确操作：

@@ -60,7 +60,8 @@
                                                         "tests/pvam/WORK-PVAM-02/"
                                                     ],
                                        "prerequisites":  [
-                                                             "WORK-PVAM-01"
+                                                             "WORK-PVAM-01",
+                                                             "WORK-PVAM-03"
                                                          ]
                                    },
                   "WORK-PVAM-03":  {

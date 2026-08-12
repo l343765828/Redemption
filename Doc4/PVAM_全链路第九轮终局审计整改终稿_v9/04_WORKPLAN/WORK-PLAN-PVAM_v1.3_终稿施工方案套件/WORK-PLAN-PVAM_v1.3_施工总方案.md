@@ -108,8 +108,8 @@
 |---|---|---|---|---|---|---|---|---|
 | 1A | `WORK-PVAM-01C` | `TASK-PVAM-01C` | GAP-PVAM-FLAG-CONTRACT | DEC-019 | Redis flag Provider、原子 MANUAL_BOOTSTRAP、run-freeze 与 admission | 无（Phase A）；组合 factory 测试在 WORK-01 后执行 | 是 | BLOCKED |
 | 1B | `WORK-PVAM-01` | `TASK-PVAM-01` | R-001、R-002 | DEC-002、DEC-008、DEC-014、DEC-019 | 金额编码公共层与基础模型适配器及条件化 factory/version gate | WORK-PVAM-01C Phase A DEV_VERIFIED | 否 | BLOCKED |
-| 2 | `WORK-PVAM-02` | `TASK-PVAM-02` | R-003、R-007 | DEC-002、DEC-005、DEC-006、DEC-007、DEC-010 | 订单/退款入口金额放大与边界转换 | WORK-PVAM-01达到DEV_VERIFIED | 条件 | BLOCKED |
-| 3 | `WORK-PVAM-03` | `TASK-PVAM-03` | R-004 | DEC-001、DEC-002、DEC-003、DEC-009、DEC-014 | 配置解析、ppm 与硬编码清理 | WORK-PVAM-01 DEV_VERIFIED | 条件 | BLOCKED |
+| 2 | `WORK-PVAM-03` | `TASK-PVAM-03` | R-004 | DEC-001、DEC-002、DEC-003、DEC-009、DEC-014 | 配置解析、ppm 与硬编码清理 | WORK-PVAM-01 DEV_VERIFIED | 条件 | BLOCKED |
+| 3 | `WORK-PVAM-02` | `TASK-PVAM-02` | R-003、R-007 | DEC-002、DEC-005、DEC-006、DEC-007、DEC-010 | 订单/退款入口金额放大与边界转换 | WORK-PVAM-01、WORK-PVAM-03 均达到 DEV_VERIFIED | 否 | BLOCKED |
 | 4 | `WORK-PVAM-04` | `TASK-PVAM-04` | R-005、R-006 | DEC-004、DEC-016、DEC-018 | monthActivePV 唯一取值与 Active 同源现算 | WORK-PVAM-01、WORK-PVAM-03 DEV_VERIFIED；真实供给链UAT仍BLOCKED | 否 | BLOCKED |
 | 5 | `WORK-PVAM-05` | `TASK-PVAM-05` | R-008、R-011 | DEC-007、DEC-008、DEC-011、DEC-017 | Elite SOURCE 原子性与外部发布证明 | WORK-PVAM-01、02、03 DEV_VERIFIED | 否 | BLOCKED |
 | 6 | `WORK-PVAM-06` | `TASK-PVAM-06` | R-009、R-010 | DEC-007、DEC-008、DEC-010、DEC-012 | 全量重算状态机、统一 Guard 与发布分层 | WORK-PVAM-01、WORK-PVAM-02、WORK-PVAM-05 DEV_VERIFIED；WORK-08A调用图证据可并行 | 否 | BLOCKED |
@@ -148,7 +148,7 @@
 | WORK-08A | 固定基线/材料 | 治理 | 先交付证据schema、原生命令包装与callgraph工具 | BLOCK外部部分，不阻止无关DEV；但各WORK引用其脚本前必须先完成08A |
 | WORK-01C | 代码基线/Redis helper | 配置接口 | HEAD精确、TASK批准；Phase A Provider/bootstrap 可独立DEV | BLOCK |
 | WORK-07A | 现有consumer | 代码 | 独立hotfix审批 | 可与01并行 |
-| WORK-02 | WORK-01 | 接口 | 公共units/version DEV通过 | 不得开工 |
+| WORK-02 | WORK-01/03 | 接口 | 公共units/version与ConfigSnapshot配置API均DEV通过 | 不得开工 |
 | WORK-03 | WORK-01 | 接口 | 公共ppm API可用 | 不得开工 |
 | WORK-04 | WORK-01/03 | 接口/数据 | units+ConfigSnapshot可用 | 读侧可做；真实供给侧保持BLOCKED |
 | WORK-05 | WORK-01/02/03 | 数据/事件 | units/event/config合同稳定 | 不得开工 |
@@ -162,12 +162,13 @@
 |---|---|---|---|---|
 | Wave 0 | WORK-08 阶段A | 施工方案批准 | 基线/manifest/脚本DEV通过 | 缺外部材料只阻断对应UAT |
 | Wave 1A | WORK-01C Phase A + WORK-07A | 各自批准 | Provider/bootstrap与ACK hotfix DEV_VERIFIED | 01C失败阻断WORK-01；07A独立 |
-| Wave 2 | WORK-02 + WORK-03 | WORK-01通过 | 边界/period/config DEV_VERIFIED | 阻断04/05 |
-| Wave 3 | WORK-04 | 01/03通过 | Active读侧与消费者DEV通过 | 真实2B仍BLOCKED |
-| Wave 4 | WORK-05 | 01/02/03通过 | Elite atomic/batch DEV通过 | 阻断06 |
-| Wave 5 | WORK-06 | 01/02/05通过；08A调用图可用 | Coordinator/Guard/receipt DEV通过 | 阻断07B |
-| Wave 6 | WORK-07B | 06/07A通过 | schema/handler/retention DEV通过 | 阻断全链路 |
-| Wave 7 | WORK-08 阶段B | DEC-013+全部DEV | TC-001~032证据包完成 | 任何P0失败总体REJECTED |
+| Wave 2 | WORK-03 | WORK-01通过 | ConfigSnapshot与配置API DEV_VERIFIED | 阻断02/04/05 |
+| Wave 3 | WORK-02 | WORK-01/03通过 | 边界/period/float金额链 DEV_VERIFIED | 阻断05/06 |
+| Wave 4 | WORK-04 | 01/03通过 | Active读侧与消费者DEV通过 | 真实2B仍BLOCKED |
+| Wave 5 | WORK-05 | 01/02/03通过 | Elite atomic/batch DEV通过 | 阻断06 |
+| Wave 6 | WORK-06 | 01/02/05通过；08A调用图可用 | Coordinator/Guard/receipt DEV通过 | 阻断07B |
+| Wave 7 | WORK-07B | 06/07A通过 | schema/handler/retention DEV通过 | 阻断全链路 |
+| Wave 8 | WORK-08 阶段B | DEC-013+全部DEV | TC-001~032证据包完成 | 任何P0失败总体REJECTED |
 
 ### 5.3 强制停工条件
 

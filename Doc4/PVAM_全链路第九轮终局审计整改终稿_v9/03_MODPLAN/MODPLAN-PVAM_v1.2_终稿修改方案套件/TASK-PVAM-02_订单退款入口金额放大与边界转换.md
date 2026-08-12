@@ -18,7 +18,7 @@
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |
-| 前置任务 | `TASK-PVAM-01` |
+| 前置任务 | `TASK-PVAM-01、TASK-PVAM-03` |
 
 > `DRAFT` 表示技术内容已修订但尚无可核验组织施工授权；不得启动代码施工、部署或生产发布。
 
@@ -160,7 +160,7 @@ approved_at / resolved_period_snapshot
 ## 7. 前置条件与依赖关系
 
 - 必须先完成 TASK-PVAM-01 的公共 API 与模型 version。
-- 配置相关比例必须通过 TASK-PVAM-03 接口获取；本任务只负责金额运算迁移。
+- 必须先完成 TASK-PVAM-03 的配置 API；配置相关比例必须通过该接口获取，本任务只负责金额运算迁移。
 - 最终三路事件提交、epoch 和 coverage 依赖 TASK-PVAM-06。
 - UAT 归期测试依赖 DEC-013 环境准入和 AR_PERIOD 只读权限。
 
