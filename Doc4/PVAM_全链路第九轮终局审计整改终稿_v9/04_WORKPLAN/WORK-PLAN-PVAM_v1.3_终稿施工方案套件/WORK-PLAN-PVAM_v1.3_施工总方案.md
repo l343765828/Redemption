@@ -242,9 +242,11 @@
 | WORK-PVAM-02 | `Order/RefundReversalLedger.py` | 新增 | 原订单冲销CAS | 无二次负delta | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/UserStatsService.py` | 修改 | `update_elite_performance` | 不再缩放 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/PlacementIncrementalService.py` | 修改 | `update_placement_performance`、`_get_prev_period` | 与UserStats同输入 | TC-PVAM-02-01; TC-PVAM-02-02 |
-| WORK-PVAM-02 | `User/EliteBonusService.py` | 修改 | `update_elite_bonus_incremental`、bonus字段 | 无float | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `Common/PvAmount.py` | 修改 | signed dtype 守卫、公共 units→cents helper | unsigned/溢出 fail-loud | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | 修改 | 增量与全量 bonus/threshold/snapshot | 同一 `estimated_bonus_cents` 合同 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/PlacementRecalculationService.py` | 修改 | `_get_prev_period`、`_process_extract_batch`、`_calculate_placement_pv`、`_write_back_placement_matrix` | 无精度漂移 | TC-PVAM-02-01; TC-PVAM-02-02 |
-| WORK-PVAM-02 | `User/PEBonusService.py` / `SuperEliteBonusService.py` / `LeadershipBonusGPUService.py` / `EliteAchievementBonusService.py` | 修改 | 金额计算边界 | writer前明确cents/string | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `User/PEBonusService.py` / `PEBonusService_Main.py` / `SuperEliteBonusService.py` / `LeadershipBonusGPUService.py` / `EliteAchievementBonusService.py` | 修改/核验 | 金额计算与受影响调用边界 | writer/人工入口明确cents/string | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `User/Test/PEBonusServiceTest.py` / `test_amount_dtype_migration.py` / `test_pv_amount_common.py` | 修改 | GPU UAT 与公共/迁移回归 | units/ppm/cents、ConfigSnapshot、signed dtype 可验证 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `MessageConsumer/PvEventConsumer.py`（CALLGRAPH_GATED） | 条件新增 | 仅在部署证明确认没有现存PV入口且新消费者获批时创建 | 唯一可追踪入口 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-03 | `Common/BonusConfig.py` | 新增 | `ConfigRequirement`/`ConfigSnapshot`/parser | 运行期唯一配置对象 | TC-PVAM-03-01; TC-PVAM-03-02 |
 | WORK-PVAM-03 | `Model/Config/ConfigSnapshot.py` | 新增 | 可序列化manifest模型 | 证据可追溯 | TC-PVAM-03-01; TC-PVAM-03-02 |
@@ -474,6 +476,7 @@
 | v1.3-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根和四类工件实哈希、独立临时目录、AC 来源保真、当前轮次/版本引用 | 七轮终局审计报告 + B7 处置 | AI Agent | DRAFT |
 | v1.3-r9 | 2026-08-06 | 九轮 P0-TRACE-CHAIN-09-01 / P1-WORK-INDEX-09-02：跨层权威等价与 §4.1 索引全量同步 | 九轮终局审计报告 + 定点修补 | AI Agent | DRAFT |
 | v1.3-r10 | 2026-08-08 | 接入 DEC-019、GAP/TASK/WORK-PVAM-01C；条件化 WORK-01，更新 scope/test/traceability/version/hash 治理链 | PVAM USER-DECISION FINAL | AI Agent | DRAFT |
+| v1.3-r11 | 2026-08-12 | 同步 WORK-PVAM-02 实施期治理扩围：公共守卫、全量 Elite、PE 人工入口与 GPU UAT 回归 | WORK-PVAM-02 终审发现与治理依赖修订 | AI Agent | DRAFT |
 
 
 ## 附录 A：推荐目录结构

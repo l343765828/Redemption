@@ -130,10 +130,12 @@ approved_at / resolved_period_snapshot
 
 | 文件 | 目标修改 |
 |---|---|
+| `Common/PvAmount.py` | 公共 dtype 守卫只接受 signed integer；统一 units/ppm/cents 溢出与舍入边界 |
 | `User/PEBonusService.py` | TOTAL_BASE_GPV/bonus 全整数；取消 `cp.round` 与 `/100.0` |
+| `User/PEBonusService_Main.py` | 人工测试入口显式注入 ConfigSnapshot，读取 integer-cents 输出 |
 | `User/SuperEliteBonusService.py` | orders/pool/bonus 使用 units/cents；禁止 float dtype |
 | `User/LeadershipBonusGPUService.py` | `_truncate_gpu` 改为整数比例/截断；gpv 列 int64 |
-| `User/EliteBonusService.py` | estimated bonus 迁移到 integer cents；不写 float |
+| `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | 增量与全量 estimated bonus、阈值和 snapshot 统一到 units/cents；不写 float |
 | `Model/User/EliteBonusStats.py` | v2 路径只写 integer-cents 字段 |
 | `User/PlacementRecalculationService.py` | 去掉 Redis `float()`、float64 PV 列和 round |
 | `User/PlacementIncrementalService.py` | 入口严格 units-int；period resolver |
@@ -146,7 +148,11 @@ approved_at / resolved_period_snapshot
 - DB loader 测试；
 - normalized single-delta 三路一致测试；
 - period/退款边界测试；
-- 各奖金和 Placement 金额 mutation/dtype 测试。
+- 各奖金和 Placement 金额 mutation/dtype 测试；
+- `User/Test/PEBonusServiceTest.py` 同步 PE GPU UAT 的 units/ppm/cents 与 ConfigSnapshot 合同；
+- `User/Test/test_pv_amount_common.py` 随公共 signed-int64 API 更新。
+
+实施期允许的治理扩围仅限上述公共信任边界、全量 Elite 共享状态和 S-008 已登记的 PE 调用方；不得借扩围改变资格、比例、分母、Country 或 SQL 舍入点。
 
 ## 6. 明确排除项（防越界红线）
 

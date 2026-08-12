@@ -249,9 +249,11 @@
 | WORK-PVAM-02 | `Order/RefundReversalLedger.py` | 新增 | 原订单冲销CAS | 无二次负delta | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/UserStatsService.py` | 修改 | `update_elite_performance` | 不再缩放 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/PlacementIncrementalService.py` | 修改 | `update_placement_performance`、`_get_prev_period` | 与UserStats同输入 | TC-PVAM-02-01; TC-PVAM-02-02 |
-| WORK-PVAM-02 | `User/EliteBonusService.py` | 修改 | `update_elite_bonus_incremental`、bonus字段 | 无float | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `Common/PvAmount.py` | 修改 | signed dtype 守卫、公共 units→cents helper | unsigned/溢出 fail-loud | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | 修改 | 增量与全量 bonus/threshold/snapshot | 同一 `estimated_bonus_cents` 合同 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/PlacementRecalculationService.py` | 修改 | `_get_prev_period`、`_process_extract_batch`、`_calculate_placement_pv`、`_write_back_placement_matrix` | 无精度漂移 | TC-PVAM-02-01; TC-PVAM-02-02 |
-| WORK-PVAM-02 | `User/PEBonusService.py` / `SuperEliteBonusService.py` / `LeadershipBonusGPUService.py` / `EliteAchievementBonusService.py` | 修改 | 金额计算边界 | writer前明确cents/string | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `User/PEBonusService.py` / `PEBonusService_Main.py` / `SuperEliteBonusService.py` / `LeadershipBonusGPUService.py` / `EliteAchievementBonusService.py` | 修改/核验 | 金额计算与受影响调用边界 | writer/人工入口明确cents/string | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `User/Test/PEBonusServiceTest.py` / `test_amount_dtype_migration.py` / `test_pv_amount_common.py` | 修改 | GPU UAT 与公共/迁移回归 | units/ppm/cents、ConfigSnapshot、signed dtype 可验证 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `MessageConsumer/PvEventConsumer.py`（CALLGRAPH_GATED） | 条件新增 | 仅在部署证明确认没有现存PV入口且新消费者获批时创建 | 唯一可追踪入口 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-03 | `Common/BonusConfig.py` | 新增 | `ConfigRequirement`/`ConfigSnapshot`/parser | 运行期唯一配置对象 | TC-PVAM-03-01; TC-PVAM-03-02 |
 | WORK-PVAM-03 | `Model/Config/ConfigSnapshot.py` | 新增 | 可序列化manifest模型 | 证据可追溯 | TC-PVAM-03-01; TC-PVAM-03-02 |
@@ -481,6 +483,7 @@
 | v1.3-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根和四类工件实哈希、独立临时目录、AC 来源保真、当前轮次/版本引用 | 七轮终局审计报告 + B7 处置 | AI Agent | DRAFT |
 | v1.3-r9 | 2026-08-06 | 九轮 P0-TRACE-CHAIN-09-01 / P1-WORK-INDEX-09-02：跨层权威等价与 §4.1 索引全量同步 | 九轮终局审计报告 + 定点修补 | AI Agent | DRAFT |
 | v1.3-r10 | 2026-08-08 | 接入 DEC-019、GAP/TASK/WORK-PVAM-01C；条件化 WORK-01，更新 scope/test/traceability/version/hash 治理链 | PVAM USER-DECISION FINAL | AI Agent | DRAFT |
+| v1.3-r11 | 2026-08-12 | 同步 WORK-PVAM-02 实施期治理扩围：公共守卫、全量 Elite、PE 人工入口与 GPU UAT 回归 | WORK-PVAM-02 终审发现与治理依赖修订 | AI Agent | DRAFT |
 
 
 ## 附录 A：推荐目录结构
@@ -1732,6 +1735,8 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 | UserStatsService | effective delta | 改为接收NormalizedPvEvent/strict units | 是 | STEP-02-04/TC-023 |
 | PlacementIncrementalService | 同上 | 同一delta，不再转换 | 是 | STEP-02-04/TC-012/023 |
 | EliteBonusService | 同上 | 同一delta，不再转换 | 是 | STEP-02-04/TC-015/023 |
+| GlobalEliteBonusRecalculationService | `EliteBonusStats` 全量状态与奖金快照 | 与增量链共用 scaled threshold 和 `estimated_bonus_cents` | 是 | STEP-02-06/TC-007/008 |
+| PEBonusService_Main / PEBonusServiceTest | PE 输出 schema 与 ConfigSnapshot | 改用显式快照、micro-units、ppm、cents | 是 | STEP-02-06/TC-007/008 |
 | 批量全量服务 | DB金额/period snapshot | DB boundary转换一次 | 是 | STEP-02-03/05 |
 | 奖金服务 | units/cents | 移除float中转 | 是 | STEP-02-06 |
 
@@ -1779,10 +1784,14 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 | CHG-04 | `Order/RefundReversalLedger.py` | 原订单冲销CAS | 新增 | 不存在 | 一次整单冲销、重复no-op、冲突阻断 | 无二次负delta | 不得决定人工override |
 | CHG-05 | `User/UserStatsService.py` | `update_elite_performance` | 修改 | 接收bv并int转换 | 改接收strict units/int + identity/revision；保留兼容adapter为非生产 | 不再缩放 | 不得绕过guard |
 | CHG-06 | `User/PlacementIncrementalService.py` | `update_placement_performance`、`_get_prev_period` | 修改 | bv int、本地period | 接收同一delta；注入PeriodSnapshot | 与UserStats同输入 | 不得period算术 |
-| CHG-07 | `User/EliteBonusService.py` | `update_elite_bonus_incremental`、bonus字段 | 修改 | pv_delta int但无version；bonus float | strict units/version；写cents | 无float | 不得改资格公式 |
+| CHG-07 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | 增量入口、全量 `_evaluate_node`、bonus字段 | 修改 | 增量/全量可能使用不同阈值或 float/cents 字段 | strict units/version；全量与增量统一写 `estimated_bonus_cents` | 同一快照无 stale/missing cents | 不得改资格公式 |
 | CHG-08 | `User/PlacementRecalculationService.py` | `_get_prev_period`、`_process_extract_batch`、`_calculate_placement_pv`、`_write_back_placement_matrix` | 修改 | float读取/float64/round | int64 units与PeriodSnapshot | 无精度漂移 | 不得改闭包腿逻辑 |
-| CHG-09 | `User/PEBonusService.py` / `User/SuperEliteBonusService.py` / `User/LeadershipBonusGPUService.py` / `User/EliteAchievementBonusService.py` | 金额计算边界 | 修改 | 多处float/本地scale | 接公共units/ppm/cents；整数运算 | writer前明确cents/string | 不得改变SQL公式 |
+| CHG-09 | `User/PEBonusService.py` / `User/SuperEliteBonusService.py` / `User/LeadershipBonusGPUService.py` / `User/EliteAchievementBonusService.py` | 金额计算边界 | 修改/核验 | 多处float/本地scale | 接公共units/ppm/cents；整数运算；已符合合同的 EAB 仅核验不强制造成 diff | writer前明确cents/string | 不得改变SQL公式 |
+| CHG-09A | `Common/PvAmount.py` | `assert_integer_amount_dtype`、公共 units→cents helper | 修改 | unsigned dtype 可在后续 cast 回绕；服务可能重复本地换算 | 公共入口只接受 signed integer dtype，并提供统一溢出/舍入合同 | 所有奖金链共用 fail-loud 边界 | 不得为单一奖项增加无依据业务上限 |
+| CHG-09B | `User/PEBonusService_Main.py` / `User/Test/PEBonusServiceTest.py` / `User/Test/test_amount_dtype_migration.py` / `User/Test/test_pv_amount_common.py` | PE 人工入口、GPU UAT、公共/迁移回归 | 修改 | 旧调用方读取 `BONUS_PE`/`PE_RATE` 或无参构造配置消费者 | 显式注入 ConfigSnapshot，fixture/assert 使用 units/ppm/cents；公共守卫覆盖 unsigned | 受影响调用方与公共合同可回归 | GPU 未执行时不得宣称 UAT PASS |
 | CHG-10 | `MessageConsumer/PvEventConsumer.py`或WORK-08A证明的现有部署入口 | 生产消费编排 | 条件新增/修改 | 当前仓库未证明订单PV入口 | normalize一次后分发三stage；先guard后权威提交 | 唯一可追踪入口 | 无callgraph不得创建第二consumer/topic/group |
+
+> 实施期治理扩围依据：`Common/PvAmount.py` 是所有 Step 06 链共享的 signed-int64 信任边界；`GlobalEliteBonusRecalculationService.py` 与增量 Elite 共用 `EliteBonusStats` 和 snapshot，不能留下 legacy float/旧阈值；`PEBonusService_Main.py` 与 `PEBonusServiceTest.py` 已由检查方案 S-008 列为 PE 受影响调用方；`test_pv_amount_common.py` 必须随公共 API 合同同步。以上路径只修复已确认的单位、字段和调用合同，不新增业务公式。
 
 ### 6.1 固定基线锚点与生产入口门禁
 
@@ -1919,7 +1928,7 @@ Normalized delivery必须冻结：`source_system/source_event_id/payload_hash/bu
 
 - 目的：清除生产float金额链，落实 `TASK-PVAM-02` 的已批准目标。
 - 前置条件：WORK-PVAM-01与WORK-PVAM-03均达到DEV_VERIFIED，且WORK-PVAM-03配置接口可用
-- 修改文件：PE/SE/LB/Elite/EAB/Placement文件
+- 修改文件：`Common/PvAmount.py`、PE/SE/LB/Elite/GlobalElite/EAB/Placement文件、`User/PEBonusService_Main.py`、`User/Test/PEBonusServiceTest.py`、`User/Test/test_amount_dtype_migration.py`、`User/Test/test_pv_amount_common.py`
 - 目标符号：金额符号
 - 精确操作：
 1. 逐字段换成units/ppm/cents
@@ -2301,6 +2310,7 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | v1.3-r6 | 2026-08-06 | 五轮 F5 定点修订：规范 v3 追溯、parent provenance/DEV CLI、控制状态字段及单一事实源 | 五轮审计报告 + 当前文档修订指令 | AI Agent（编制） | DRAFT |
 | v1.3-r7 | 2026-08-06 | 六轮 S6：信任 registry 初版、归档哈希、临时目录与 Decimal finite 防护 | 六轮终局审计报告 | AI Agent（编制） | DRAFT |
 | v1.3-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根、四工件摘要、AC 来源保真及当前轮次引用 | 七轮终局审计报告 + B7 处置 | AI Agent（编制） | DRAFT |
+| v1.3-r11 | 2026-08-12 | 实施期扩围公共 signed-int64 守卫、全量 Elite 共享状态与 S-008 PE 调用方，并同步测试范围 | WORK-PVAM-02 终审发现与用户批准的治理依赖修订 | AI Agent（编制） | DRAFT |
 
 <!-- END WORK-PVAM-02_订单退款金额边界与期间解析.md -->
 

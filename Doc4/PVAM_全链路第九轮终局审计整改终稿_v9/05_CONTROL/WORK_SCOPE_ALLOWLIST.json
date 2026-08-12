@@ -38,6 +38,7 @@
                   "WORK-PVAM-02":  {
                                        "exact":  [
                                                      "Common/PeriodResolver.py",
+                                                     "Common/PvAmount.py",
                                                      "Model/Order/NormalizedPvEvent.py",
                                                      "MessageConsumer/PvEventSchema.py",
                                                      "MessageConsumer/PvEventNormalizer.py",
@@ -46,14 +47,18 @@
                                                      "User/UserStatsService.py",
                                                      "User/PlacementIncrementalService.py",
                                                      "User/EliteBonusService.py",
+                                                     "User/GlobalEliteBonusRecalculationService.py",
                                                      "User/PlacementRecalculationService.py",
                                                      "User/PEBonusService.py",
+                                                     "User/PEBonusService_Main.py",
                                                      "User/SuperEliteBonusService.py",
                                                      "User/LeadershipBonusGPUService.py",
                                                      "User/EliteAchievementBonusService.py",
                                                      "User/Test/test_pv_event_normalizer.py",
                                                      "User/Test/test_period_resolver.py",
                                                      "User/Test/test_amount_dtype_migration.py",
+                                                     "User/Test/PEBonusServiceTest.py",
+                                                     "User/Test/test_pv_amount_common.py",
                                                      "User/GlobalRecalculationService.py"
                                                  ],
                                        "prefixes":  [
