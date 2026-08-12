@@ -239,14 +239,14 @@
 | WORK-PVAM-02 | `Common/PeriodResolver.py` | 新增 | `PeriodRepository`、`PeriodResolver`、`PeriodSnapshot` | 唯一period合同 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `Model/Order/NormalizedPvEvent.py` | 新增 | 不可变事件模型 | 三stage同一payload | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `MessageConsumer/PvEventSchema.py` / `PvEventNormalizer.py` | 新增 | schema与normalize | 非法输入fail-loud | TC-PVAM-02-01; TC-PVAM-02-02 |
-| WORK-PVAM-02 | `Order/RefundReversalLedger.py` | 新增 | 原订单冲销CAS | 无二次负delta | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `Order/RefundReversalLedger.py` | 新增 | 原订单权威快照 repository + 冲销 CAS | payload 不成为金额权威且无二次负 delta | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/UserStatsService.py` | 修改 | `update_elite_performance` | 不再缩放 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/PlacementIncrementalService.py` | 修改 | `update_placement_performance`、`_get_prev_period` | 与UserStats同输入 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `Common/PvAmount.py` | 修改 | signed dtype 守卫、公共 units→cents helper | unsigned/溢出 fail-loud | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | 修改 | 增量与全量 bonus/threshold/snapshot | 同一 `estimated_bonus_cents` 合同 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/PlacementRecalculationService.py` | 修改 | `_get_prev_period`、`_process_extract_batch`、`_calculate_placement_pv`、`_write_back_placement_matrix` | 无精度漂移 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/PEBonusService.py` / `PEBonusService_Main.py` / `SuperEliteBonusService.py` / `LeadershipBonusGPUService.py` / `EliteAchievementBonusService.py` | 修改/核验 | 金额计算与受影响调用边界 | writer/人工入口明确cents/string | TC-PVAM-02-01; TC-PVAM-02-02 |
-| WORK-PVAM-02 | `User/Test/PEBonusServiceTest.py` / `test_amount_dtype_migration.py` / `test_pv_amount_common.py` | 修改 | GPU UAT 与公共/迁移回归 | units/ppm/cents、ConfigSnapshot、signed dtype 可验证 | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `User/Test/PEBonusServiceTest.py` / `SuperEliteBonusServiceTest.py` / `GlobalRecalculationServiceTest.py` / `PlacementRecalculationServiceTest.py` / `test_amount_dtype_migration.py` / `test_pv_amount_common.py` | 修改 | GPU/Dask UAT、显式 PeriodSnapshot 调用方与公共/迁移回归 | units/ppm/cents、ConfigSnapshot、period snapshot、signed dtype/checked accumulation 可验证 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `MessageConsumer/PvEventConsumer.py`（CALLGRAPH_GATED） | 条件新增 | 仅在部署证明确认没有现存PV入口且新消费者获批时创建 | 唯一可追踪入口 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-03 | `Common/BonusConfig.py` | 新增 | `ConfigRequirement`/`ConfigSnapshot`/parser | 运行期唯一配置对象 | TC-PVAM-03-01; TC-PVAM-03-02 |
 | WORK-PVAM-03 | `Model/Config/ConfigSnapshot.py` | 新增 | 可序列化manifest模型 | 证据可追溯 | TC-PVAM-03-01; TC-PVAM-03-02 |
@@ -477,6 +477,7 @@
 | v1.3-r9 | 2026-08-06 | 九轮 P0-TRACE-CHAIN-09-01 / P1-WORK-INDEX-09-02：跨层权威等价与 §4.1 索引全量同步 | 九轮终局审计报告 + 定点修补 | AI Agent | DRAFT |
 | v1.3-r10 | 2026-08-08 | 接入 DEC-019、GAP/TASK/WORK-PVAM-01C；条件化 WORK-01，更新 scope/test/traceability/version/hash 治理链 | PVAM USER-DECISION FINAL | AI Agent | DRAFT |
 | v1.3-r11 | 2026-08-12 | 同步 WORK-PVAM-02 实施期治理扩围：公共守卫、全量 Elite、PE 人工入口与 GPU UAT 回归 | WORK-PVAM-02 终审发现与治理依赖修订 | AI Agent | DRAFT |
+| v1.3-r12 | 2026-08-13 | 同步原订单权威仓库/首次状态原子合同、Global/Placement 显式 PeriodSnapshot、SE 测试调用方与持久化 checked-int64 累计边界 | WORK-PVAM-02 独立终审修复与实际实施范围同步 | AI Agent | DRAFT |
 
 
 ## 附录 A：推荐目录结构

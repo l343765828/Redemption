@@ -58,6 +58,9 @@
                                                      "User/Test/test_period_resolver.py",
                                                      "User/Test/test_amount_dtype_migration.py",
                                                      "User/Test/PEBonusServiceTest.py",
+                                                     "User/Test/SuperEliteBonusServiceTest.py",
+                                                     "User/Test/GlobalRecalculationServiceTest.py",
+                                                     "User/Test/PlacementRecalculationServiceTest.py",
                                                      "User/Test/test_pv_amount_common.py",
                                                      "User/GlobalRecalculationService.py"
                                                  ],

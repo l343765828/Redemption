@@ -917,7 +917,7 @@ approved_at / resolved_period_snapshot
 
 ### 5.1 边界与 Normalizer
 
-- 新订单/退款消息 schema 和 Normalizer。
+- 新订单/退款消息 schema、Normalizer 与可注入的原订单权威仓库；退款金额必须由原订单快照确认，payload 仅作一致性校验。
 - 实际 Kafka/MQ 部署入口及启动脚本。
 - DB batch loader/全量重建入口。
 - UserStats/Placement/Elite 增量调用签名。
@@ -945,10 +945,11 @@ approved_at / resolved_period_snapshot
 - normalized single-delta 三路一致测试；
 - period/退款边界测试；
 - 各奖金和 Placement 金额 mutation/dtype 测试；
-- `User/Test/PEBonusServiceTest.py` 同步 PE GPU UAT 的 units/ppm/cents 与 ConfigSnapshot 合同；
+- `User/Test/PEBonusServiceTest.py` 与 `User/Test/SuperEliteBonusServiceTest.py` 同步 PE/SE 的 units/ppm/cents 与 ConfigSnapshot 合同；
+- `User/Test/GlobalRecalculationServiceTest.py` 与 `User/Test/PlacementRecalculationServiceTest.py` 同步显式 `PeriodSnapshot` 调用合同；
 - `User/Test/test_pv_amount_common.py` 随公共 signed-int64 API 更新。
 
-实施期允许的治理扩围仅限上述公共信任边界、全量 Elite 共享状态和 S-008 已登记的 PE 调用方；不得借扩围改变资格、比例、分母、Country 或 SQL 舍入点。
+实施期允许的治理扩围仅限上述公共信任边界、全量 Elite 共享状态、S-008 已登记的 PE 调用方、受 `PeriodSnapshot` 签名变化影响的 Global/Placement 测试调用方，以及随 SE `pv_units`/ConfigSnapshot 合同迁移的既有测试调用方；不得借扩围改变资格、比例、分母、Country 或 SQL 舍入点。
 
 ## 6. 明确排除项（防越界红线）
 
@@ -989,7 +990,7 @@ effective_pv_delta_units = new_business_units - old_business_units
 - 任一商品退款触发原订单整单有效 BV 等额负向事件。
 - 同一原订单从未冲销到已整单冲销只允许一次。
 - 相同身份/hash 重投为幂等 no-op；第二个冲销请求按 DEC-005 识别 duplicate/no-op，不再次扣减。
-- 金额与原订单不一致、身份冲突：自动路径拒绝，记录永久冲突；不做部分应用。
+- payload 金额与权威原订单金额不一致、身份冲突：自动路径拒绝，记录永久冲突；不做部分应用。
 - 未发奖回原期，已发奖进入批准时间映射出的当前期；不重开已发历史期。
 
 ### 8.4 出计算域

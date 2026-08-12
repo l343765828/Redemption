@@ -20,8 +20,8 @@
     "real_work_patches_generated":  true,
     "real_dev_executed":  true,
     "real_uat_executed":  false,
-    "modplan_archive_sha256":  "2a13f64a615c0b3783862859a6b937178263060050d11de2501f317b8dbb7afd",
-    "workplan_archive_sha256":  "b0f6a04a3995db08c89c16911231d9c9baea490feca67f916dd05687316caaa5",
+    "modplan_archive_sha256":  "93066a4b6e2cd20ec02631642889fac3c4ddf44c88c347aab07cd928b75d0473",
+    "workplan_archive_sha256":  "adfc7e3ca621ddff233ac7ae35fec098e7a226444cff71af8ce9ae2eeee2c396",
     "approved_commit_registry":  {
                                      "path":  "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
                                      "sha256":  "60007f2da4588909ef84c96db53111a6ce20d0ae4cc79f0e9c072b668b3d0127",

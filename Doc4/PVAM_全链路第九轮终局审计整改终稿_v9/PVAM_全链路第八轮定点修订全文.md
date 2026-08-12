@@ -3144,7 +3144,7 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 # Redemption PV Amount Migration 本轮修改方案 v1.2（主控总方案）
 
 > 文档编号：`MODPLAN-PVAM_v1.2`  
-> 受控代码基线：`l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`  
+> 受控代码基线：`l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`  
 > 当前状态：`DRAFT`  
 > 授权状态：`PENDING_ORGANIZATIONAL_APPROVAL`  
 > 状态含义：本轮只完成技术文档修订；当前未提供可识别组织批准人、角色、签名或批准原文，不构成施工授权。
@@ -3155,8 +3155,8 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 
 - 授权状态：`PENDING_ORGANIZATIONAL_APPROVAL`；权威登记见 `05_CONTROL/AUTHORIZATION_STATUS-PVAM-v2.md`。历史 `APPROVAL-PVAM-20260805-01` 仅作 `UNVERIFIED/HISTORICAL_ONLY` 记录。
 - 上游检查/复核：`PLAN-PVAM-v1.15`、`REPORT-PVAM-v1.5`。
-- 受控代码基线：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`。
-- 拟申请批准范围：R-001～R-013及TASK-01～08的既定处置；不关闭DEC-013、Gate C或任何UAT AC。
+- 受控代码基线：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`。
+- 拟申请批准范围：R-001～R-013、GAP-PVAM-FLAG-CONTRACT 及 TASK-01、01C、02～08 的既定处置；不关闭 DEC-013、Gate C 或任何 UAT AC。
 
 ## 1. 文档控制
 
@@ -3167,7 +3167,7 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 | 文档版本 | `v1.2` |
 | 当前状态 | `DRAFT` |
 | 受控仓库 | `l343765828/Redemption` |
-| 受控提交 | `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控提交 | `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 代码/SQL事实基线 | 与 `097cae32e0ff7708eb6ee69a7f2ce188e80c060c` 一致；两提交区间仅 Elite 规则 DOCX 变化 |
 | 对应检查方案 | `Redemption_PV_Amount_Migration_d74_检查方案_v1.15.md` / `PLAN-PVAM-v1.15` |
 | 对应复核报告 | `Redemption_PV_Amount_Migration_d74_复核报告_v1.5.md` |
@@ -3201,15 +3201,16 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 | v1.1 | 2026-08-05 | 历史全链路修订版；其自述批准记录因不可独立验证而由本版取代 | SUPERSEDED |
 | v1.2 | 2026-08-05 | 第四轮关闭追溯、状态、patch/DEV、版本和设计边界问题 | DRAFT |
 | v1.2-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根、工件摘要、独立临时目录、AC 来源保真及当前轮次引用 | DRAFT |
+| v1.2-r10 | 2026-08-08 | 登记 DEC-019/GAP-PVAM-FLAG-CONTRACT，新增 TASK-PVAM-01C，并条件化 TASK-PVAM-01 AC-02/03 与 WORK-01 路由 | DRAFT |
 
 ## 2. 本轮目标与边界
 
 ### 2.1 目标
 
-本方案保持 8 个逻辑任务组；为降低 R-012 的紧急风险，将 TASK-07 拆为 07A/07B，因此实际交付 9 份施工任务书：
+本方案在原 8 个逻辑任务组之外新增独立 flag runtime 配置组 01C；TASK-07 仍拆为 07A/07B，因此实际交付 10 份施工任务书：
 
 - 关闭 R-001～R-013 的设计缺口并给出可执行 AC；
-- 金额域统一为 int64 micro-units、费率 ppm、最终奖金 integer cents；
+- 金额域统一为 int64 micro-units、费率 ppm、最终奖金 integer cents；通过独立 01C 建立 Redis flag Provider、atomic bootstrap、run-freeze 与四态 admission；
 - 只允许外部事件和 DB loader 两处放大；
 - monthActivePV 使用唯一读取 getter，各消费方同源现算 Active；
 - Elite stats/SOURCE/revision/outbox 原子化并输出外部发布 proof；
@@ -3247,7 +3248,7 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 | 合同 | 唯一规则 |
 |---|---|
 | PV/BV/GPV/1L/2L/结余/奖金基数 | `int64 micro-units`，`PV_SCALE=1_000_000` |
-| amount version | 新计算记录显式 `amount_encoding_version=2`；缺失/None 为 legacy/unknown，默认阻断 |
+| amount version | 只有进入获批 V2 domain 且全部共享字段满足 V2 合同的 record 才显式2；00/01共享-key Legacy record不写2；legacy/unknown只在V2 calculation entry阻断 |
 | 费率 | 有符号整数 ppm，scale=1_000_000 |
 | 最终奖金 | 内部 integer cents；外部两位 Decimal string |
 | 放大边界 | 外部规范十进制字符串→units；DB Decimal/string→units |
@@ -3282,6 +3283,7 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 | DEC-016 | CLOSED | monthActivePV 重复取真实行一条；负/上限不二次业务阻断 | 04 |
 | DEC-017 | CLOSED | 文档已修；不等于代码行为 PASS | 05、08 |
 | DEC-018 | CLOSED | 无须物化 Active，各消费方同规则现算 | 04 |
+| DEC-019 | CLOSED | AR_CONFIG Source of Truth、Redis唯一runtime Provider、MANUAL_BOOTSTRAP原子01、fail-loud/run-freeze/四态admission；WORK-01 AC/CHG条件化 | 01C、01 |
 
 ## 5. 问题处置与双向追踪矩阵
 
@@ -3289,7 +3291,7 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 
 | 问题 | 级别 | 状态 | REM | W | V | 所属任务 | 本轮结果要求 |
 |---|---:|---|---|---|---|---|---|
-| R-001 amount version 缺失 | P0 | ACCEPTED | REM-001 | W-001 | V-001 | 01 | 新记录 v2；legacy/unknown 隔离 |
+| R-001 amount version 缺失 | P0 | ACCEPTED | REM-001 | W-001 | V-001 | 01 | 获批V2 record写2；00/01共享Legacy不写2；V2入口隔离legacy/unknown |
 | R-002 PvAmount 公共层缺失 | P1 | ACCEPTED | REM-002 | W-002 | V-002 | 01 | 唯一公共金额 API |
 | R-003 float/round 链 | P0 | ACCEPTED | REM-003 | W-003 | V-003 | 02 | 生产金额整数化 |
 | R-004 配置合同偏差 | P0 | ACCEPTED | REM-004 | W-004 | V-004 | 03 | signed ppm、snapshot、exact raw |
@@ -3323,11 +3325,12 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 | OPT-002 | ACCEPTED | 08 | 机器可读双向追踪 manifest |
 | FIX-001 | N/A — CONFIRMED_CLOSED | 文档基线 | DEC-017 文档修复，不计当前缺陷 |
 | GAP-DEC004-2B | DEFERRED | 08 | 本轮不建设写入/失效链；生产前必须另有施工任务 |
+| GAP-PVAM-FLAG-CONTRACT | ACCEPTED | 01C | DEC-019 已裁决；独立 Provider/bootstrap/run admission 卡接线，禁止扩大 WORK-01 production allowlist |
 
 ### 5.4 五状态统计
 
 - R/RISK/UV 强制范围：`ACCEPTED=13`、`UAT_VERIFY=7`、`REJECTED=0`、`DEFERRED=0`、`NEEDS_DECISION=0`。
-- `GAP-DEC004-2B` 是本方案派生的实现缺口，不改变复核报告 13+7 统计。
+- `GAP-DEC004-2B` 仍为 DEFERRED；`GAP-PVAM-FLAG-CONTRACT` 是 DEC-019 已接受的治理/实施缺口，均不改变复核报告 13+7 统计。
 - FIX-001 为已关闭修复，不进入五状态统计。
 
 ## 6. 模块化任务拆分
@@ -3335,6 +3338,7 @@ Global、Global Elite、Placement Incremental、Placement Recalculation 的 XADD
 | 任务 | 标题 | 主问题 | Gate | 独立交付边界 |
 |---|---|---|---|---|
 | 01 | 金额编码公共层与模型适配 | R-001/002 | A | API、version、legacy 隔离 |
+| 01C | Flag runtime Provider 与原子配置 | GAP-PVAM-FLAG-CONTRACT | A | Redis snapshot、CAS bootstrap、run-freeze、00/01/10/11 admission |
 | 02 | 订单/退款边界与 Period | R-003/007 | A/B/C | normalizer、resolver、无 float |
 | 03 | 配置/ppm | R-004 | A/B | matrix、snapshot、signed ppm |
 | 04 | monthActivePV/Active | R-005/006 | B | 读取 getter、消费方现算；2B 写入侧延期 |
@@ -3363,6 +3367,7 @@ flowchart LR
     T08A -.并行.-> T07A
     T01 --> T02
     T01 --> T03
+    T03 --> T02
     T01 --> T04
     T03 --> T04
     T01 --> T05
@@ -3390,12 +3395,13 @@ flowchart LR
 |---|---|---|
 | 0 | 08A | archive、DDL、镜像、权限、fixture 准入 |
 | 1 | 01、07A | 公共金额域与 ACK hotfix 并行；07A 不依赖金额/状态机 |
-| 2 | 02、03 | 依赖 01，可并行 |
-| 3 | 04 | 依赖 01/03；只做读取侧和 Active |
-| 4 | 05 | 依赖 01/02/03 |
-| 5 | 06 | 状态机、发布分层、Topology 条件接线 |
-| 6 | 07B | 依赖 06 和 07A |
-| 7 | 08B | 固定环境全量 UAT |
+| 2 | 03 | 依赖 01；先交付配置 API |
+| 3 | 02 | 依赖 01/03；Step 06 使用已 DEV_VERIFIED 的配置 API |
+| 4 | 04 | 依赖 01/03；只做读取侧和 Active |
+| 5 | 05 | 依赖 01/02/03 |
+| 6 | 06 | 状态机、发布分层、Topology 条件接线 |
+| 7 | 07B | 依赖 06 和 07A |
+| 8 | 08B | 固定环境全量 UAT |
 
 ### 7.2 合并门禁
 
@@ -3479,6 +3485,7 @@ flowchart LR
 | `00_F1-F7_审核意见核验与反驳表.md` | `HISTORICAL_ONLY`；不属于当前包，不参与活动门禁 |
 | `MODPLAN-PVAM_v1.2_总方案.md` | 主索引、范围、DEC、追踪、依赖、总验收 |
 | `TASK-PVAM-01_金额编码公共层与基础模型适配器.md` | R-001/002 |
+| `TASK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md` | GAP-PVAM-FLAG-CONTRACT / DEC-019 |
 | `TASK-PVAM-02_订单退款入口金额放大与边界转换.md` | R-003/007 |
 | `TASK-PVAM-03_配置解析ppm与硬编码清理.md` | R-004 |
 | `TASK-PVAM-04_monthActivePV与Active同源现算.md` | R-005/006；2B读取侧/延期边界 |
@@ -3492,7 +3499,7 @@ flowchart LR
 
 ## 13. 审批与授权状态
 
-本文件当前治理状态为 `DRAFT`，授权状态为 `PENDING_ORGANIZATIONAL_APPROVAL`。当前会话指令授权的是 B7-01～B7-06 的事实核验和文档/控制资产修订，不是代码施工、部署或生产发布授权。
+本文件当前治理状态为 `DRAFT`，授权状态为 `PENDING_ORGANIZATIONAL_APPROVAL`。DEC-019 是 CURRENT_CONTRACT 的业务/架构裁决；它授权本轮按 Phase G→I→D 施工与 DEV 验证，但不代替可识别组织批准、真实 UAT、部署或生产发布授权。
 
 升格为 `APPROVED` 前必须提供并归档：
 
@@ -3770,11 +3777,11 @@ Model adapters / User / Placement / Bonus
 | 关联决策 | `DEC-002、DEC-005、DEC-006、DEC-007、DEC-010` |
 | 严重级别 | `P0` |
 | 当前状态 | `DRAFT` |
-| 受控基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 受控基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 编制日期 | `2026-08-04` |
 | 审批人 | `待组织授权人签署` |
 | 审批日期 | `待签署` |
-| 前置任务 | `TASK-PVAM-01` |
+| 前置任务 | `TASK-PVAM-01、TASK-PVAM-03` |
 
 > `DRAFT` 表示技术内容已修订但尚无可核验组织施工授权；不得启动代码施工、部署或生产发布。
 
@@ -3877,7 +3884,7 @@ approved_at / resolved_period_snapshot
 
 ### 5.1 边界与 Normalizer
 
-- 新订单/退款消息 schema 和 Normalizer。
+- 新订单/退款消息 schema、Normalizer 与可注入的原订单权威仓库；退款金额必须由原订单快照确认，payload 仅作一致性校验。
 - 实际 Kafka/MQ 部署入口及启动脚本。
 - DB batch loader/全量重建入口。
 - UserStats/Placement/Elite 增量调用签名。
@@ -3886,10 +3893,12 @@ approved_at / resolved_period_snapshot
 
 | 文件 | 目标修改 |
 |---|---|
+| `Common/PvAmount.py` | 公共 dtype 守卫只接受 signed integer；统一 units/ppm/cents 溢出与舍入边界 |
 | `User/PEBonusService.py` | TOTAL_BASE_GPV/bonus 全整数；取消 `cp.round` 与 `/100.0` |
+| `User/PEBonusService_Main.py` | 人工测试入口显式注入 ConfigSnapshot，读取 integer-cents 输出 |
 | `User/SuperEliteBonusService.py` | orders/pool/bonus 使用 units/cents；禁止 float dtype |
 | `User/LeadershipBonusGPUService.py` | `_truncate_gpu` 改为整数比例/截断；gpv 列 int64 |
-| `User/EliteBonusService.py` | estimated bonus 迁移到 integer cents；不写 float |
+| `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | 增量与全量 estimated bonus、阈值和 snapshot 统一到 units/cents；不写 float |
 | `Model/User/EliteBonusStats.py` | v2 路径只写 integer-cents 字段 |
 | `User/PlacementRecalculationService.py` | 去掉 Redis `float()`、float64 PV 列和 round |
 | `User/PlacementIncrementalService.py` | 入口严格 units-int；period resolver |
@@ -3902,7 +3911,12 @@ approved_at / resolved_period_snapshot
 - DB loader 测试；
 - normalized single-delta 三路一致测试；
 - period/退款边界测试；
-- 各奖金和 Placement 金额 mutation/dtype 测试。
+- 各奖金和 Placement 金额 mutation/dtype 测试；
+- `User/Test/PEBonusServiceTest.py` 与 `User/Test/SuperEliteBonusServiceTest.py` 同步 PE/SE 的 units/ppm/cents 与 ConfigSnapshot 合同；
+- `User/Test/GlobalRecalculationServiceTest.py` 与 `User/Test/PlacementRecalculationServiceTest.py` 同步显式 `PeriodSnapshot` 调用合同；
+- `User/Test/test_pv_amount_common.py` 随公共 signed-int64 API 更新。
+
+实施期允许的治理扩围仅限上述公共信任边界、全量 Elite 共享状态、S-008 已登记的 PE 调用方、受 `PeriodSnapshot` 签名变化影响的 Global/Placement 测试调用方，以及随 SE `pv_units`/ConfigSnapshot 合同迁移的既有测试调用方；不得借扩围改变资格、比例、分母、Country 或 SQL 舍入点。
 
 ## 6. 明确排除项（防越界红线）
 
@@ -3916,7 +3930,7 @@ approved_at / resolved_period_snapshot
 ## 7. 前置条件与依赖关系
 
 - 必须先完成 TASK-PVAM-01 的公共 API 与模型 version。
-- 配置相关比例必须通过 TASK-PVAM-03 接口获取；本任务只负责金额运算迁移。
+- 必须先完成 TASK-PVAM-03 的配置 API；配置相关比例必须通过该接口获取，本任务只负责金额运算迁移。
 - 最终三路事件提交、epoch 和 coverage 依赖 TASK-PVAM-06。
 - UAT 归期测试依赖 DEC-013 环境准入和 AR_PERIOD 只读权限。
 
@@ -3943,7 +3957,7 @@ effective_pv_delta_units = new_business_units - old_business_units
 - 任一商品退款触发原订单整单有效 BV 等额负向事件。
 - 同一原订单从未冲销到已整单冲销只允许一次。
 - 相同身份/hash 重投为幂等 no-op；第二个冲销请求按 DEC-005 识别 duplicate/no-op，不再次扣减。
-- 金额与原订单不一致、身份冲突：自动路径拒绝，记录永久冲突；不做部分应用。
+- payload 金额与权威原订单金额不一致、身份冲突：自动路径拒绝，记录永久冲突；不做部分应用。
 - 未发奖回原期，已发奖进入批准时间映射出的当前期；不重开已发历史期。
 
 ### 8.4 出计算域
@@ -5420,7 +5434,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 
 # WORK-PLAN-PVAM_v1.3 Redemption PV Amount Migration 施工总方案
 
-> 文档定位：基于 `MODPLAN-PVAM_v1.2` 与九份专项修改任务书定义施工顺序、统一技术合同、停工条件、DEV/UAT证据、发布和回滚。当前尚无可核验组织施工授权，本文件不得被解释为开工批准。
+> 文档定位：基于 `MODPLAN-PVAM_v1.2` 与十份专项修改任务书定义施工顺序、统一技术合同、停工条件、DEV/UAT证据、发布和回滚。当前尚无可核验组织施工授权，本文件不得被解释为开工批准。
 
 ## 0. 使用规则
 
@@ -5441,9 +5455,9 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 | 检查方案 | `PLAN-PVAM-v1.15` |
 | 七轮审查 | `B7-01～B7-06` 独立核验与第八轮定点修订；S6/F5 为历史来源 |
 | 九轮治理修补 | `P0-TRACE-CHAIN-09-01`、`P1-WORK-INDEX-09-02`、`P2-DELIVERY-NAME-09-03` 定点闭环；不改变文档业务版本 |
-| 项目代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
+| 项目代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
 | 修改方案套件SHA-256 | `6b6c45fc5d52339cae2ab7fe4cbbc1ff2e179fe45b4ef3aef08cd23410d05c97`（对象：`MODPLAN-PVAM_v1.2_终稿修改方案套件.zip`，随本包提供） |
-| SQL业务基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，排除Skill列明废弃/副本 |
+| SQL业务基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，排除Skill列明废弃/副本 |
 | 编制人 | AI Agent（施工方案编制） |
 | 复核人 | 待组织指派（AI Agent 仅完成文档自检，不代签组织审批） |
 | 批准人 | 待组织授权人签署 |
@@ -5480,16 +5494,16 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 | 检查方案 | PLAN-PVAM-v1.15 | CHK/TC/判据 | CONTROLLED_DRAFT | 授权状态见 `AUTHORIZATION_STATUS-PVAM-v2.md` |
 | 复核报告 | REPORT-PVAM-v1.5 | R-001~013、RISK、UV | FINAL / 代码结论 REJECTED | 总体 REJECTED 不弱化 |
 | 修改总方案 | MODPLAN-PVAM_v1.2 | 范围/状态/依赖 | DRAFT（待组织授权） | 逻辑8组，07拆A/B |
-| 专项修改任务书 | TASK-01~06、07A、07B、08 | 目标/排除/AC | DRAFT（待组织授权） | 九份 |
+| 专项修改任务书 | TASK-01、01C、02~06、07A、07B、08 | 目标/排除/AC | DRAFT（待组织授权） | 十份 |
 | 正式决策 | DEC-001~018相关项 | 业务/架构裁决 | 按上游CLOSED/OPEN状态 | DEC-013仍是UAT门禁 |
-| 代码与SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 施工对象 | FROZEN | Python/SQL与097cae32一致 |
+| 代码与SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 施工对象 | FROZEN | Python/SQL与097cae32一致 |
 | 施工模板 | 两份Redemption模板 | 文档结构/状态/证据 | CONTROLLED | 本套件完整套用 |
 
 ### 2.2 开工准入门槛
 
 - [x] R-001～R-013 已在修改方案中处置为 `ACCEPTED`。
 - [ ] 已取得可核验组织批准人、角色、批准原文/签名、时间、范围和允许 Wave。
-- [x] 代码基线完整SHA固定为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`。
+- [x] 代码基线完整SHA固定为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`。
 - [x] `AUDIT-WORKPLAN-PVAM-v1.1` 唯一条件 G-1 已闭合：07A 统一 `RecalcProcessResult` 并实现 `should_ack`。
 - [ ] 当前工作副本、有效SQL blob、项目Skill和MODPLAN套件SHA由执行脚本复验。
 - [ ] 每个WORK由实施/复核签署；feature flag、分支、回滚提交点就绪。
@@ -5510,7 +5524,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 
 ### 3.2 总体完成定义（DoD）
 
-- [ ] 九份WORK全部达到 `VERIFIED`，或仅保留经正式批准且不含P0/P1的偏离。
+- [ ] 十份WORK全部达到 `VERIFIED`，或仅保留经正式批准且不含P0/P1的偏离。
 - [ ] R-001～R-013均有代码diff、测试、EV及对应CHK关闭证据。
 - [ ] 所有金额字段内部为version=2 int64 micro-units，最终金额为integer cents/明确Decimal string，无生产float链。
 - [ ] 同一normalized event三stage的identity/revision/hash/delta一致且幂等。
@@ -5526,9 +5540,10 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 
 | 顺序 | 施工任务 | 来源修改任务 | 来源问题 | 关联决策 | 内容摘要 | 前置任务 | 可否并行 | 状态 |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `WORK-PVAM-01` | `TASK-PVAM-01` | R-001、R-002 | DEC-002、DEC-008、DEC-014 | 金额编码公共层与基础模型适配器 | 无 | 否 | BLOCKED |
-| 2 | `WORK-PVAM-02` | `TASK-PVAM-02` | R-003、R-007 | DEC-002、DEC-005、DEC-006、DEC-007、DEC-010 | 订单/退款入口金额放大与边界转换 | WORK-PVAM-01达到DEV_VERIFIED | 条件 | BLOCKED |
-| 3 | `WORK-PVAM-03` | `TASK-PVAM-03` | R-004 | DEC-001、DEC-002、DEC-003、DEC-009、DEC-014 | 配置解析、ppm 与硬编码清理 | WORK-PVAM-01 DEV_VERIFIED | 条件 | BLOCKED |
+| 1A | `WORK-PVAM-01C` | `TASK-PVAM-01C` | GAP-PVAM-FLAG-CONTRACT | DEC-019 | Redis flag Provider、原子 MANUAL_BOOTSTRAP、run-freeze 与 admission | 无（Phase A）；组合 factory 测试在 WORK-01 后执行 | 是 | BLOCKED |
+| 1B | `WORK-PVAM-01` | `TASK-PVAM-01` | R-001、R-002 | DEC-002、DEC-008、DEC-014、DEC-019 | 金额编码公共层与基础模型适配器及条件化 factory/version gate | WORK-PVAM-01C Phase A DEV_VERIFIED | 否 | BLOCKED |
+| 2 | `WORK-PVAM-03` | `TASK-PVAM-03` | R-004 | DEC-001、DEC-002、DEC-003、DEC-009、DEC-014 | 配置解析、ppm 与硬编码清理 | WORK-PVAM-01 DEV_VERIFIED | 条件 | BLOCKED |
+| 3 | `WORK-PVAM-02` | `TASK-PVAM-02` | R-003、R-007 | DEC-002、DEC-005、DEC-006、DEC-007、DEC-010 | 订单/退款入口金额放大与边界转换 | WORK-PVAM-01、WORK-PVAM-03 均达到 DEV_VERIFIED | 否 | BLOCKED |
 | 4 | `WORK-PVAM-04` | `TASK-PVAM-04` | R-005、R-006 | DEC-004、DEC-016、DEC-018 | monthActivePV 唯一取值与 Active 同源现算 | WORK-PVAM-01、WORK-PVAM-03 DEV_VERIFIED；真实供给链UAT仍BLOCKED | 否 | BLOCKED |
 | 5 | `WORK-PVAM-05` | `TASK-PVAM-05` | R-008、R-011 | DEC-007、DEC-008、DEC-011、DEC-017 | Elite SOURCE 原子性与外部发布证明 | WORK-PVAM-01、02、03 DEV_VERIFIED | 否 | BLOCKED |
 | 6 | `WORK-PVAM-06` | `TASK-PVAM-06` | R-009、R-010 | DEC-007、DEC-008、DEC-010、DEC-012 | 全量重算状态机、统一 Guard 与发布分层 | WORK-PVAM-01、WORK-PVAM-02、WORK-PVAM-05 DEV_VERIFIED；WORK-08A调用图证据可并行 | 否 | BLOCKED |
@@ -5536,7 +5551,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 | 8 | `WORK-PVAM-07B` | `TASK-PVAM-07B` | R-012B（parent_issue=R-012）、R-013 | DEC-007、DEC-010 | 事件路由、正式 Handler 与 Stream 保留护栏 | WORK-PVAM-06、WORK-PVAM-07A DEV_VERIFIED | 否 | BLOCKED |
 | 9 | `WORK-PVAM-08` | `TASK-PVAM-08` | RISK-001、RISK-002、UV-001～UV-005、OPT-001、OPT-002、GAP-DEC004-2B | DEC-004、DEC-009、DEC-010、DEC-012、DEC-013、DEC-017、DEC-018 | 风险、UAT 准入与机器可读证据包 | 阶段A可与所有DEV任务并行；阶段B依赖DEC-013及WORK-01～07B DEV_VERIFIED | 是 | BLOCKED |
 
-说明：逻辑上仍为 `WORK-PVAM-01～08` 八组；`WORK-PVAM-07` 为降低P0 ACK风险拆成 `07A/07B`，因此交付九份专项文件。
+说明：原 `WORK-PVAM-01～08` 八组保持不变；DEC-019 另增独立配置组 `WORK-PVAM-01C`，且 `WORK-PVAM-07` 仍拆为 `07A/07B`，因此当前交付十份专项文件。
 
 ### 4.2 纳入范围
 
@@ -5549,7 +5564,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 ### 4.3 明确排除范围
 
 - PB、SFB、GPB、CRB算法；Team Bonus units-int生产服务建设。
-- `GAP-DEC004-2B` AR_CONFIG→Delta→Redis生产写入/失效producer。
+- `GAP-DEC004-2B` AR_CONFIG→Delta→Redis生产写入/失效producer；DEC-019 只批准 MANUAL_BOOTSTRAP，不批准自动同步。
 - RISK/UV自身的代码修复；仅验证、取证和阻断。
 - 业务系统MariaDB writer、正式读切换和跨Redis/DB原子保证。
 - `_bak/_final/copy`、9个废弃SQL、`GraphService.run_bfs`、demo/print脚本作为生产证明。
@@ -5565,9 +5580,9 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 | 施工任务 | 依赖对象 | 依赖类型 | 依赖满足条件 | 未满足时处理 |
 |---|---|---|---|---|
 | WORK-08A | 固定基线/材料 | 治理 | 先交付证据schema、原生命令包装与callgraph工具 | BLOCK外部部分，不阻止无关DEV；但各WORK引用其脚本前必须先完成08A |
-| WORK-01 | 代码基线 | 代码 | HEAD精确、TASK批准 | BLOCK |
+| WORK-01C | 代码基线/Redis helper | 配置接口 | HEAD精确、TASK批准；Phase A Provider/bootstrap 可独立DEV | BLOCK |
 | WORK-07A | 现有consumer | 代码 | 独立hotfix审批 | 可与01并行 |
-| WORK-02 | WORK-01 | 接口 | 公共units/version DEV通过 | 不得开工 |
+| WORK-02 | WORK-01/03 | 接口 | 公共units/version与ConfigSnapshot配置API均DEV通过 | 不得开工 |
 | WORK-03 | WORK-01 | 接口 | 公共ppm API可用 | 不得开工 |
 | WORK-04 | WORK-01/03 | 接口/数据 | units+ConfigSnapshot可用 | 读侧可做；真实供给侧保持BLOCKED |
 | WORK-05 | WORK-01/02/03 | 数据/事件 | units/event/config合同稳定 | 不得开工 |
@@ -5580,13 +5595,14 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 | 批次 | 任务 | 开始条件 | 批次完成条件 | 失败影响 |
 |---|---|---|---|---|
 | Wave 0 | WORK-08 阶段A | 施工方案批准 | 基线/manifest/脚本DEV通过 | 缺外部材料只阻断对应UAT |
-| Wave 1 | WORK-01 + WORK-07A | 各自批准 | 公共层与ACK hotfix DEV_VERIFIED | 01失败阻断金额链；07A独立 |
-| Wave 2 | WORK-02 + WORK-03 | WORK-01通过 | 边界/period/config DEV_VERIFIED | 阻断04/05 |
-| Wave 3 | WORK-04 | 01/03通过 | Active读侧与消费者DEV通过 | 真实2B仍BLOCKED |
-| Wave 4 | WORK-05 | 01/02/03通过 | Elite atomic/batch DEV通过 | 阻断06 |
-| Wave 5 | WORK-06 | 01/02/05通过；08A调用图可用 | Coordinator/Guard/receipt DEV通过 | 阻断07B |
-| Wave 6 | WORK-07B | 06/07A通过 | schema/handler/retention DEV通过 | 阻断全链路 |
-| Wave 7 | WORK-08 阶段B | DEC-013+全部DEV | TC-001~032证据包完成 | 任何P0失败总体REJECTED |
+| Wave 1A | WORK-01C Phase A + WORK-07A | 各自批准 | Provider/bootstrap与ACK hotfix DEV_VERIFIED | 01C失败阻断WORK-01；07A独立 |
+| Wave 2 | WORK-03 | WORK-01通过 | ConfigSnapshot与配置API DEV_VERIFIED | 阻断02/04/05 |
+| Wave 3 | WORK-02 | WORK-01/03通过 | 边界/period/float金额链 DEV_VERIFIED | 阻断05/06 |
+| Wave 4 | WORK-04 | 01/03通过 | Active读侧与消费者DEV通过 | 真实2B仍BLOCKED |
+| Wave 5 | WORK-05 | 01/02/03通过 | Elite atomic/batch DEV通过 | 阻断06 |
+| Wave 6 | WORK-06 | 01/02/05通过；08A调用图可用 | Coordinator/Guard/receipt DEV通过 | 阻断07B |
+| Wave 7 | WORK-07B | 06/07A通过 | schema/handler/retention DEV通过 | 阻断全链路 |
+| Wave 8 | WORK-08 阶段B | DEC-013+全部DEV | TC-001~032证据包完成 | 任何P0失败总体REJECTED |
 
 ### 5.3 强制停工条件
 
@@ -5603,14 +5619,15 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 
 - 依赖方向：`Common → Model adapters / User / Placement / Bonus`；Common禁止反向导入业务层。
 - I/O、纯计算、权威提交、发布/receipt、consumer/retention分层。
-- Redis是本仓权威状态；关系库正式writer和读切换属于业务系统。
+- Redis是本仓权威状态且是 PV amount flag 唯一 runtime Provider；AR_CONFIG 仍为业务 Source of Truth；关系库正式writer和读切换属于业务系统。
 - GPU/Dask仅消费已经规范化的int64列；禁止金额隐式提升为float。
 
 ### 6.2 数据契约
 
 | 对象 | 字段/接口 | 单位与类型 | 空值/默认值 | 兼容规则 | 责任任务 |
 |---|---|---|---|---|---|
-| UserStats/EliteBonusStats | amount_encoding_version | Optional[int]；新域必须2 | 缺失=legacy unknown | 普通计算阻断 | WORK-01 |
+| UserStats/EliteBonusStats | amount_encoding_version | Optional[int]；完整V2域必须2 | 缺失=legacy unknown | 00/01 Legacy path不无条件gate且不stamping2；获批11 V2 entry阻断 | WORK-01 |
+| PV amount flag | `PVAmountRunConfig` | frozen bool/bool/non-negative config_version | 无默认 | Redis atomic snapshot；00/01允许、10拒绝、未批准11拒绝；run途中不refresh | WORK-01C/01 |
 | PV/BV/GPV/1L/2L/结余 | 金额字段 | int64 micro-units | 业务零=0，不用None洗白 | 两处边界转换 | WORK-01/02 |
 | 费率 | *_rate_ppm | signed int64 ppm | 由键矩阵决定缺失/0 | raw+canonical checksum | WORK-03 |
 | 最终奖金 | *_cents | int64 cents | 0明确 | E/PE/SE/LB/TB截断；EAB最终HALF_UP | WORK-01/02 |
@@ -5641,11 +5658,14 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 
 | 施工任务 | 文件/对象 | 变更类型 | 目标符号/表/配置 | 预期行为 | 对应测试 |
 |---|---|---|---|---|---|
+| WORK-PVAM-01C | `Redishelper/PVAmountConfigProvider.py` | 新增 | run config/provider/admission | Redis唯一runtime Provider、fail-loud、run-freeze | TC-FLAG-01～11; TC-FLAG-13 |
+| WORK-PVAM-01C | `Redishelper/PVAmountConfigBootstrap.py` | 新增 | MANUAL_BOOTSTRAP/Lua CAS | 原子发布01、stale/lost-update保护 | TC-FLAG-12; TC-FLAG-22; TC-FLAG-23 |
+| WORK-PVAM-01C | `tests/pvam/WORK-PVAM-01C/` | 新增 | provider/bootstrap tests | fake DEV与真实Redis UAT分层 | TC-FLAG-01～13; TC-FLAG-22; TC-FLAG-23 |
 | WORK-PVAM-01 | `Common/PvAmount.py` | 新增 | 模块级常量与纯函数 | 唯一公共金额 API | TC-PVAM-01-01; TC-PVAM-01-02 |
 | WORK-PVAM-01 | `Common/AmountModelAdapter.py` | 新增 | `AmountRecordState`、`classify_amount_record` | 普通计算只能接收 NEW | TC-PVAM-01-01; TC-PVAM-01-02 |
-| WORK-PVAM-01 | `Model/User/UserStats.py` | 修改 | `UserStats.amount_encoding_version` | 新记录显式2，旧记录保持None | TC-PVAM-01-01; TC-PVAM-01-02 |
-| WORK-PVAM-01 | `Model/User/EliteBonusStats.py` | 修改 | version、`estimated_bonus_cents` | v2 不写 float | TC-PVAM-01-01; TC-PVAM-01-02 |
-| WORK-PVAM-01 | `User/UserStatsService.py` | 修改 | `_get_or_init_user` | 单位可审计 | TC-PVAM-01-01; TC-PVAM-01-02 |
+| WORK-PVAM-01 | `Model/User/UserStats.py` | 修改 | `UserStats.amount_encoding_version` | 仅获批 V2 domain record 显式2；00/01共享-key Legacy record不写2 | TC-PVAM-01-01; TC-PVAM-01-02 |
+| WORK-PVAM-01 | `Model/User/EliteBonusStats.py` | 修改 | version、`estimated_bonus_cents` | 仅V2 blank/init允许cents=0；禁止legacy float→cents与00/01 stamping2 | TC-PVAM-01-01; TC-PVAM-01-02 |
+| WORK-PVAM-01 | `User/UserStatsService.py` | 修改 | `_get_or_init_user` | factory按冻结run config条件化且单位可审计 | TC-PVAM-01-01; TC-PVAM-01-02 |
 | WORK-PVAM-01 | `User/GlobalRecalculationService.py` | 修改 | `_new_zero_user_stats`、`_mget_users_with_exists` | 全量不混算 | TC-PVAM-01-01; TC-PVAM-01-02 |
 | WORK-PVAM-01 | `User/PlacementIncrementalService.py` / `User/PlacementRecalculationService.py` | 修改 | 节点构造与批量读取 | placement全字段同单位 | TC-PVAM-01-01; TC-PVAM-01-02 |
 | WORK-PVAM-01 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | 修改 | `_build_blank_node` / `_new_blank_stats` 等 | Elite状态可判编码 | TC-PVAM-01-01; TC-PVAM-01-02 |
@@ -5653,12 +5673,14 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 | WORK-PVAM-02 | `Common/PeriodResolver.py` | 新增 | `PeriodRepository`、`PeriodResolver`、`PeriodSnapshot` | 唯一period合同 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `Model/Order/NormalizedPvEvent.py` | 新增 | 不可变事件模型 | 三stage同一payload | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `MessageConsumer/PvEventSchema.py` / `PvEventNormalizer.py` | 新增 | schema与normalize | 非法输入fail-loud | TC-PVAM-02-01; TC-PVAM-02-02 |
-| WORK-PVAM-02 | `Order/RefundReversalLedger.py` | 新增 | 原订单冲销CAS | 无二次负delta | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `Order/RefundReversalLedger.py` | 新增 | 原订单权威快照 repository + 冲销 CAS | payload 不成为金额权威且无二次负 delta | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/UserStatsService.py` | 修改 | `update_elite_performance` | 不再缩放 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/PlacementIncrementalService.py` | 修改 | `update_placement_performance`、`_get_prev_period` | 与UserStats同输入 | TC-PVAM-02-01; TC-PVAM-02-02 |
-| WORK-PVAM-02 | `User/EliteBonusService.py` | 修改 | `update_elite_bonus_incremental`、bonus字段 | 无float | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `Common/PvAmount.py` | 修改 | signed dtype 守卫、公共 units→cents helper | unsigned/溢出 fail-loud | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | 修改 | 增量与全量 bonus/threshold/snapshot | 同一 `estimated_bonus_cents` 合同 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `User/PlacementRecalculationService.py` | 修改 | `_get_prev_period`、`_process_extract_batch`、`_calculate_placement_pv`、`_write_back_placement_matrix` | 无精度漂移 | TC-PVAM-02-01; TC-PVAM-02-02 |
-| WORK-PVAM-02 | `User/PEBonusService.py` / `SuperEliteBonusService.py` / `LeadershipBonusGPUService.py` / `EliteAchievementBonusService.py` | 修改 | 金额计算边界 | writer前明确cents/string | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `User/PEBonusService.py` / `PEBonusService_Main.py` / `SuperEliteBonusService.py` / `LeadershipBonusGPUService.py` / `EliteAchievementBonusService.py` | 修改/核验 | 金额计算与受影响调用边界 | writer/人工入口明确cents/string | TC-PVAM-02-01; TC-PVAM-02-02 |
+| WORK-PVAM-02 | `User/Test/PEBonusServiceTest.py` / `SuperEliteBonusServiceTest.py` / `GlobalRecalculationServiceTest.py` / `PlacementRecalculationServiceTest.py` / `test_amount_dtype_migration.py` / `test_pv_amount_common.py` | 修改 | GPU/Dask UAT、显式 PeriodSnapshot 调用方与公共/迁移回归 | units/ppm/cents、ConfigSnapshot、period snapshot、signed dtype/checked accumulation 可验证 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-02 | `MessageConsumer/PvEventConsumer.py`（CALLGRAPH_GATED） | 条件新增 | 仅在部署证明确认没有现存PV入口且新消费者获批时创建 | 唯一可追踪入口 | TC-PVAM-02-01; TC-PVAM-02-02 |
 | WORK-PVAM-03 | `Common/BonusConfig.py` | 新增 | `ConfigRequirement`/`ConfigSnapshot`/parser | 运行期唯一配置对象 | TC-PVAM-03-01; TC-PVAM-03-02 |
 | WORK-PVAM-03 | `Model/Config/ConfigSnapshot.py` | 新增 | 可序列化manifest模型 | 证据可追溯 | TC-PVAM-03-01; TC-PVAM-03-02 |
@@ -5753,7 +5775,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 |---|---|---|---|---|
 | 基线/patch/语法 | `05_CONTROL/check_baseline_preflight.sh` + `05_CONTROL/validate_parent_provenance.py` + `05_CONTROL/validate_work_patch.sh` + `05_CONTROL/validate_work_dev.sh` | root baseline、parent provenance、PARENT_COMMIT/PARENT_TREE、WORK commit/tree、scope、patch SHA 与 changed-file `py_compile` 全部一致 | EV-BASE/patch/dev | WORK-08/全部 |
 | pytest收集 | `python -m pytest --collect-only -q` | 目标测试真实收集 | JUnit/collect | WORK-08 |
-| 公共合同/单元 | 各WORK第9.2节命令 | 全部通过，无未解释skip | JUnit/stdout | WORK-01~07B |
+| 公共合同/单元 | 各WORK第9.2节命令 | 全部通过，无未解释skip | JUnit/stdout | WORK-01C、01~07B |
 | AST/mutation/callgraph | WORK-08工具 | 反模式0、关键mutation被捕获 | JSON/HTML | 全部 |
 | CPU/替身 | repository/Redis fake | 只证明纯逻辑与调用，不冒充UAT | manifest | 对应WORK |
 
@@ -5761,7 +5783,8 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 
 | 验证包 | 前置条件 | 执行脚本/步骤 | 预期结果 | 必须回传证据 | 状态 |
 |---|---|---|---|---|---|
-| ENV-01 | 专用 Redis DB/前缀；固定commit；WORK-08 manifest已生成 | 见 `WORK-PVAM-01_金额编码公共层与基础模型适配器.md` §9.3 | version=2 正常；legacy/3阻断且原值不变; 新记录全部显式 version=2; 无旧记录被自动放大 | 命令/exit/log/DB/Redis/Kafka/Dask/manifest SHA | PENDING_TEST_ENV |
+| ENV-01C | 隔离 Redis；AR_CONFIG 批准值已确认；不得使用生产 key | 见 `WORK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md` §9.2 | 原子加载/发布01；00/01/10/11 admission、stale/concurrent CAS、run-freeze全部符合DEC-019；fake证据不冒充本行 | 命令/exit/log/Redis前后snapshot/config_version/checksum/manifest SHA | PENDING_TEST_ENV |
+| ENV-01 | 专用 Redis DB/前缀；固定commit；WORK-08 manifest已生成 | 见 `WORK-PVAM-01_金额编码公共层与基础模型适配器.md` §9.3 | 00/01共享-key Legacy record不写2；获批/test-only V2 factory写2；Legacy path不无条件gate；无旧记录被放大或float→cents | 命令/exit/log/DB/Redis/Kafka/Dask/manifest SHA | PENDING_TEST_ENV |
 | ENV-02 | Kafka/Redis/Dask隔离环境；AR_PERIOD只读；专用topic/group/period | 见 `WORK-PVAM-02_订单退款金额边界与期间解析.md` §9.3 | 同一事件三stage delta/hash一致; 整单退款只冲销一次且归期由批准时间决定; 所有金额列int64；差分为0或已批准标签 | 命令/exit/log/DB/Redis/Kafka/Dask/manifest SHA | PENDING_TEST_ENV |
 | ENV-03 | 脱敏AR_CONFIG快照；DB/SQL oracle可用；fixture有checksum | 见 `WORK-PVAM-03_配置解析ppm与硬编码清理.md` §9.3 | PE/Elite无硬编码兜底; 负费率按合同计算；SE exact raw成立; TB missing/0/capping=0与SQL一致 | 命令/exit/log/DB/Redis/Kafka/Dask/manifest SHA | PENDING_TEST_ENV |
 | ENV-04 | WORK-08批准fixture；Redis/Delta隔离；真实2B状态标DEFERRED | 见 `WORK-PVAM-04_monthActivePV与Active同源现算.md` §9.3 | 当前run所有消费者Active一致; 最终缺失时整run失败且无奖金发布; fixture证据不关闭2B生产缺口 | 命令/exit/log/DB/Redis/Kafka/Dask/manifest SHA | PENDING_TEST_ENV |
@@ -5775,13 +5798,13 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 
 #### Traceability Manifest v3
 
-- 基线：`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`
+- 基线：`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`
 - 统计域：核心缺陷 13 项；R-012 拆为两个施工子项，但不增加核心缺陷总数。
 
 | CHK | R/parent | DEC | TASK | WORK | REM/W/V | STEP | TC | EV |
 |---|---|---|---|---|---|---:|---:|---:|
-| CHK-DATA-001、CHK-DATA-003、CHK-EVT-002 | R-001 | DEC-002、DEC-008、DEC-014 | TASK-PVAM-01 | WORK-PVAM-01 | REM-001/W-001/V-001 | 5 | 6 | 15 |
-| CHK-ARCH-003 | R-002 | DEC-002、DEC-008、DEC-014 | TASK-PVAM-01 | WORK-PVAM-01 | REM-002/W-002/V-002 | 5 | 6 | 15 |
+| CHK-DATA-001、CHK-DATA-003、CHK-EVT-002 | R-001 | DEC-002、DEC-008、DEC-014、DEC-019 | TASK-PVAM-01 | WORK-PVAM-01 | REM-001/W-001/V-001 | 5 | 14 | 15 |
+| CHK-ARCH-003 | R-002 | DEC-002、DEC-008、DEC-014 | TASK-PVAM-01 | WORK-PVAM-01 | REM-002/W-002/V-002 | 5 | 14 | 15 |
 | CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011 | R-003 | DEC-002、DEC-005、DEC-006、DEC-007、DEC-010 | TASK-PVAM-02 | WORK-PVAM-02 | REM-003/W-003/V-003 | 7 | 8 | 17 |
 | CHK-DATA-004、CHK-BIZ-007、CHK-BIZ-008 | R-004 | DEC-001、DEC-002、DEC-003、DEC-009、DEC-014 | TASK-PVAM-03 | WORK-PVAM-03 | REM-004/W-004/V-004 | 6 | 7 | 15 |
 | CHK-DATA-006、CHK-BIZ-007 | R-005 | DEC-004、DEC-016、DEC-018 | TASK-PVAM-04 | WORK-PVAM-04 | REM-005/W-005/V-005 | 5 | 8 | 16 |
@@ -5794,6 +5817,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 | CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-001、CHK-TEST-003 | R-012A（parent=R-012） | DEC-010 | TASK-PVAM-07A | WORK-PVAM-07A | REM-012A/W-012A/V-012A | 4 | 7 | 13 |
 | CHK-ARCH-002、CHK-EVT-006、CHK-EVT-007、CHK-TEST-003 | R-012B（parent=R-012） | DEC-007、DEC-010 | TASK-PVAM-07B | WORK-PVAM-07B | REM-012B/W-012B/V-012B | 6 | 9 | 15 |
 | CHK-EVT-007 | R-013 | DEC-007、DEC-010 | TASK-PVAM-07B | WORK-PVAM-07B | REM-013/W-013/V-013 | 6 | 9 | 15 |
+| CHK-ARCH-001、CHK-ARCH-003、CHK-DATA-003、CHK-EVT-003、CHK-TEST-003、CHK-TEST-004 | GAP-PVAM-FLAG-CONTRACT | DEC-019 | TASK-PVAM-01C | WORK-PVAM-01C | REM-014/W-014/V-014 | 4 | 15 | 5 |
 
 ## 10. 发布、切换与回滚总策略
 
@@ -5821,6 +5845,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 
 | 对象 | 可否独立回滚 | 回滚步骤所在任务 | 数据恢复点 | 回滚后验证 |
 |---|---|---|---|---|
+| WORK-PVAM-01C config Provider/bootstrap | 是 | WORK-PVAM-01C §11 | 保留versioned snapshot；发布更高version合法00/01 | TC-FLAG-01/12/22/23 |
 | WORK-PVAM-01代码/flag | 是 | WORK-PVAM-01 §11 | 最后committed旧状态/保留v2审计 | TC-PVAM-01-01 |
 | WORK-PVAM-02代码/flag | 是 | WORK-PVAM-02 §11 | 最后committed旧状态/保留v2审计 | TC-PVAM-02-01 |
 | WORK-PVAM-03代码/flag | 是 | WORK-PVAM-03 §11 | 最后committed旧状态/保留v2审计 | TC-PVAM-03-01 |
@@ -5835,7 +5860,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 
 | 编号 | 交付物 | 责任任务 | 格式/位置 | 完成条件 | artifact_status |
 |---|---|---|---|---|---|
-| D-01 | 生产代码修改 | WORK-01~07B | commit/diff | 全部CHG完成且复核 | PENDING |
+| D-01 | 生产代码修改 | WORK-01C、01~07B | commit/diff | 全部CHG完成且复核 | PENDING |
 | D-02 | 单元/契约/mutation测试 | 全部 | JUnit/JSON/log | DEV全通过 | PENDING |
 | D-03 | 迁移/回滚/安全脚本 | WORK-08+各WORK | uat/scripts | dry-run/幂等/回滚验证 | PENDING |
 | D-04 | UAT执行包 | WORK-08 | evidence/attempt-* | TC-001~032状态完整 | PENDING |
@@ -5884,6 +5909,9 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 | v1.3-r7 | 2026-08-06 | 六轮 S6：duplicate-shadow、registry 初版、归档哈希、临时目录与 Decimal finite 防护 | 六轮终局审计报告 | AI Agent | DRAFT |
 | v1.3-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根和四类工件实哈希、独立临时目录、AC 来源保真、当前轮次/版本引用 | 七轮终局审计报告 + B7 处置 | AI Agent | DRAFT |
 | v1.3-r9 | 2026-08-06 | 九轮 P0-TRACE-CHAIN-09-01 / P1-WORK-INDEX-09-02：跨层权威等价与 §4.1 索引全量同步 | 九轮终局审计报告 + 定点修补 | AI Agent | DRAFT |
+| v1.3-r10 | 2026-08-08 | 接入 DEC-019、GAP/TASK/WORK-PVAM-01C；条件化 WORK-01，更新 scope/test/traceability/version/hash 治理链 | PVAM USER-DECISION FINAL | AI Agent | DRAFT |
+| v1.3-r11 | 2026-08-12 | 同步 WORK-PVAM-02 实施期治理扩围：公共守卫、全量 Elite、PE 人工入口与 GPU UAT 回归 | WORK-PVAM-02 终审发现与治理依赖修订 | AI Agent | DRAFT |
+| v1.3-r12 | 2026-08-13 | 同步原订单权威仓库/首次状态原子合同、Global/Placement 显式 PeriodSnapshot、SE 测试调用方与持久化 checked-int64 累计边界 | WORK-PVAM-02 独立终审修复与实际实施范围同步 | AI Agent | DRAFT |
 
 
 ## 附录 A：推荐目录结构
@@ -5892,6 +5920,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 04_施工方案/
 ├── WORK-PLAN-PVAM_v1.3_施工总方案.md
 ├── WORK-PVAM-01_金额编码公共层与基础模型适配器.md
+├── WORK-PVAM-01C_Flag_Runtime_Contract与Redis原子配置.md
 ├── WORK-PVAM-02_订单退款金额边界与期间解析.md
 ├── WORK-PVAM-03_配置解析ppm与硬编码清理.md
 ├── WORK-PVAM-04_monthActivePV与Active同源现算.md
@@ -5906,7 +5935,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 └── README.md
 ```
 
-拆分原则：逻辑上保持 `WORK-PVAM-01～08` 八组；`WORK-PVAM-07` 因紧急 ACK fail-closed 与最终 schema/retention 可独立施工、验证和回滚而物理拆分为 07A/07B。不得将 RISK/UV/DEFERRED 项转成未获批准的生产代码修改。
+拆分原则：原 `WORK-PVAM-01～08` 八组保持；DEC-019 新增独立配置卡 01C，07 仍物理拆分 07A/07B。01C 不扩张 WORK-01 production allowlist，不得把 RISK/UV/DEFERRED 项转成未获批准修改。
 
 ## 附录 B：追溯编号约定与本轮绑定
 
@@ -5927,6 +5956,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 
 | WORK | R / RISK / UV | REM | W | V / UAT |
 |---|---|---|---|---|
+| WORK-01C | GAP-PVAM-FLAG-CONTRACT | REM-014 | W-014 | V-014 |
 | WORK-01 | R-001、R-002 | REM-001、REM-002 | W-001、W-002 | V-001、V-002 |
 | WORK-02 | R-003、R-007 | REM-003、REM-007 | W-003、W-007 | V-003、V-007 |
 | WORK-03 | R-004 | REM-004 | W-004 | V-004 |
@@ -5950,7 +5980,7 @@ T08 负责取得固定 archive、部署 manifest、consumer/cron/人工入口、
 ## 附录 D：Patch与Rollback阶段边界
 
 1. 施工方案负责规定patch生成和验收方法，不在代码尚未实现时伪造标准patch。
-2. 每个代码WORK完成前必须交付可在`2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`干净树通过`git apply --check`的真实patch。
+2. 每个代码WORK完成前必须交付可在`3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`干净树通过`git apply --check`的真实patch。
 3. 每个部署WORK在切换前必须有签名的`ROLLBACK-MANIFEST-PVAM-v1`，包含部署系统、workload/release/config、前后镜像、精确命令、健康检查和数据恢复动作。
 4. 缺少外部部署信息时状态为`BLOCKED_EXTERNAL_EVIDENCE`，而不是由文档编制者猜测命令。
 
@@ -6748,7 +6778,7 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 
 1. 上游修改任务与本 v1.3 施工套件当前均为 `DRAFT`；没有组织授权前，本任务保持 `BLOCKED`，不得启动代码施工或部署。
 2. 只实施 `R-003、R-007` 中已 `ACCEPTED` 或由来源 TASK 明确批准的条件代码事项。任何 `REJECTED / NEEDS_DECISION / DEFERRED / 未获 TASK 授权的 UAT_VERIFY` 只允许登记、验证或阻断，不得扩展代码范围。
-3. 基线必须精确等于 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；发现漂移立即登记 `BLOCK-PVAM-02-BASELINE`。
+3. 基线必须精确等于 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；发现漂移立即登记 `BLOCK-PVAM-02-BASELINE`。
 4. 所有新文件/符号已在变更表标为“新增”；其余锚点均来自固定基线。
 5. DEV替身不能冒充真实Kafka/Redis/Dask/GPU/MySQL UAT验证。
 
@@ -6764,14 +6794,14 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | 复核闭环追踪号 | `REM-003、REM-007 / W-003、W-007 / V-003、V-007` |
 | 来源检查项 | `CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005` |
 | 关联决策 | `DEC-002、DEC-005、DEC-006、DEC-007、DEC-010` |
-| 代码基线 | `l343765828/Redemption@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb` |
-| SQL基线 | `sql_uat/*@2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，仅有效SQL |
+| 代码基线 | `l343765828/Redemption@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2` |
+| SQL基线 | `sql_uat/*@3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，仅有效SQL |
 | 文档版本 | `v1.3` |
 | 负责人 | `待指派 / 实施工程师` |
 | 复核人 | `待指派 / 架构与QA` |
 | 当前状态 | `BLOCKED` |
 | 文档治理状态 | `DRAFT`（`PENDING_ORGANIZATIONAL_APPROVAL`） |
-| 前置任务 | WORK-PVAM-01 达到 DEV_VERIFIED；WORK-PVAM-03 的配置 API 在奖金切换前可用 |
+| 前置任务 | WORK-PVAM-01、WORK-PVAM-03 均达到 DEV_VERIFIED；WORK-PVAM-03 配置 API 在奖金切换前必须可用 |
 | 功能开关 | `PV_NORMALIZER_V2 / PERIOD_RESOLVER_V2` |
 
 ### 1.1 一对一追溯摘要
@@ -6797,14 +6827,14 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 | 修改任务书 | `TASK-PVAM-02` | 采用方案、范围、排除项、AC | DRAFT（待组织授权） |
 | 检查方案 | `PLAN-PVAM-v1.15` | CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005 | CONTROLLED |
 | 正式决策 | DEC-002、DEC-005、DEC-006、DEC-007、DEC-010 | 只执行已关闭裁决；开放项阻断 | CLOSED / 按上游登记 |
-| 代码/SQL快照 | 2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb | 唯一施工对象 | FROZEN |
+| 代码/SQL快照 | 3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2 | 唯一施工对象 | FROZEN |
 | 施工模板 | 总方案模板/专项模板 | 章节、状态、证据纪律 | CONTROLLED |
 
 ### 2.2 开工条件
 
-- [ ] 当前 HEAD 精确为 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`，工作树无未登记变更。
+- [ ] 当前 HEAD 精确为 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`，工作树无未登记变更。
 - [ ] `TASK-PVAM-02` 的人工批准记录已归档；本 `WORK` 已由施工负责人和复核人签署。
-- [ ] 前置关系满足：WORK-PVAM-01 达到 DEV_VERIFIED；WORK-PVAM-03 的配置 API 在奖金切换前可用。
+- [ ] 前置关系满足：WORK-PVAM-01、WORK-PVAM-03 均达到 DEV_VERIFIED；WORK-PVAM-03 配置 API 在奖金切换前必须可用。
 - [ ] 本任务涉及的接口、单位、精度、兼容和回滚边界已由上游任务固定。
 - [ ] DEV测试依赖已安装；UAT项具备WORK-08生成的环境/数据/schema manifest。
 - [ ] 功能开关默认关闭，回滚路径已演练。
@@ -6822,7 +6852,7 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 | 差异 | 当前实现缺少本任务批准的唯一合同、门禁或原子边界。 |
 | 影响 | 金额/PV单位、奖金、并发一致性、发布或可恢复性，具体见来源问题。 |
 | 严重级别 | P0 |
-| 证据位置 | 固定代码基线 `2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb`；来源 `TASK-PVAM-02`；检查项 `CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005` |
+| 证据位置 | 固定代码基线 `3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2`；来源 `TASK-PVAM-02`；检查项 `CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005` |
 
 ### 3.2 已确认代码事实
 
@@ -6876,6 +6906,8 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 | UserStatsService | effective delta | 改为接收NormalizedPvEvent/strict units | 是 | STEP-02-04/TC-023 |
 | PlacementIncrementalService | 同上 | 同一delta，不再转换 | 是 | STEP-02-04/TC-012/023 |
 | EliteBonusService | 同上 | 同一delta，不再转换 | 是 | STEP-02-04/TC-015/023 |
+| GlobalEliteBonusRecalculationService | `EliteBonusStats` 全量状态与奖金快照 | 与增量链共用 scaled threshold 和 `estimated_bonus_cents` | 是 | STEP-02-06/TC-007/008 |
+| PEBonusService_Main / PEBonusServiceTest | PE 输出 schema 与 ConfigSnapshot | 改用显式快照、micro-units、ppm、cents | 是 | STEP-02-06/TC-007/008 |
 | 批量全量服务 | DB金额/period snapshot | DB boundary转换一次 | 是 | STEP-02-03/05 |
 | 奖金服务 | units/cents | 移除float中转 | 是 | STEP-02-06 |
 
@@ -6886,8 +6918,9 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 - 新增 `Common/PeriodResolver.py`，以可注入 repository 查询 AR_PERIOD；输出不可变 `PeriodSnapshot(period_num, calc_year, calc_month, first_period_num, previous_period_num, source_checksum)`。
 - 新增 `Model/Order/NormalizedPvEvent.py`、`MessageConsumer/PvEventSchema.py`、`PvEventNormalizer.py`；raw 金额字段只接受 canonical JSON string。
 - 事件身份不含 period；normalized event 固化 source identity、hash、business revision、previous revision、effective_pv_delta_units、version=2 和 resolved period snapshot。
-- 退款用 `Order/RefundReversalLedger.py`（新增 Redis authority接口）保证同一原订单只产生一次整单负delta；批准时间按 GMT+8 映射。
+- 退款由可注入的 `OriginalOrderRepository` 读取权威 `OriginalOrderSnapshot`，payload 金额只用于一致性校验；`Order/RefundReversalLedger.py` 的原子声明保证同一原订单只产生一次整单负 delta，批准时间按 GMT+8 映射。
 - PE/SE/LB/Elite/Placement 的金额列改用 int64 units/cents；EAB 保留最终一次 HALF_UP，但入口统一使用公共units。
+- 本任务的 event registry 只冻结 identity/hash；生产事件完成态、三 stage 原子提交、epoch/coverage 与 ACK 仍由 WORK-PVAM-06 及 WORK-08A 选定的生产入口负责。
 
 选择理由：
 
@@ -6920,13 +6953,18 @@ CHK-DATA-001、CHK-DATA-002、CHK-ARCH-003、CHK-BIZ-011、CHK-DATA-005
 | CHG-01 | `Common/PeriodResolver.py` | `PeriodRepository`、`PeriodResolver`、`PeriodSnapshot` | 新增 | 不存在 | 从AR_PERIOD解析current/first/previous/approval-time period | 唯一period合同 | 不得本地减一猜测 |
 | CHG-02 | `Model/Order/NormalizedPvEvent.py` | 不可变事件模型 | 新增 | 不存在 | 定义identity/revision/delta/version/period | 三stage同一payload | 不得含float |
 | CHG-03 | `MessageConsumer/PvEventSchema.py` / `MessageConsumer/PvEventNormalizer.py` | schema与normalize | 新增 | 无受控金额入口 | canonical string→units一次，生成hash/delta | 非法输入fail-loud | 不得trim/指数/number洗白 |
-| CHG-04 | `Order/RefundReversalLedger.py` | 原订单冲销CAS | 新增 | 不存在 | 一次整单冲销、重复no-op、冲突阻断 | 无二次负delta | 不得决定人工override |
+| CHG-04 | `Order/RefundReversalLedger.py` | `OriginalOrderRepository`、`OriginalOrderSnapshot`、原订单冲销 CAS | 新增 | 不存在 | 先读取权威原订单金额/可退款状态，再执行一次整单冲销；重复 no-op、冲突阻断 | payload 不成为金额权威且无二次负 delta | 不得决定人工 override |
 | CHG-05 | `User/UserStatsService.py` | `update_elite_performance` | 修改 | 接收bv并int转换 | 改接收strict units/int + identity/revision；保留兼容adapter为非生产 | 不再缩放 | 不得绕过guard |
 | CHG-06 | `User/PlacementIncrementalService.py` | `update_placement_performance`、`_get_prev_period` | 修改 | bv int、本地period | 接收同一delta；注入PeriodSnapshot | 与UserStats同输入 | 不得period算术 |
-| CHG-07 | `User/EliteBonusService.py` | `update_elite_bonus_incremental`、bonus字段 | 修改 | pv_delta int但无version；bonus float | strict units/version；写cents | 无float | 不得改资格公式 |
+| CHG-07 | `User/EliteBonusService.py` / `User/GlobalEliteBonusRecalculationService.py` | 增量入口、全量 `_evaluate_node`、bonus字段 | 修改 | 增量/全量可能使用不同阈值或 float/cents 字段 | strict units/version；全量与增量统一写 `estimated_bonus_cents` | 同一快照无 stale/missing cents | 不得改资格公式 |
 | CHG-08 | `User/PlacementRecalculationService.py` | `_get_prev_period`、`_process_extract_batch`、`_calculate_placement_pv`、`_write_back_placement_matrix` | 修改 | float读取/float64/round | int64 units与PeriodSnapshot | 无精度漂移 | 不得改闭包腿逻辑 |
-| CHG-09 | `User/PEBonusService.py` / `User/SuperEliteBonusService.py` / `User/LeadershipBonusGPUService.py` / `User/EliteAchievementBonusService.py` | 金额计算边界 | 修改 | 多处float/本地scale | 接公共units/ppm/cents；整数运算 | writer前明确cents/string | 不得改变SQL公式 |
+| CHG-09 | `User/PEBonusService.py` / `User/SuperEliteBonusService.py` / `User/LeadershipBonusGPUService.py` / `User/EliteAchievementBonusService.py` | 金额计算边界 | 修改/核验 | 多处float/本地scale | 接公共units/ppm/cents；整数运算；已符合合同的 EAB 仅核验不强制造成 diff | writer前明确cents/string | 不得改变SQL公式 |
+| CHG-09A | `Common/PvAmount.py` | `assert_integer_amount_dtype`、公共 units→cents helper | 修改 | unsigned dtype 可在后续 cast 回绕；服务可能重复本地换算 | 公共入口只接受 signed integer dtype，并提供统一溢出/舍入合同 | 所有奖金链共用 fail-loud 边界 | 不得为单一奖项增加无依据业务上限 |
+| CHG-09B | `User/PEBonusService_Main.py` / `User/Test/PEBonusServiceTest.py` / `User/Test/SuperEliteBonusServiceTest.py` / `User/Test/test_amount_dtype_migration.py` / `User/Test/test_pv_amount_common.py` | PE/SE 人工入口、GPU/Dask UAT、公共/迁移回归 | 修改 | 旧调用方读取旧奖金字段、传入 `pv` float 或沿用 WORK-03 之前的配置预期 | 显式注入 ConfigSnapshot，fixture/assert 使用 units/ppm/cents；公共守卫覆盖 unsigned/narrow signed，累计使用 checked-int64 | 受影响调用方与公共合同可回归 | GPU 未执行时不得宣称 UAT PASS |
+| CHG-09C | `User/Test/GlobalRecalculationServiceTest.py` / `User/Test/PlacementRecalculationServiceTest.py` | 全量服务既有测试调用方 | 修改 | 仍按旧签名调用结算服务，隐式依赖本地 period 算术 | 为固定 fixture 显式构造并传入 `PeriodSnapshot` | 测试调用方与生产 period 合同一致 | 不得把 YYYYMM 算术重新引入生产代码 |
 | CHG-10 | `MessageConsumer/PvEventConsumer.py`或WORK-08A证明的现有部署入口 | 生产消费编排 | 条件新增/修改 | 当前仓库未证明订单PV入口 | normalize一次后分发三stage；先guard后权威提交 | 唯一可追踪入口 | 无callgraph不得创建第二consumer/topic/group |
+
+> 实施期治理扩围依据：`Common/PvAmount.py` 是所有 Step 06 链共享的 signed-int64 信任边界；`GlobalEliteBonusRecalculationService.py` 与增量 Elite 共用 `EliteBonusStats` 和 snapshot，不能留下 legacy float/旧阈值；`PEBonusService_Main.py` 与 `PEBonusServiceTest.py` 已由检查方案 S-008 列为 PE 受影响调用方；`test_pv_amount_common.py` 必须随公共 API 合同同步；`GlobalRecalculationServiceTest.py` 与 `PlacementRecalculationServiceTest.py` 必须随显式 `PeriodSnapshot` 签名同步；`SuperEliteBonusServiceTest.py` 必须随 SE `pv_units` 与已批准 ConfigSnapshot 合同同步。以上路径只修复已确认的单位、字段和调用合同，不新增业务公式。
 
 ### 6.1 固定基线锚点与生产入口门禁
 
@@ -7062,12 +7100,13 @@ Normalized delivery必须冻结：`source_system/source_event_id/payload_hash/bu
 ### STEP-PVAM-02-06：清除生产float金额链
 
 - 目的：清除生产float金额链，落实 `TASK-PVAM-02` 的已批准目标。
-- 前置条件：WORK-01与WORK-03接口可用
-- 修改文件：PE/SE/LB/Elite/EAB/Placement文件
+- 前置条件：WORK-PVAM-01与WORK-PVAM-03均达到DEV_VERIFIED，且WORK-PVAM-03配置接口可用
+- 修改文件：`Common/PvAmount.py`、PE/SE/LB/Elite/GlobalElite/EAB/Placement文件、`User/PEBonusService_Main.py`、`User/Test/PEBonusServiceTest.py`、`User/Test/SuperEliteBonusServiceTest.py`、`User/Test/GlobalRecalculationServiceTest.py`、`User/Test/PlacementRecalculationServiceTest.py`、`User/Test/test_amount_dtype_migration.py`、`User/Test/test_pv_amount_common.py`
 - 目标符号：金额符号
 - 精确操作：
 1. 逐字段换成units/ppm/cents
-2. merge/groupby前后dtype断言。
+2. merge/groupby前后dtype断言
+3. Redis/model 持久化金额累计统一使用 checked-int64，越界立即 fail-loud。
 - 必须保持：保持各奖项SQL舍入点
 - 禁止实现：不得引入未批准业务规则、默认值、异常白名单或不可逆数据操作。
 - 本步静态检查：`python -m compileall -q User Model Common MessageConsumer Order`
@@ -7146,7 +7185,7 @@ Normalized delivery必须冻结：`source_system/source_event_id/payload_hash/bu
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set the implementation commit for WORK-PVAM-02}"
 : "${PARENT_COMMIT_SHA:?set the controlled parent commit; root WORK uses BASE_SHA}"
 : "${PARENT_TREE_SHA:?set the tree of PARENT_COMMIT_SHA}"
@@ -7185,12 +7224,17 @@ from Common.PeriodResolver import PeriodResolver
 from MessageConsumer.PvEventNormalizer import PvEventNormalizer
 
 
-def test_period_and_refund_contract(period_repository, event_registry, refund_ledger) -> None:
+def test_period_and_refund_contract(period_repository, event_registry, refund_ledger, original_order_repository) -> None:
     resolver = PeriodResolver(period_repository)
     snap = resolver.resolve_approval_time(datetime(2026, 1, 31, 16, 0, tzinfo=timezone.utc))
     assert snap.calc_year == 2026
     assert snap.calc_month == 2
-    normalizer = PvEventNormalizer(resolver, event_registry, refund_ledger)
+    normalizer = PvEventNormalizer(
+        resolver,
+        event_registry,
+        refund_ledger,
+        order_repository=original_order_repository,
+    )
     first = normalizer.normalize_refund({"source_event_id": "R-1", "original_order_id": "O-1", "amount": "100.25", "approved_at": "2026-01-31T16:00:00Z"})
     second = normalizer.normalize_refund({"source_event_id": "R-2", "original_order_id": "O-1", "amount": "100.25", "approved_at": "2026-01-31T16:00:00Z"})
     assert first.effective_pv_delta_units == -100_250_000
@@ -7349,7 +7393,7 @@ SQL
 ```bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_SHA="2475c6c49e60089b28f8ef1c0b75e86b2ceb6ebb"
+BASE_SHA="3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2"
 : "${WORK_COMMIT_SHA:?set implementation commit}"
 CONTROL_ROOT="${PVAM_CONTROL_ROOT:?point to released 05_CONTROL}"
 
@@ -7445,6 +7489,8 @@ bash "$CONTROL_ROOT/validate_work_patch.sh" \
 | v1.3-r6 | 2026-08-06 | 五轮 F5 定点修订：规范 v3 追溯、parent provenance/DEV CLI、控制状态字段及单一事实源 | 五轮审计报告 + 当前文档修订指令 | AI Agent（编制） | DRAFT |
 | v1.3-r7 | 2026-08-06 | 六轮 S6：信任 registry 初版、归档哈希、临时目录与 Decimal finite 防护 | 六轮终局审计报告 | AI Agent（编制） | DRAFT |
 | v1.3-r8 | 2026-08-06 | 七轮 B7：registry 发布信任根、四工件摘要、AC 来源保真及当前轮次引用 | 七轮终局审计报告 + B7 处置 | AI Agent（编制） | DRAFT |
+| v1.3-r11 | 2026-08-12 | 实施期扩围公共 signed-int64 守卫、全量 Elite 共享状态与 S-008 PE 调用方，并同步测试范围 | WORK-PVAM-02 终审发现与用户批准的治理依赖修订 | AI Agent（编制） | DRAFT |
+| v1.3-r12 | 2026-08-13 | 登记原订单权威仓库/首次状态原子合同、Global/Placement 显式 PeriodSnapshot、SE 测试调用方及持久化 checked-int64 累计边界 | WORK-PVAM-02 独立终审修复与实际实施范围同步 | AI Agent（编制） | DRAFT |
 
 <!-- END WORK-PVAM-02_订单退款金额边界与期间解析.md -->
 
