@@ -27,23 +27,25 @@ class PeriodSnapshot:
     """一次业务处理使用的不可变 AR_PERIOD 快照。"""
 
     period_num: int
-    calc_year: int
-    calc_month: int
+    calc_year: Optional[int]
+    calc_month: Optional[int]
     first_period_num: int
     previous_period_num: Optional[int]
     source_checksum: str
 
     def __post_init__(self) -> None:
         _require_plain_int(self.period_num, field_name="period_num")
-        _require_plain_int(self.calc_year, field_name="calc_year")
-        _require_plain_int(self.calc_month, field_name="calc_month")
+        if self.calc_year is not None:
+            _require_plain_int(self.calc_year, field_name="calc_year")
+        if self.calc_month is not None:
+            _require_plain_int(self.calc_month, field_name="calc_month")
         _require_plain_int(self.first_period_num, field_name="first_period_num")
         if self.previous_period_num is not None:
             _require_plain_int(
                 self.previous_period_num,
                 field_name="previous_period_num",
             )
-        if not 1 <= self.calc_month <= 12:
+        if self.calc_month is not None and not 1 <= self.calc_month <= 12:
             raise PeriodResolutionError("calc_month must be between 1 and 12")
         if self.first_period_num > self.period_num:
             raise PeriodResolutionError(
@@ -105,6 +107,10 @@ class PeriodResolver:
         snapshot = self._require_snapshot(
             self._repository.resolve_approved_at(approved_at_gmt8)
         )
+        if snapshot.calc_year is None or snapshot.calc_month is None:
+            raise PeriodResolutionError(
+                "period snapshot is missing calendar fields required for approval-time resolution"
+            )
         if (
             snapshot.calc_year != approved_at_gmt8.year
             or snapshot.calc_month != approved_at_gmt8.month
@@ -124,6 +130,41 @@ class PeriodResolver:
         if not isinstance(value, PeriodSnapshot):
             raise TypeError("period repository must return PeriodSnapshot")
         return value
+
+
+class ContractPeriodRepository:
+    """DEC-011 消息周期适配器；生产归期只读取消息中的整数 period。"""
+
+    def resolve_current(self, period_num: int) -> PeriodSnapshot:
+        period_num = _require_plain_int(period_num, field_name="period_num")
+        if period_num < 1:
+            raise PeriodResolutionError("period_num must be greater than or equal to 1")
+
+        checksum_payload = {
+            "contract": "DEC-011",
+            "period": period_num,
+        }
+        source_checksum = hashlib.sha256(
+            json.dumps(
+                checksum_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        return PeriodSnapshot(
+            period_num=period_num,
+            calc_year=None,
+            calc_month=None,
+            first_period_num=1,
+            previous_period_num=period_num - 1 if period_num > 1 else None,
+            source_checksum=source_checksum,
+        )
+
+    def resolve_approved_at(self, approved_at: datetime) -> PeriodSnapshot:
+        raise PeriodResolutionError(
+            "approval-time resolution retired by DEC-011; period comes from the message"
+        )
 
 
 class MappingPeriodRepository:
