@@ -101,11 +101,8 @@ class PvEventNormalizer:
         validated = validate_order_payload(payload)
         source_system = validated.source_system or self._source_system
         payload_hash = self._hash_payload(payload)
-        period_snapshot = (
-            self._resolver.resolve_current(validated.period_num)
-            if validated.period_num is not None
-            else self._resolver.resolve_approval_time(validated.approved_at)
-        )
+        # DEC-011 D1：订单周期由消息直接提供，本系统不再从批准时间推导归期。
+        period_snapshot = self._resolver.resolve_current(validated.period_num)
         registration = self._register(
             source_system=source_system,
             source_event_id=validated.source_event_id,
@@ -115,6 +112,7 @@ class PvEventNormalizer:
             return self._build_event(
                 source_system=source_system,
                 source_event_id=validated.source_event_id,
+                user_id=validated.user_id,
                 payload_hash=payload_hash,
                 business_revision=validated.business_revision,
                 previous_business_revision=validated.previous_business_revision,
@@ -126,6 +124,7 @@ class PvEventNormalizer:
         return self._build_event(
             source_system=source_system,
             source_event_id=validated.source_event_id,
+            user_id=validated.user_id,
             payload_hash=payload_hash,
             business_revision=validated.business_revision,
             previous_business_revision=validated.previous_business_revision,
@@ -142,7 +141,8 @@ class PvEventNormalizer:
         validated = validate_refund_payload(payload)
         source_system = validated.source_system or self._source_system
         payload_hash = self._hash_payload(payload)
-        period_snapshot = self._resolver.resolve_approval_time(validated.approved_at)
+        # DEC-011 D3：退款归期由上游消息确定；approved_at 仅作审计留痕。
+        period_snapshot = self._resolver.resolve_current(validated.period_num)
 
         # region 查询原订单权威金额与可退款状态
         # raw refund amount 只用于检测上游漂移；负向 delta 必须来自原订单 repository。
@@ -182,6 +182,7 @@ class PvEventNormalizer:
         return self._build_event(
             source_system=source_system,
             source_event_id=validated.source_event_id,
+            user_id=validated.user_id,
             payload_hash=payload_hash,
             business_revision=validated.business_revision,
             previous_business_revision=validated.previous_business_revision,
@@ -231,6 +232,7 @@ class PvEventNormalizer:
         *,
         source_system: str,
         source_event_id: str,
+        user_id: str,
         payload_hash: str,
         business_revision: int,
         previous_business_revision: Any,
@@ -243,6 +245,7 @@ class PvEventNormalizer:
         return NormalizedPvEvent(
             source_system=source_system,
             source_event_id=source_event_id,
+            user_id=user_id,
             payload_hash=payload_hash,
             business_revision=business_revision,
             previous_business_revision=previous_business_revision,

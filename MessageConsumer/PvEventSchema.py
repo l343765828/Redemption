@@ -70,23 +70,25 @@ def _parse_amount_units(
     return amount_units
 
 
-def _parse_period_num(payload: Mapping[str, Any]) -> Optional[int]:
-    if "period_num" not in payload:
-        return None
-    value = payload["period_num"]
+def _parse_period_num(payload: Mapping[str, Any]) -> int:
+    if "period" not in payload:
+        raise ValueError("period is required")
+    value = payload["period"]
     if not isinstance(value, int) or isinstance(value, bool):
-        raise TypeError("period_num must be int")
+        raise TypeError("period must be int")
+    if value < 1:
+        raise ValueError("period must be greater than or equal to 1")
     return value
 
 
 @dataclass(frozen=True)
 class ValidatedOrderPayload:
     source_event_id: str
+    user_id: str
     source_system: Optional[str]
     amount_units: int
     previous_amount_units: Optional[int]
-    period_num: Optional[int]
-    approved_at: Optional[datetime]
+    period_num: int
     business_revision: int
     previous_business_revision: Optional[int]
 
@@ -94,10 +96,12 @@ class ValidatedOrderPayload:
 @dataclass(frozen=True)
 class ValidatedRefundPayload:
     source_event_id: str
+    user_id: str
     source_system: Optional[str]
     original_order_id: str
     original_amount_units: int
-    approved_at: datetime
+    period_num: int
+    approved_at: Optional[datetime]
     business_revision: int
     previous_business_revision: Optional[int]
 
@@ -105,10 +109,6 @@ class ValidatedRefundPayload:
 def validate_order_payload(payload: object) -> ValidatedOrderPayload:
     raw = _require_mapping(payload)
     period_num = _parse_period_num(raw)
-    approved_at = _parse_approved_at(raw["approved_at"]) if "approved_at" in raw else None
-    if (period_num is None) == (approved_at is None):
-        raise ValueError("order payload must contain exactly one of period_num or approved_at")
-
     business_revision = _require_revision(raw, "business_revision", 1)
     previous_business_revision = _require_revision(
         raw,
@@ -123,12 +123,12 @@ def validate_order_payload(payload: object) -> ValidatedOrderPayload:
         previous_amount_units = _parse_amount_units(raw, "previous_amount")
 
     return ValidatedOrderPayload(
-        source_event_id=_require_nonempty_string(raw, "source_event_id"),
+        source_event_id=_require_nonempty_string(raw, "order_id"),
+        user_id=_require_nonempty_string(raw, "user_id"),
         source_system=_require_optional_source_system(raw),
-        amount_units=_parse_amount_units(raw),
+        amount_units=_parse_amount_units(raw, "bv"),
         previous_amount_units=previous_amount_units,
         period_num=period_num,
-        approved_at=approved_at,
         business_revision=business_revision,
         previous_business_revision=previous_business_revision,
     )
@@ -136,14 +136,19 @@ def validate_order_payload(payload: object) -> ValidatedOrderPayload:
 
 def validate_refund_payload(payload: object) -> ValidatedRefundPayload:
     raw = _require_mapping(payload)
-    if "approved_at" not in raw:
-        raise ValueError("refund payload must contain approved_at")
+    approved_at = (
+        _parse_approved_at(raw["approved_at"])
+        if "approved_at" in raw
+        else None
+    )
     return ValidatedRefundPayload(
-        source_event_id=_require_nonempty_string(raw, "source_event_id"),
+        source_event_id=_require_nonempty_string(raw, "order_id"),
+        user_id=_require_nonempty_string(raw, "user_id"),
         source_system=_require_optional_source_system(raw),
         original_order_id=_require_nonempty_string(raw, "original_order_id"),
         original_amount_units=_parse_amount_units(raw),
-        approved_at=_parse_approved_at(raw["approved_at"]),
+        period_num=_parse_period_num(raw),
+        approved_at=approved_at,
         business_revision=_require_revision(raw, "business_revision", 1),
         previous_business_revision=_require_revision(
             raw,

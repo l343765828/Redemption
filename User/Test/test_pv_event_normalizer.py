@@ -66,25 +66,31 @@ def test_period_and_refund_contract(
     normalizer = PvEventNormalizer(resolver, event_registry, refund_ledger, order_repository=order_repository)
     first = normalizer.normalize_refund(
         {
-            "source_event_id": "R-1",
+            "order_id": "R-1",
+            "user_id": "U-1",
+            "period": 45,
             "original_order_id": "O-1",
             "amount": "100.25",
-            "approved_at": "2026-01-31T16:00:00Z",
         }
     )
     second = normalizer.normalize_refund(
         {
-            "source_event_id": "R-2",
+            "order_id": "R-2",
+            "user_id": "U-1",
+            "period": 45,
             "original_order_id": "O-1",
             "amount": "100.25",
-            "approved_at": "2026-01-31T16:00:00Z",
         }
     )
     assert first.effective_pv_delta_units == -100_250_000
+    assert first.period_snapshot.period_num == 45
+    assert first.user_id == "U-1"
     assert second.disposition == "DUPLICATE_NOOP"
     assert second.effective_pv_delta_units == 0
     with pytest.raises((TypeError, ValueError)):
-        normalizer.normalize_order({"source_event_id": "O-X", "amount": 30.0})
+        normalizer.normalize_order(
+            {"order_id": "O-X", "user_id": "U-X", "period": 45, "bv": 30.0}
+        )
 
 
 def test_refund_retry_rechecks_ledger_after_transient_failure(
@@ -109,10 +115,11 @@ def test_refund_retry_rechecks_ledger_after_transient_failure(
         order_repository=order_repository,
     )
     payload = {
-        "source_event_id": "R-RETRY",
+        "order_id": "R-RETRY",
+        "user_id": "U-RETRY",
+        "period": 45,
         "original_order_id": "O-RETRY",
         "amount": "100.25",
-        "approved_at": "2026-01-31T16:00:00Z",
     }
 
     with pytest.raises(RuntimeError, match="transient ledger failure"):
@@ -139,10 +146,11 @@ def test_exact_refund_retry_remains_noop_after_authority_status_changes(
         ),
     )
     payload = {
-        "source_event_id": "R-HISTORY",
+        "order_id": "R-HISTORY",
+        "user_id": "U-HISTORY",
+        "period": 45,
         "original_order_id": "O-HISTORY",
         "amount": "100.25",
-        "approved_at": "2026-01-31T16:00:00Z",
     }
 
     first = normalizer.normalize_refund(payload)
@@ -166,17 +174,19 @@ def test_refund_conflict_is_not_swallowed_by_duplicate_registry(
     )
     normalizer.normalize_refund(
         {
-            "source_event_id": "R-ORIGINAL",
+            "order_id": "R-ORIGINAL",
+            "user_id": "U-CONFLICT",
+            "period": 45,
             "original_order_id": "O-CONFLICT",
             "amount": "100.25",
-            "approved_at": "2026-01-31T16:00:00Z",
         }
     )
     conflicting_payload = {
-        "source_event_id": "R-CONFLICT",
+        "order_id": "R-CONFLICT",
+        "user_id": "U-CONFLICT",
+        "period": 45,
         "original_order_id": "O-CONFLICT",
         "amount": "99.00",
-        "approved_at": "2026-01-31T16:00:00Z",
     }
 
     with pytest.raises(RefundReversalConflict):
@@ -198,10 +208,11 @@ def test_refund_requires_authoritative_order_amount(period_repository) -> None:
     with pytest.raises(RefundReversalConflict, match="authoritative original order"):
         normalizer.normalize_refund(
             {
-                "source_event_id": "R-AUTH",
+                "order_id": "R-AUTH",
+                "user_id": "U-AUTH",
+                "period": 45,
                 "original_order_id": "O-AUTH",
                 "amount": "99.00",
-                "approved_at": "2026-01-31T16:00:00Z",
             }
         )
 
@@ -214,10 +225,11 @@ def test_refund_blocks_missing_or_nonrefundable_authority(period_repository) -> 
         order_repository=MappingOriginalOrderRepository({}),
     )
     payload = {
-        "source_event_id": "R-MISSING",
+        "order_id": "R-MISSING",
+        "user_id": "U-MISSING",
+        "period": 45,
         "original_order_id": "O-MISSING",
         "amount": "1.00",
-        "approved_at": "2026-01-31T16:00:00Z",
     }
     with pytest.raises(OriginalOrderUnavailable):
         missing.normalize_refund(payload)
@@ -250,9 +262,10 @@ def test_raw_amount_rejects_noncanonical_values(
     with pytest.raises((TypeError, ValueError)):
         normalizer.normalize_order(
             {
-                "source_event_id": "O-X",
-                "amount": bad_amount,
-                "period_num": 41,
+                "order_id": "O-X",
+                "user_id": "U-X",
+                "bv": bad_amount,
+                "period": 41,
             }
         )
 
@@ -267,10 +280,11 @@ def test_order_amount_is_scaled_exactly_once(period_repository) -> None:
 
     event = normalizer.normalize_order(
         {
-            "source_event_id": "O-30",
-            "amount": "30.00",
+            "order_id": "O-30",
+            "user_id": "U-30",
+            "bv": "30.00",
             "previous_amount": "0.00",
-            "period_num": 41,
+            "period": 41,
             "business_revision": 7,
             "previous_business_revision": 6,
         }
@@ -281,6 +295,8 @@ def test_order_amount_is_scaled_exactly_once(period_repository) -> None:
     assert event.business_revision == 7
     assert event.previous_business_revision == 6
     assert event.identity == "ORDER_API:O-30"
+    assert event.user_id == "U-30"
+    assert event.period_snapshot.period_num == 41
 
 
 def test_same_identity_with_different_hash_is_blocked(period_repository) -> None:
@@ -290,12 +306,12 @@ def test_same_identity_with_different_hash_is_blocked(period_repository) -> None
         InMemoryRefundReversalLedger(),
     )
     normalizer.normalize_order(
-        {"source_event_id": "O-1", "amount": "1.00", "period_num": 41}
+        {"order_id": "O-1", "user_id": "U-1", "bv": "1.00", "period": 41}
     )
 
     with pytest.raises(EventIdentityConflict):
         normalizer.normalize_order(
-            {"source_event_id": "O-1", "amount": "2.00", "period_num": 41}
+            {"order_id": "O-1", "user_id": "U-1", "bv": "2.00", "period": 41}
         )
 
 
@@ -305,7 +321,7 @@ def test_exact_duplicate_event_is_noop(period_repository) -> None:
         InMemoryEventRegistry(),
         InMemoryRefundReversalLedger(),
     )
-    payload = {"source_event_id": "O-1", "amount": "1.00", "period_num": 41}
+    payload = {"order_id": "O-1", "user_id": "U-1", "bv": "1.00", "period": 41}
 
     first = normalizer.normalize_order(payload)
     second = normalizer.normalize_order(payload)
@@ -323,7 +339,7 @@ def test_normalized_event_is_immutable(period_repository) -> None:
         InMemoryRefundReversalLedger(),
     )
     event = normalizer.normalize_order(
-        {"source_event_id": "O-1", "amount": "1.00", "period_num": 41}
+        {"order_id": "O-1", "user_id": "U-1", "bv": "1.00", "period": 41}
     )
 
     with pytest.raises(FrozenInstanceError):
@@ -339,10 +355,11 @@ def test_business_revision_delta_is_new_amount_minus_previous(period_repository)
 
     event = normalizer.normalize_order(
         {
-            "source_event_id": "O-REV-2",
-            "amount": "100.25",
+            "order_id": "O-REV-2",
+            "user_id": "U-REV",
+            "bv": "100.25",
             "previous_amount": "30.00",
-            "period_num": 41,
+            "period": 41,
             "business_revision": 2,
             "previous_business_revision": 1,
         }
@@ -361,9 +378,10 @@ def test_revision_and_previous_amount_must_be_paired(period_repository) -> None:
     with pytest.raises(ValueError):
         normalizer.normalize_order(
             {
-                "source_event_id": "O-REV-X",
-                "amount": "100.25",
-                "period_num": 41,
+                "order_id": "O-REV-X",
+                "user_id": "U-REV",
+                "bv": "100.25",
+                "period": 41,
                 "business_revision": 2,
                 "previous_business_revision": 1,
             }
@@ -372,13 +390,162 @@ def test_revision_and_previous_amount_must_be_paired(period_repository) -> None:
     with pytest.raises(ValueError):
         normalizer.normalize_order(
             {
-                "source_event_id": "O-REV-Y",
-                "amount": "100.25",
+                "order_id": "O-REV-Y",
+                "user_id": "U-REV",
+                "bv": "100.25",
                 "previous_amount": "30.00",
-                "period_num": 41,
+                "period": 41,
             }
         )
 
+
+def test_order_requires_message_period_and_user_id(period_repository) -> None:
+    normalizer = PvEventNormalizer(
+        PeriodResolver(period_repository),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+    )
+
+    with pytest.raises((TypeError, ValueError)):
+        normalizer.normalize_order(
+            {
+                "order_id": "O-NO-PERIOD",
+                "user_id": "U-1",
+                "bv": "1.00",
+                "approved_at": "2026-01-31T16:00:00Z",
+            }
+        )
+    with pytest.raises((TypeError, ValueError)):
+        normalizer.normalize_order(
+            {"order_id": "O-NO-USER", "period": 41, "bv": "1.00"}
+        )
+
+
+@pytest.mark.parametrize("bad_period", [0, -1, "41", True, 41.0])
+def test_order_rejects_non_integer_message_period(
+    period_repository,
+    bad_period,
+) -> None:
+    normalizer = PvEventNormalizer(
+        PeriodResolver(period_repository),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+    )
+
+    with pytest.raises((TypeError, ValueError)):
+        normalizer.normalize_order(
+            {
+                "order_id": "O-BAD-PERIOD",
+                "user_id": "U-1",
+                "period": bad_period,
+                "bv": "1.00",
+            }
+        )
+
+
+@pytest.mark.parametrize("bad_period", [0, -1, "45", True, 45.0])
+def test_refund_rejects_non_integer_message_period(
+    period_repository,
+    order_repository,
+    bad_period,
+) -> None:
+    normalizer = PvEventNormalizer(
+        PeriodResolver(period_repository),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=order_repository,
+    )
+
+    with pytest.raises((TypeError, ValueError)):
+        normalizer.normalize_refund(
+            {
+                "order_id": "R-BAD-PERIOD",
+                "user_id": "U-1",
+                "period": bad_period,
+                "original_order_id": "O-1",
+                "amount": "100.25",
+            }
+        )
+
+
+def test_refund_requires_message_period_and_user_id(
+    period_repository,
+    order_repository,
+) -> None:
+    normalizer = PvEventNormalizer(
+        PeriodResolver(period_repository),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=order_repository,
+    )
+
+    with pytest.raises((TypeError, ValueError)):
+        normalizer.normalize_refund(
+            {
+                "order_id": "R-NO-PERIOD",
+                "user_id": "U-1",
+                "original_order_id": "O-1",
+                "amount": "100.25",
+            }
+        )
+    with pytest.raises((TypeError, ValueError)):
+        normalizer.normalize_refund(
+            {
+                "order_id": "R-NO-USER",
+                "period": 45,
+                "original_order_id": "O-1",
+                "amount": "100.25",
+            }
+        )
+
+
+def test_refund_uses_message_period_without_approved_at(
+    period_repository,
+    order_repository,
+) -> None:
+    normalizer = PvEventNormalizer(
+        PeriodResolver(period_repository),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=order_repository,
+    )
+
+    event = normalizer.normalize_refund(
+        {
+            "order_id": "R-MESSAGE-PERIOD",
+            "user_id": "U-1",
+            "period": 45,
+            "original_order_id": "O-1",
+            "amount": "100.25",
+        }
+    )
+
+    assert event.period_snapshot.period_num == 45
+    assert event.user_id == "U-1"
+
+
+def test_refund_rejects_invalid_optional_approved_at(
+    period_repository,
+    order_repository,
+) -> None:
+    normalizer = PvEventNormalizer(
+        PeriodResolver(period_repository),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=order_repository,
+    )
+
+    with pytest.raises((TypeError, ValueError)):
+        normalizer.normalize_refund(
+            {
+                "order_id": "R-BAD-AUDIT-TIME",
+                "user_id": "U-1",
+                "period": 45,
+                "original_order_id": "O-1",
+                "amount": "100.25",
+                "approved_at": "2026-02-01T00:00:00",
+            }
+        )
 
 class _FakeRedis:
     def __init__(self, response):

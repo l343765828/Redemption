@@ -95,7 +95,12 @@ def _normalized_event():
         InMemoryEventRegistry(),
         InMemoryRefundReversalLedger(),
     ).normalize_order(
-        {"source_event_id": "O-1", "amount": "1.25", "period_num": 40}
+        {
+            "order_id": "O-1",
+            "user_id": "U-1",
+            "bv": "1.25",
+            "period": 40,
+        }
     )
 
 

@@ -35,6 +35,7 @@ class NormalizedPvEvent:
 
     source_system: str
     source_event_id: str
+    user_id: str
     payload_hash: str
     business_revision: int
     previous_business_revision: Optional[int]
@@ -48,6 +49,7 @@ class NormalizedPvEvent:
     def __post_init__(self) -> None:
         _require_nonempty_string(self.source_system, field_name="source_system")
         _require_nonempty_string(self.source_event_id, field_name="source_event_id")
+        _require_nonempty_string(self.user_id, field_name="user_id")
         if not isinstance(self.payload_hash, str) or not _SHA256_HEX.fullmatch(
             self.payload_hash
         ):
