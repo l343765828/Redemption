@@ -316,6 +316,34 @@ def test_leadership_bonus_has_no_float_amount_kernel() -> None:
     assert "numerator // denominator" not in divide_source
 
 
+def test_amount_path_sources_reject_unapproved_float64_lines() -> None:
+    targets = (
+        "User/PEBonusService.py",
+        "User/PEBonusService_Main.py",
+        "User/SuperEliteBonusService.py",
+        "User/PlacementRecalculationService.py",
+        "User/PlacementIncrementalService.py",
+        "User/EliteBonusService.py",
+        "User/EliteAchievementBonusService.py",
+    )
+    # PE 的 parent_id 是图关系 ID，不是金额列；cuDF 需先转为 float64 才能 fillna，再恢复为 int64。
+    allowed_float64_lines = {
+        "User/PEBonusService.py": {
+            "ddf_tree['parent_id'] = ddf_tree['parent_id'].astype('float64').fillna(0).astype('int64')"
+        }
+    }
+
+    for relative_path in targets:
+        source_lines = (REPO_ROOT / relative_path).read_text(encoding="utf-8").splitlines()
+        float64_lines = {line.strip() for line in source_lines if "float64" in line}
+        allowed_lines = allowed_float64_lines.get(relative_path, set())
+
+        assert float64_lines <= allowed_lines, (
+            f"{relative_path} contains unapproved float64 lines: "
+            f"{sorted(float64_lines - allowed_lines)}"
+        )
+
+
 def test_leadership_bonus_global_rate_uses_ppm_helper_and_checked_int64_math() -> None:
     compute_source = _function_source(
         "User/LeadershipBonusGPUService.py", "compute_leadership_bonus"
