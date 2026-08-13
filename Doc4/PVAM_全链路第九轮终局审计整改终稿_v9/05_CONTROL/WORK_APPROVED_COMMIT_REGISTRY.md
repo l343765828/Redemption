@@ -2,13 +2,13 @@
 
 - canonical path: `05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json`
 - schema: `2`
-- current SHA-256: `60007f2da4588909ef84c96db53111a6ce20d0ae4cc79f0e9c072b668b3d0127`
+- current SHA-256: `4740ce983211e7747d43bc1a75fb03e4e6ee9be6a3342e72b85098f54796db3d`
 - registry status: `ACTIVE`
 - authorization status: `APPROVED_FOR_CONSTRUCTION`
 
 ## 信任根
 
-活动校验器从自身位置推导发布包根目录，并要求 canonical registry 的路径和 SHA-256 同时匹配根 `DOCUMENT_MANIFEST.json` 与 `VERSION_REFERENCE_MANIFEST.json`。每个 `APPROVED` 条目必须绑定并实读校验 patch、scope result、parent provenance、approval record 四类工件。WORK-PVAM-01C、WORK-PVAM-01、WORK-PVAM-03 已由正式 approval record 登记为 `APPROVED`；其余条目保持 `PENDING`。依赖型 WORK 只能引用已批准的前置条目。
+活动校验器从自身位置推导发布包根目录，并要求 canonical registry 的路径和 SHA-256 同时匹配根 `DOCUMENT_MANIFEST.json` 与 `VERSION_REFERENCE_MANIFEST.json`。每个 `APPROVED` 条目必须绑定并实读校验 patch、scope result、parent provenance、approval record 四类工件。WORK-PVAM-01C、WORK-PVAM-01、WORK-PVAM-02、WORK-PVAM-03 已由正式 approval record 登记为 `APPROVED`；其余条目保持 `PENDING`。依赖型 WORK 只能引用已批准的前置条目。
 
 ## WORK-PVAM-01 正式批准登记
 
@@ -31,3 +31,15 @@
 - approval record：`evidence/WORK-PVAM-03/attempt-20260812-102919/approval/approval_record.json`
 - approval record SHA-256：`517dce947bee5ba0554280eccfbe34782f751b6fc7d3750ac9a2a2646a249967`
 - scope：仅批准 WORK-PVAM-03 DEV 实施结果及其作为 WORK-PVAM-02 的前置依赖；不构成 UAT、Gate C 或生产发布批准。
+## WORK-PVAM-02 正式批准登记
+
+- commit：`ce1c9a860816c697e465b717a803bccd43a7b7a7`
+- tree：`1a5dd1d0fae8f3d613f3616b9cb033e44c6d79aa`
+- patch SHA-256：`ac7e6e6259473f8952c265f4373a9cc8ad289c4b620850f43a066c67d99d3265`
+- DEV：`PASS`（56 tests，0 failures，0 errors）
+- approver：`343765828@qq.com`
+- role：`技术负责人`
+- approved at：`2026-08-13T02:01:12Z`
+- approval record：`evidence/WORK-PVAM-02/attempt-20260813-020112/approval/approval_record.json`
+- approval record SHA-256：`9c74bf063b77f8b8a5d83377db81059e98adfc3bf64c70ae85e87b35208137f0`
+- scope：仅批准 WORK-PVAM-02 DEV 实施结果及其作为后续 WORK 的已批准前置；不构成 UAT、Gate C 或生产发布批准。

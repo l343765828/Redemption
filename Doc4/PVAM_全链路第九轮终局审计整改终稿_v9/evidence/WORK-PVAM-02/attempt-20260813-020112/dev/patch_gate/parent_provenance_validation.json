@@ -1,0 +1,120 @@
+{
+  "work_id": "WORK-PVAM-02",
+  "stage": null,
+  "root_baseline_sha": "3891f4b9c1f33df056e1334ed30e0ec3f2be1ad2",
+  "direct_prerequisites": [
+    "WORK-PVAM-01",
+    "WORK-PVAM-03"
+  ],
+  "prerequisite_closure": [
+    "WORK-PVAM-01",
+    "WORK-PVAM-01C",
+    "WORK-PVAM-03"
+  ],
+  "integration_order": [
+    "WORK-PVAM-01C",
+    "WORK-PVAM-01",
+    "WORK-PVAM-03"
+  ],
+  "included_works": [
+    {
+      "work_id": "WORK-PVAM-01C",
+      "commit_sha": "2a5d39651f8eb50845c4377d3181d3cb846f6cab",
+      "tree_sha": "3284a9309c4fa450a6e3c40befb591f9854b2074"
+    },
+    {
+      "work_id": "WORK-PVAM-01",
+      "commit_sha": "9c1382600fa60e2d488113aef289bcc2331f8f45",
+      "tree_sha": "8cfa5f0738dc7cb50cf9b739fca9b4a20b609af9"
+    },
+    {
+      "work_id": "WORK-PVAM-03",
+      "commit_sha": "4e4742c2f504bfb8d37585e408c6c777f5e43018",
+      "tree_sha": "612518f98db825a11067aea52d5e40a69749c86a"
+    }
+  ],
+  "approved_commit_registry_path": "05_CONTROL/WORK_APPROVED_COMMIT_REGISTRY.json",
+  "approved_commit_registry_sha256": "60007f2da4588909ef84c96db53111a6ce20d0ae4cc79f0e9c072b668b3d0127",
+  "matched_registry_entries": [
+    {
+      "work_id": "WORK-PVAM-01",
+      "commit_sha": "9c1382600fa60e2d488113aef289bcc2331f8f45",
+      "tree_sha": "8cfa5f0738dc7cb50cf9b739fca9b4a20b609af9",
+      "approver_identity": "343765828@qq.com",
+      "approved_at": "2026-08-10T14:49:08Z",
+      "evidence": {
+        "patch": {
+          "path": "evidence/WORK-PVAM-01/attempt-20260810-143426/patch/WORK-PVAM-01.patch",
+          "sha256": "979adaedc48b953885629a76adc6173d5f74f42d07b8652c7fbcd0518fd83a97"
+        },
+        "scope_result": {
+          "path": "evidence/WORK-PVAM-01/attempt-20260810-143426/patch/scope_result.json",
+          "sha256": "573aa4ec3cb1c7616742888bd222cf606728ca540452259e2b06bb880de55a49"
+        },
+        "parent_provenance": {
+          "path": "evidence/WORK-PVAM-01/attempt-20260810-143426/patch/parent_provenance_validation.json",
+          "sha256": "c3c176d5f839bfaa97a0462dd60cca72b82717619bdd20408e836f6baf5ba42e"
+        },
+        "approval_record": {
+          "path": "evidence/WORK-PVAM-01/attempt-20260810-143426/approval/approval_record.json",
+          "sha256": "bf3b1db1c4b6a3da40cde52e609d956b818312f2b8296e47893cf61b1c782136"
+        }
+      }
+    },
+    {
+      "work_id": "WORK-PVAM-01C",
+      "commit_sha": "2a5d39651f8eb50845c4377d3181d3cb846f6cab",
+      "tree_sha": "3284a9309c4fa450a6e3c40befb591f9854b2074",
+      "approver_identity": "343765828@qq.com",
+      "approved_at": "2026-08-10T13:46:37Z",
+      "evidence": {
+        "patch": {
+          "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/WORK-PVAM-01C.patch",
+          "sha256": "8cb025ad8b9e15bbd90d5418a2d30fb2ac2e8a20d051b3693746bd286ef55254"
+        },
+        "scope_result": {
+          "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/scope_result.json",
+          "sha256": "8203457bc9a3e50f40b3bb67f7e5f8e77665e6f20870ddee0da638cb8b7eef1f"
+        },
+        "parent_provenance": {
+          "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/patch/parent_provenance_validation.json",
+          "sha256": "61154e13a88abbe47009ba39133ade63858b7261b24c585e4a06b8fd57c3a4c6"
+        },
+        "approval_record": {
+          "path": "evidence/WORK-PVAM-01C/attempt-20260810-130319/approval/approval_record.json",
+          "sha256": "2be55003a01a8f6dfcaf2c206bff8b05aeec46e8aa42dfe7b56aa68f185f4486"
+        }
+      }
+    },
+    {
+      "work_id": "WORK-PVAM-03",
+      "commit_sha": "4e4742c2f504bfb8d37585e408c6c777f5e43018",
+      "tree_sha": "612518f98db825a11067aea52d5e40a69749c86a",
+      "approver_identity": "343765828@qq.com",
+      "approved_at": "2026-08-12T10:38:11Z",
+      "evidence": {
+        "patch": {
+          "path": "evidence/WORK-PVAM-03/attempt-20260812-102919/dev/patch_gate/WORK-PVAM-03.patch",
+          "sha256": "c4f13eab41f6108b5dc877e6764056d931ca03b5e3e5015da4a86eba10c095ce"
+        },
+        "scope_result": {
+          "path": "evidence/WORK-PVAM-03/attempt-20260812-102919/dev/patch_gate/scope_result.json",
+          "sha256": "a5e75d132499b235804e40ba557676edcc83c4e789443d12c1cd4769e7ae0a59"
+        },
+        "parent_provenance": {
+          "path": "evidence/WORK-PVAM-03/attempt-20260812-102919/dev/patch_gate/parent_provenance_validation.json",
+          "sha256": "316f3fcb0e5b5e49d47c35c19fd57204ef3f8f0059b6183e6a7412194c9ed0c4"
+        },
+        "approval_record": {
+          "path": "evidence/WORK-PVAM-03/attempt-20260812-102919/approval/approval_record.json",
+          "sha256": "517dce947bee5ba0554280eccfbe34782f751b6fc7d3750ac9a2a2646a249967"
+        }
+      }
+    }
+  ],
+  "parent_commit_sha": "4e4742c2f504bfb8d37585e408c6c777f5e43018",
+  "parent_tree_sha": "612518f98db825a11067aea52d5e40a69749c86a",
+  "work_commit_sha": "ce1c9a860816c697e465b717a803bccd43a7b7a7",
+  "work_tree_sha": "1a5dd1d0fae8f3d613f3616b9cb033e44c6d79aa",
+  "provenance_status": "PASS"
+}

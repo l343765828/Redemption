@@ -9,7 +9,7 @@
 - `DEC-013=OPEN`
 - `Gate C=OPEN`
 
-包内文档与控制资产已达到 `document_technical_readiness=APPROVED_FOR_CONSTRUCTION`，可以作为受控施工设计基线下发。全项目组织授权仍保持 `PENDING_ORGANIZATIONAL_APPROVAL`；WORK-PVAM-01C、WORK-PVAM-01、WORK-PVAM-03 仅按下述范围授权记录完成单项批准，不构成 Gate C、UAT、部署或生产发布批准。
+包内文档与控制资产已达到 `document_technical_readiness=APPROVED_FOR_CONSTRUCTION`，可以作为受控施工设计基线下发。全项目组织授权仍保持 `PENDING_ORGANIZATIONAL_APPROVAL`；WORK-PVAM-01C、WORK-PVAM-01、WORK-PVAM-02、WORK-PVAM-03 仅按下述范围授权记录完成单项批准，不构成 Gate C、UAT、部署或生产发布批准。
 
 ## 第八轮技术就绪声明
 
@@ -60,3 +60,19 @@ E8-01～E8-06 的包内文档治理与控制门禁修补已纳入受控终稿；
 - approval record SHA-256：`517dce947bee5ba0554280eccfbe34782f751b6fc7d3750ac9a2a2646a249967`
 - UAT：`PENDING_TEST_ENV`，继续由 `WORK-PVAM-08 / DEC-013` 管理
 - 限制：不构成 Gate C、部署或生产发布批准；WORK-PVAM-08A 的生产调用链证据阻断仍未关闭。
+## WORK-PVAM-02 范围授权登记
+
+- approval：`APPROVED`
+- commit：`ce1c9a860816c697e465b717a803bccd43a7b7a7`
+- tree：`1a5dd1d0fae8f3d613f3616b9cb033e44c6d79aa`
+- DEV：`PASS`（56 tests，0 failures，0 errors）
+- approver：`343765828@qq.com`
+- role：`技术负责人`
+- authority basis：`User instructed Codex to continue all explicitly listed unfinished WORK-PVAM-02 delivery tasks on 2026-08-13`
+- approved at：`2026-08-13T02:01:12Z`
+- approval scope：`WORK-PVAM-02 commit ce1c9a860816c697e465b717a803bccd43a7b7a7、tree 1a5dd1d0fae8f3d613f3616b9cb033e44c6d79aa 及其正式 patch/DEV 证据登记`
+- allowed wave：`WORK-PVAM-02 DEV_VERIFIED and approved prerequisite use by downstream WORKs according to WORK_SCOPE_ALLOWLIST`
+- approval record：`evidence/WORK-PVAM-02/attempt-20260813-020112/approval/approval_record.json`
+- approval record SHA-256：`9c74bf063b77f8b8a5d83377db81059e98adfc3bf64c70ae85e87b35208137f0`
+- UAT：`PENDING_TEST_ENV`，GPU/cudf 行为继续在目标环境验证。
+- 限制：不构成 Gate C、部署或生产发布批准；生产 consumer 接线与最终三路事件完成仍由 WORK-PVAM-06 / WORK-PVAM-08A 管理。
