@@ -14,6 +14,8 @@ from MessageConsumer.PvEventNormalizer import (
     InMemoryEventRegistry,
     PvEventNormalizer,
 )
+from Order.PvEventDeliveryLedger import InMemoryPvEventDeliveryLedger
+from Order.ConsumedOrderLedger import InMemoryConsumedOrderLedger
 from Model.Order.NormalizedPvEvent import require_normalized_pv_event
 from Order.RefundReversalLedger import InMemoryRefundReversalLedger
 from Common.PvAmount import (
@@ -94,6 +96,8 @@ def _normalized_event():
         resolver,
         InMemoryEventRegistry(),
         InMemoryRefundReversalLedger(),
+        order_repository=InMemoryConsumedOrderLedger(),
+        delivery_ledger=InMemoryPvEventDeliveryLedger(),
     ).normalize_order(
         {
             "order_id": "O-1",

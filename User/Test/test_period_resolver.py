@@ -144,3 +144,22 @@ def test_approval_time_rejects_snapshot_without_calendar_fields() -> None:
 
     with pytest.raises(PeriodResolutionError, match="calendar fields"):
         resolver.resolve_approval_time(datetime(2026, 2, 1, tzinfo=timezone.utc))
+
+
+@pytest.mark.parametrize(
+    ("calc_year", "calc_month"),
+    [(2026, None), (None, 2)],
+)
+def test_period_snapshot_rejects_partial_calendar_fields(
+    calc_year,
+    calc_month,
+) -> None:
+    with pytest.raises(PeriodResolutionError, match="both present or both None"):
+        PeriodSnapshot(
+            period_num=41,
+            calc_year=calc_year,
+            calc_month=calc_month,
+            first_period_num=1,
+            previous_period_num=40,
+            source_checksum="partial-calendar-test",
+        )

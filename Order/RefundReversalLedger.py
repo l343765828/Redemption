@@ -86,6 +86,7 @@ class MappingOriginalOrderRepository:
 class RefundClaim:
     disposition: str
     original_amount_units: int
+    same_event: bool
 
     def __post_init__(self) -> None:
         if self.disposition not in {APPLIED, DUPLICATE_NOOP}:
@@ -94,6 +95,8 @@ class RefundClaim:
             self.original_amount_units,
             field_name="original_amount_units",
         )
+        if type(self.same_event) is not bool:
+            raise TypeError("same_event must be bool")
 
 
 class RefundReversalLedger(Protocol):
@@ -101,7 +104,7 @@ class RefundReversalLedger(Protocol):
         self,
         *,
         original_order_id: str,
-        source_event_id: str,
+        event_identity: str,
         payload_hash: str,
         original_amount_units: int,
         original_order_refundable: bool,
@@ -126,7 +129,7 @@ class InMemoryRefundReversalLedger:
         self,
         *,
         original_order_id: str,
-        source_event_id: str,
+        event_identity: str,
         payload_hash: str,
         original_amount_units: int,
         original_order_refundable: bool,
@@ -135,9 +138,9 @@ class InMemoryRefundReversalLedger:
             original_order_id,
             field_name="original_order_id",
         )
-        source_event_id = _require_nonempty_string(
-            source_event_id,
-            field_name="source_event_id",
+        event_identity = _require_nonempty_string(
+            event_identity,
+            field_name="event_identity",
         )
         payload_hash = _require_nonempty_string(
             payload_hash,
@@ -160,16 +163,24 @@ class InMemoryRefundReversalLedger:
                         f"authoritative original order is not refundable: {original_order_id}"
                     )
                 self._claims[original_order_id] = {
-                    "source_event_id": source_event_id,
+                    "event_identity": event_identity,
                     "payload_hash": payload_hash,
                     "original_amount_units": original_amount_units,
                 }
-                return RefundClaim(APPLIED, original_amount_units)
+                return RefundClaim(APPLIED, original_amount_units, True)
             if current["original_amount_units"] != original_amount_units:
                 raise RefundReversalConflict(
                     "whole-order refund amount conflicts with the existing reversal claim"
                 )
-            return RefundClaim(DUPLICATE_NOOP, original_amount_units)
+            same_event = (
+                current["event_identity"] == event_identity
+                and current["payload_hash"] == payload_hash
+            )
+            return RefundClaim(
+                DUPLICATE_NOOP,
+                original_amount_units,
+                same_event,
+            )
 
 
 class RedisRefundReversalLedger:
@@ -177,27 +188,32 @@ class RedisRefundReversalLedger:
 
     _CLAIM_SCRIPT = """
 local key = KEYS[1]
-local source_event_id = ARGV[1]
+local event_identity = ARGV[1]
 local payload_hash = ARGV[2]
 local original_amount_units = ARGV[3]
 local original_order_refundable = ARGV[4]
 
 if redis.call('EXISTS', key) == 0 then
     if original_order_refundable ~= '1' then
-        return {'NOT_REFUNDABLE', original_amount_units}
+        return {'NOT_REFUNDABLE', original_amount_units, '0'}
     end
     redis.call('HSET', key,
-        'source_event_id', source_event_id,
+        'event_identity', event_identity,
         'payload_hash', payload_hash,
         'original_amount_units', original_amount_units)
-    return {'APPLIED', original_amount_units}
+    return {'APPLIED', original_amount_units, '1'}
 end
 
 local stored_amount = redis.call('HGET', key, 'original_amount_units')
 if stored_amount ~= original_amount_units then
-    return {'CONFLICT', stored_amount}
+    return {'CONFLICT', stored_amount, '0'}
 end
-return {'DUPLICATE_NOOP', stored_amount}
+local stored_event_identity = redis.call('HGET', key, 'event_identity')
+local stored_payload_hash = redis.call('HGET', key, 'payload_hash')
+if stored_event_identity == event_identity and stored_payload_hash == payload_hash then
+    return {'DUPLICATE_NOOP', stored_amount, '1'}
+end
+return {'DUPLICATE_NOOP', stored_amount, '0'}
 """
 
     def __init__(self, redis_conn: Any, *, key_prefix: str = "pvam:refund_reversal:"):
@@ -212,7 +228,7 @@ return {'DUPLICATE_NOOP', stored_amount}
         self,
         *,
         original_order_id: str,
-        source_event_id: str,
+        event_identity: str,
         payload_hash: str,
         original_amount_units: int,
         original_order_refundable: bool,
@@ -221,9 +237,9 @@ return {'DUPLICATE_NOOP', stored_amount}
             original_order_id,
             field_name="original_order_id",
         )
-        source_event_id = _require_nonempty_string(
-            source_event_id,
-            field_name="source_event_id",
+        event_identity = _require_nonempty_string(
+            event_identity,
+            field_name="event_identity",
         )
         payload_hash = _require_nonempty_string(
             payload_hash,
@@ -242,21 +258,28 @@ return {'DUPLICATE_NOOP', stored_amount}
             self._CLAIM_SCRIPT,
             1,
             f"{self._key_prefix}{original_order_id}",
-            source_event_id,
+            event_identity,
             payload_hash,
             str(original_amount_units),
             "1" if original_order_refundable else "0",
         )
-        if not isinstance(raw_result, (list, tuple)) or len(raw_result) != 2:
+        if not isinstance(raw_result, (list, tuple)) or len(raw_result) != 3:
             raise RuntimeError("Redis refund CAS returned an invalid response")
 
         disposition = self._decode(raw_result[0])
         stored_amount_raw = self._decode(raw_result[1])
+        same_event_raw = self._decode(raw_result[2])
         try:
             stored_amount_units = int(stored_amount_raw)
         except (TypeError, ValueError) as exc:
             raise RuntimeError("Redis refund CAS returned an invalid amount") from exc
 
+        if same_event_raw == "1":
+            same_event = True
+        elif same_event_raw == "0":
+            same_event = False
+        else:
+            raise RuntimeError("Redis refund CAS returned an invalid event match")
         if disposition == NOT_REFUNDABLE:
             raise OriginalOrderNotRefundable(
                 f"authoritative original order is not refundable: {original_order_id}"
@@ -269,7 +292,7 @@ return {'DUPLICATE_NOOP', stored_amount}
             raise RuntimeError(
                 f"Redis refund CAS returned an invalid disposition: {disposition!r}"
             )
-        return RefundClaim(disposition, stored_amount_units)
+        return RefundClaim(disposition, stored_amount_units, same_event)
 
     @staticmethod
     def _decode(value: Any) -> Any:

@@ -35,6 +35,10 @@ class PeriodSnapshot:
 
     def __post_init__(self) -> None:
         _require_plain_int(self.period_num, field_name="period_num")
+        if (self.calc_year is None) != (self.calc_month is None):
+            raise PeriodResolutionError(
+                "calc_year and calc_month must be both present or both None"
+            )
         if self.calc_year is not None:
             _require_plain_int(self.calc_year, field_name="calc_year")
         if self.calc_month is not None:
