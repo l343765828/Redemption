@@ -21,13 +21,13 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Check environment
-        shell: pwsh
+        shell: powershell
         run: |
           whoami
           Get-Command codex
           codex --version
 
       - name: Test Codex account
-        shell: pwsh
+        shell: powershell
         run: |
           codex exec "只输出 CODEX_OK，不要修改任何文件"
