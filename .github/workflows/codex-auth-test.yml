@@ -24,10 +24,11 @@ jobs:
         shell: powershell
         run: |
           whoami
+          $PSVersionTable.PSVersion
           Get-Command codex
           codex --version
 
       - name: Test Codex account
         shell: powershell
         run: |
-          codex exec "只输出 CODEX_OK，不要修改任何文件"
+          codex exec "Output exactly CODEX_OK. Do not modify any files."
