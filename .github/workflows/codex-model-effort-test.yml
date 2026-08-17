@@ -8,7 +8,7 @@ permissions:
 
 env:
   CODEX_MODEL: gpt-5.6-sol
-  CODEX_REASONING_EFFORT: minimal
+  CODEX_REASONING_EFFORT: low
 
 jobs:
   codex-model-test:
