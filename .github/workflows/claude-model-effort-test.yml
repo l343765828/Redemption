@@ -8,7 +8,7 @@ permissions:
 
 env:
   CLAUDE_MODEL: opus
-  CLAUDE_EFFORT: xhigh
+  CLAUDE_EFFORT: low
 
 jobs:
   claude-model-test:
