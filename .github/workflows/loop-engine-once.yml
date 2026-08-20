@@ -54,10 +54,20 @@ jobs:
           Remove-Item -Force -ErrorAction SilentlyContinue `
             "$env:OUTDIR\codex-final.txt", "$env:OUTDIR\IMPLEMENTATION_HANDOFF.md", `
             "$env:OUTDIR\uat-result.txt", "$env:OUTDIR\UAT_REPORT.md"
+          # A sandbox-account clone may linger from an earlier run; Administrator can force-remove it
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:OUTDIR\pvam-work02-publish"
           $head = (git -C $env:WORKTREE rev-parse HEAD).Trim()
           Write-Output "worktree HEAD = $head"
+          # A dirty worktree is ALLOWED: the producer contract leaves changes uncommitted, so a
+          # re-run legitimately starts from a previous round's work (see producer-override resume
+          # clause). Log it so the operator can see what is being carried forward.
           $status = git -C $env:WORKTREE status --porcelain
-          if ($status) { Write-Error "worktree not clean:`n$status"; exit 1 }
+          if ($status) {
+            Write-Output "--- worktree carries uncommitted changes from a previous run ---"
+            $status | ForEach-Object { Write-Output $_ }
+          } else {
+            Write-Output "worktree clean"
+          }
           # HEAD must be baseline or its descendant (allows resuming from a previous committed round)
           $mb = (git -C $env:WORKTREE merge-base $head $env:BASELINE).Trim()
           if ($mb -ne $env:BASELINE) { Write-Error "HEAD is not a descendant of baseline $env:BASELINE"; exit 1 }
@@ -85,7 +95,7 @@ jobs:
             -
           if ($LASTEXITCODE -ne 0) { Write-Error "codex exec exited $LASTEXITCODE"; exit 1 }
 
-      - name: Gate READY_FOR_UAT + push consistency
+      - name: Gate producer verdict + whitelist scope
         shell: powershell
         run: |
           $final = [IO.File]::ReadAllText("$env:OUTDIR\codex-final.txt", [System.Text.Encoding]::UTF8)
@@ -97,15 +107,32 @@ jobs:
           Write-Output "producer verdict line: '$verdict'"
           if ($verdict -eq "PRODUCER_BLOCKED") { Write-Error "Producer blocked. See codex-final.txt"; exit 1 }
           if ($verdict -ne "READY_FOR_UAT")    { Write-Error "final line is not a bare status word: '$verdict'"; exit 1 }
+          if (-not (Test-Path "$env:OUTDIR\IMPLEMENTATION_HANDOFF.md")) { Write-Error "IMPLEMENTATION_HANDOFF.md missing in OUTDIR"; exit 1 }
+          # Producer leaves changes UNCOMMITTED by contract (it runs as a sandbox account with no
+          # write access to this repo's git metadata). Expect a dirty worktree with real changes.
+          $status = git -C $env:WORKTREE status --porcelain
+          if (-not $status) { Write-Error "no changes in worktree - producer claimed READY_FOR_UAT but changed nothing"; exit 1 }
+          Write-Output "--- producer change set ---"
+          $status | ForEach-Object { Write-Output $_ }
+
+      - name: Commit and push candidate
+        shell: powershell
+        run: |
+          # git runs here as the runner account (Administrator): it owns .git/worktrees metadata
+          # and ~/.ssh/id_ed25519, neither of which the codex sandbox account can touch.
+          git -C $env:WORKTREE add -A
+          if ($LASTEXITCODE -ne 0) { Write-Error "git add failed"; exit 1 }
+          $msg = "WORK-PVAM-02 WP-0..WP-6 automated construction (loop-engine run $env:GITHUB_RUN_ID)"
+          git -C $env:WORKTREE -c user.name="loop-engine" -c user.email="loop-engine@local" commit -m $msg
+          if ($LASTEXITCODE -ne 0) { Write-Error "git commit failed"; exit 1 }
+          git -C $env:WORKTREE push $env:SSH_URL "HEAD:refs/heads/$env:BRANCH"
+          if ($LASTEXITCODE -ne 0) { Write-Error "git push failed (check runner account SSH key access)"; exit 1 }
           $local  = (git -C $env:WORKTREE rev-parse HEAD).Trim()
           $remote = (git -C $env:WORKTREE ls-remote $env:SSH_URL "refs/heads/$env:BRANCH") -split "\s" | Select-Object -First 1
           Write-Output "local=$local  remote=$remote"
-          if ($remote -ne $local) { Write-Error "push mismatch: remote branch != local HEAD"; exit 1 }
+          if ($remote -ne $local) { Write-Error "push verification failed: remote != local HEAD"; exit 1 }
+          $local | Out-File -Encoding utf8 "$env:OUTDIR\pushed-sha.txt"
           git -C $env:WORKTREE log --oneline "$($env:BASELINE.Substring(0,8))..HEAD"
-          if (-not (Test-Path "$env:OUTDIR\IMPLEMENTATION_HANDOFF.md")) { Write-Error "IMPLEMENTATION_HANDOFF.md missing in OUTDIR"; exit 1 }
-          # Construction must not leave the worktree dirty (everything belongs in commits)
-          $status = git -C $env:WORKTREE status --porcelain
-          if ($status) { Write-Error "worktree dirty after construction:`n$status"; exit 1 }
 
       - name: Upload producer output
         if: always()
