@@ -5,11 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping, Optional, Protocol, Sequence
-
-
-GMT_PLUS_8 = timezone(timedelta(hours=8))
 
 
 class PeriodResolutionError(ValueError):
@@ -78,12 +74,8 @@ class PeriodRepository(Protocol):
     def resolve_current(self, period_num: int) -> PeriodSnapshot:
         ...
 
-    def resolve_approved_at(self, approved_at: datetime) -> PeriodSnapshot:
-        ...
-
-
 class PeriodResolver:
-    """校验 repository 输出，并统一处理批准时间的 GMT+8 边界。"""
+    """校验 repository 按消息期号返回的不可变期间快照。"""
 
     def __init__(self, repository: PeriodRepository):
         if repository is None:
@@ -101,34 +93,6 @@ class PeriodResolver:
             )
         return snapshot
 
-    def resolve_approval_time(self, approved_at: datetime) -> PeriodSnapshot:
-        if not isinstance(approved_at, datetime):
-            raise TypeError("approved_at must be datetime")
-        if approved_at.tzinfo is None or approved_at.utcoffset() is None:
-            raise PeriodResolutionError("approved_at must include a timezone")
-
-        approved_at_gmt8 = approved_at.astimezone(GMT_PLUS_8)
-        snapshot = self._require_snapshot(
-            self._repository.resolve_approved_at(approved_at_gmt8)
-        )
-        if snapshot.calc_year is None or snapshot.calc_month is None:
-            raise PeriodResolutionError(
-                "period snapshot is missing calendar fields required for approval-time resolution"
-            )
-        if (
-            snapshot.calc_year != approved_at_gmt8.year
-            or snapshot.calc_month != approved_at_gmt8.month
-        ):
-            raise PeriodResolutionError(
-                "AR_PERIOD snapshot does not match approved_at in GMT+8"
-            )
-        return snapshot
-
-    def resolve_approved_at(self, approved_at: datetime) -> PeriodSnapshot:
-        """与上游合同命名兼容的显式别名。"""
-
-        return self.resolve_approval_time(approved_at)
-
     @staticmethod
     def _require_snapshot(value: Any) -> PeriodSnapshot:
         if not isinstance(value, PeriodSnapshot):
@@ -137,13 +101,14 @@ class PeriodResolver:
 
 
 class ContractPeriodRepository:
-    """DEC-011 消息周期适配器；生产归期只读取消息中的整数 period。"""
+    """DEC-020 消息周期适配器；生产归期只读取消息中的整数 period。"""
 
     def resolve_current(self, period_num: int) -> PeriodSnapshot:
         period_num = _require_plain_int(period_num, field_name="period_num")
         if period_num < 1:
             raise PeriodResolutionError("period_num must be greater than or equal to 1")
 
+        # 功能性合同标识沿用初始编号；修改会改变既有 source_checksum。
         checksum_payload = {
             "contract": "DEC-011",
             "period": period_num,
@@ -165,17 +130,10 @@ class ContractPeriodRepository:
             source_checksum=source_checksum,
         )
 
-    def resolve_approved_at(self, approved_at: datetime) -> PeriodSnapshot:
-        raise PeriodResolutionError(
-            "approval-time resolution retired by DEC-011; period comes from the message"
-        )
-
-
 class MappingPeriodRepository:
     """用于 DEV/测试的确定性 AR_PERIOD 行适配器。
 
-    生产环境应实现 ``PeriodRepository`` 并在同一次只读视图中查询唯一当前行、
-    ``MIN(PERIOD_NUM)`` 及真实上一行；本适配器不连接数据库。
+    仅按唯一 PERIOD_NUM 构造快照；本适配器不连接数据库，也不承担生产归期。
     """
 
     def __init__(self, rows: Iterable[Mapping[str, Any]]):
@@ -187,22 +145,6 @@ class MappingPeriodRepository:
         period_num = _require_plain_int(period_num, field_name="period_num")
         matches = [row for row in self._rows if row["period_num"] == period_num]
         return self._snapshot_from_unique(matches, lookup=f"period_num={period_num}")
-
-    def resolve_approved_at(self, approved_at: datetime) -> PeriodSnapshot:
-        if not isinstance(approved_at, datetime):
-            raise TypeError("approved_at must be datetime")
-        if approved_at.tzinfo is None or approved_at.utcoffset() is None:
-            raise PeriodResolutionError("approved_at must include a timezone")
-        matches = [
-            row
-            for row in self._rows
-            if row["calc_year"] == approved_at.year
-            and row["calc_month"] == approved_at.month
-        ]
-        return self._snapshot_from_unique(
-            matches,
-            lookup=f"calc_year={approved_at.year}, calc_month={approved_at.month}",
-        )
 
     def _snapshot_from_unique(
         self,

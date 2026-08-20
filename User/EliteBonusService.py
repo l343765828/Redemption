@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 ELITE_MARK_UNITS = 1000 * PV_SCALE  # SQL VV_ARRIVE_PV1=1000 的 V2 micro-units
 
 # ---------- 基础设施常量 ----------
-DEFAULT_DASK_ADDRESS = "tcp://127.0.0.1:8786"
+from User.UserStatsService import SCHEDULE_ADDRESS as DEFAULT_DASK_ADDRESS
 LOCK_TIMEOUT = 30          # 锁自动释放(秒);深树 + Redis RTT 留出余量
 LOCK_BLOCKING_TIMEOUT = 5  # 锁等待(秒);超时则上抛,由调用方决定重试或入死信
 SOURCE_TTL_SECONDS = 60 * 60 * 24 * 90  # 溯源记录 90 天兜底过期

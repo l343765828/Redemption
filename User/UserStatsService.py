@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # SQL 的 1000/2000 PV 资格边界必须与 NormalizedPvEvent 的 micro-units 输入同量纲。
 ELITE_MARK = 1000 * PV_SCALE
 VIRTUAL_MARK = 2000 * PV_SCALE
-SCHEDULE_ADDRESS = "tcp://127.0.0.1:8786"
+from Model.Config import SCHEDULE_ADDRESS
 
 # ---------- 锁配置 ----------
 LOCK_TIMEOUT = 300

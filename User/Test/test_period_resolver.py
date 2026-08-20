@@ -1,7 +1,6 @@
 import hashlib
 import json
 from dataclasses import FrozenInstanceError
-from datetime import datetime, timezone
 
 import pytest
 
@@ -34,19 +33,6 @@ def test_current_uses_min_and_real_previous_row(period_rows) -> None:
     assert len(snap.source_checksum) == 64
 
 
-def test_approval_time_is_resolved_in_gmt_plus_8(period_rows) -> None:
-    resolver = PeriodResolver(MappingPeriodRepository(period_rows))
-
-    snap = resolver.resolve_approval_time(
-        datetime(2026, 1, 31, 16, 0, tzinfo=timezone.utc)
-    )
-
-    assert snap.period_num == 45
-    assert snap.calc_year == 2026
-    assert snap.calc_month == 2
-    assert snap.previous_period_num == 41
-
-
 def test_first_period_has_no_previous(period_rows) -> None:
     resolver = PeriodResolver(MappingPeriodRepository(period_rows))
 
@@ -71,13 +57,6 @@ def test_duplicate_period_num_is_rejected(period_rows) -> None:
 
     with pytest.raises(PeriodResolutionError):
         resolver.resolve_current(41)
-
-
-def test_naive_approval_time_is_rejected(period_rows) -> None:
-    resolver = PeriodResolver(MappingPeriodRepository(period_rows))
-
-    with pytest.raises(PeriodResolutionError):
-        resolver.resolve_approval_time(datetime(2026, 2, 1, 0, 0))
 
 
 @pytest.mark.parametrize(
@@ -113,37 +92,6 @@ def test_contract_period_repository_rejects_invalid_message_period(
 ) -> None:
     with pytest.raises((TypeError, PeriodResolutionError)):
         ContractPeriodRepository().resolve_current(bad_period)
-
-
-def test_contract_period_repository_retires_approval_time_resolution() -> None:
-    with pytest.raises(
-        PeriodResolutionError,
-        match="approval-time resolution retired by DEC-011",
-    ):
-        ContractPeriodRepository().resolve_approved_at(
-            datetime(2026, 2, 1, tzinfo=timezone.utc)
-        )
-
-
-def test_approval_time_rejects_snapshot_without_calendar_fields() -> None:
-    class CalendarlessRepository:
-        def resolve_current(self, period_num):
-            raise AssertionError("not used")
-
-        def resolve_approved_at(self, approved_at):
-            return PeriodSnapshot(
-                period_num=41,
-                calc_year=None,
-                calc_month=None,
-                first_period_num=1,
-                previous_period_num=40,
-                source_checksum="calendarless-test-snapshot",
-            )
-
-    resolver = PeriodResolver(CalendarlessRepository())
-
-    with pytest.raises(PeriodResolutionError, match="calendar fields"):
-        resolver.resolve_approval_time(datetime(2026, 2, 1, tzinfo=timezone.utc))
 
 
 @pytest.mark.parametrize(

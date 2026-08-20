@@ -1,10 +1,11 @@
 from redis_om import JsonModel, get_redis_connection
+from Model.Config import REDIS_DB, REDIS_HOST, REDIS_PASSWORD, REDIS_PORT
 
 redis_conn = get_redis_connection(
-    host="192.168.18.149",
-    port=36378,
-    db=0,
-    password="123456",
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    db=REDIS_DB,
+    password=REDIS_PASSWORD,
     decode_responses=True
 )
 

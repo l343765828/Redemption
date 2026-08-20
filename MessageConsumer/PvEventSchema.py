@@ -25,12 +25,6 @@ def _require_nonempty_string(
     return value
 
 
-def _require_optional_source_system(payload: Mapping[str, Any]) -> Optional[str]:
-    if "source_system" not in payload:
-        return None
-    return _require_nonempty_string(payload, "source_system")
-
-
 def _require_revision(payload: Mapping[str, Any], field_name: str, default: Any) -> Any:
     value = payload.get(field_name, default)
     if value is None and field_name == "previous_business_revision":
@@ -85,7 +79,6 @@ def _parse_period_num(payload: Mapping[str, Any]) -> int:
 class ValidatedOrderPayload:
     source_event_id: str
     user_id: str
-    source_system: Optional[str]
     amount_units: int
     previous_amount_units: Optional[int]
     period_num: int
@@ -97,7 +90,6 @@ class ValidatedOrderPayload:
 class ValidatedRefundPayload:
     source_event_id: str
     user_id: str
-    source_system: Optional[str]
     original_order_id: str
     original_amount_units: int
     period_num: int
@@ -125,7 +117,6 @@ def validate_order_payload(payload: object) -> ValidatedOrderPayload:
     return ValidatedOrderPayload(
         source_event_id=_require_nonempty_string(raw, "order_id"),
         user_id=_require_nonempty_string(raw, "user_id"),
-        source_system=_require_optional_source_system(raw),
         amount_units=_parse_amount_units(raw, "bv"),
         previous_amount_units=previous_amount_units,
         period_num=period_num,
@@ -144,7 +135,6 @@ def validate_refund_payload(payload: object) -> ValidatedRefundPayload:
     return ValidatedRefundPayload(
         source_event_id=_require_nonempty_string(raw, "order_id"),
         user_id=_require_nonempty_string(raw, "user_id"),
-        source_system=_require_optional_source_system(raw),
         original_order_id=_require_nonempty_string(raw, "original_order_id"),
         original_amount_units=_parse_amount_units(raw),
         period_num=_parse_period_num(raw),

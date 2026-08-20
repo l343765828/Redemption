@@ -33,7 +33,6 @@ def _require_revision(value: object, *, field_name: str) -> int:
 class NormalizedPvEvent:
     """金额只以 signed int64 units 表达，raw 字段不会进入业务 stage。"""
 
-    source_system: str
     source_event_id: str
     user_id: str
     payload_hash: str
@@ -47,7 +46,6 @@ class NormalizedPvEvent:
     original_order_id: Optional[str] = None
 
     def __post_init__(self) -> None:
-        _require_nonempty_string(self.source_system, field_name="source_system")
         _require_nonempty_string(self.source_event_id, field_name="source_event_id")
         _require_nonempty_string(self.user_id, field_name="user_id")
         if not isinstance(self.payload_hash, str) or not _SHA256_HEX.fullmatch(
@@ -83,7 +81,7 @@ class NormalizedPvEvent:
 
     @property
     def identity(self) -> str:
-        return f"{self.source_system}:{self.source_event_id}"
+        return self.source_event_id
 
 
 def require_normalized_pv_event(value: object) -> NormalizedPvEvent:

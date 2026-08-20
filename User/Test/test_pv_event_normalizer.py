@@ -1,5 +1,4 @@
 from dataclasses import FrozenInstanceError
-from datetime import datetime, timezone
 import importlib
 
 import pytest
@@ -26,6 +25,9 @@ from Order.RefundReversalLedger import (
     RedisRefundReversalLedger,
     RefundReversalConflict,
 )
+
+
+LEGACY_SOURCE_FIELD = "source_" "system"
 
 
 @pytest.fixture
@@ -60,7 +62,6 @@ def _normalizer(
     refund_ledger,
     *,
     order_repository=None,
-    source_system="PV_EVENT_DEV_ADAPTER",
 ):
     return PvEventNormalizer(
         resolver,
@@ -68,7 +69,6 @@ def _normalizer(
         refund_ledger,
         order_repository=order_repository,
         delivery_ledger=InMemoryPvEventDeliveryLedger(),
-        source_system=source_system,
     )
 
 
@@ -88,11 +88,6 @@ def test_period_and_refund_contract(
     order_repository,
 ) -> None:
     resolver = PeriodResolver(period_repository)
-    snap = resolver.resolve_approval_time(
-        datetime(2026, 1, 31, 16, 0, tzinfo=timezone.utc)
-    )
-    assert snap.calc_year == 2026
-    assert snap.calc_month == 2
     normalizer = _normalizer(resolver, event_registry, refund_ledger, order_repository=order_repository)
     first = normalizer.normalize_refund(
         {
@@ -293,7 +288,6 @@ def test_order_amount_is_scaled_exactly_once(period_repository, order_ledger) ->
         InMemoryEventRegistry(),
         InMemoryRefundReversalLedger(),
         order_repository=order_ledger,
-        source_system="ORDER_API",
     )
 
     event = normalizer.normalize_order(
@@ -312,7 +306,7 @@ def test_order_amount_is_scaled_exactly_once(period_repository, order_ledger) ->
     assert event.amount_encoding_version == 2
     assert event.business_revision == 7
     assert event.previous_business_revision == 6
-    assert event.identity == "ORDER_API:O-30"
+    assert event.identity == "O-30"
     assert event.user_id == "U-30"
     assert event.period_snapshot.period_num == 41
 
@@ -331,6 +325,61 @@ def test_same_identity_with_different_hash_is_blocked(period_repository, order_l
     with pytest.raises(EventIdentityConflict):
         normalizer.normalize_order(
             {"order_id": "O-1", "user_id": "U-1", "bv": "2.00", "period": 41}
+        )
+
+
+def test_legacy_source_field_participates_in_process_hash_conflict(
+    period_repository,
+    order_ledger,
+) -> None:
+    normalizer = _normalizer(
+        PeriodResolver(period_repository),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=order_ledger,
+    )
+    payload = {
+        "order_id": "O-LEGACY-SOURCE",
+        "user_id": "U-1",
+        "bv": "1.00",
+        "period": 41,
+    }
+    normalizer.normalize_order(payload)
+
+    with pytest.raises(EventIdentityConflict):
+        normalizer.normalize_order(dict(payload, **{LEGACY_SOURCE_FIELD: "LEGACY"}))
+
+
+def test_legacy_source_field_hits_delivery_conflict_after_restart(
+    period_repository,
+    order_ledger,
+) -> None:
+    delivery_ledger = InMemoryPvEventDeliveryLedger()
+    payload = {
+        "order_id": "O-LEGACY-RESTART",
+        "user_id": "U-1",
+        "bv": "1.00",
+        "period": 41,
+    }
+    first = PvEventNormalizer(
+        PeriodResolver(period_repository),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=order_ledger,
+        delivery_ledger=delivery_ledger,
+    )
+    first.normalize_order(payload)
+    restarted = PvEventNormalizer(
+        PeriodResolver(period_repository),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=order_ledger,
+        delivery_ledger=delivery_ledger,
+    )
+
+    with pytest.raises(DeliveryIdentityConflict):
+        restarted.normalize_order(
+            dict(payload, **{LEGACY_SOURCE_FIELD: "LEGACY"})
         )
 
 
@@ -1020,47 +1069,6 @@ def test_other_refund_identity_for_claimed_order_does_not_reapply(
     assert other_refund.effective_pv_delta_units == 0
 
 
-def test_refund_claim_identity_includes_configured_source_system(
-    period_repository,
-) -> None:
-    order_ledger = InMemoryConsumedOrderLedger()
-    order_ledger.record_order("O-SOURCE", 100_250_000, 44)
-    refund_ledger = InMemoryRefundReversalLedger()
-    delivery_ledger = InMemoryPvEventDeliveryLedger()
-    payload = {
-        "order_id": "R-SHARED",
-        "user_id": "U-1",
-        "period": 45,
-        "original_order_id": "O-SOURCE",
-        "amount": "100.25",
-    }
-    source_a = PvEventNormalizer(
-        PeriodResolver(period_repository),
-        InMemoryEventRegistry(),
-        refund_ledger,
-        order_repository=order_ledger,
-        delivery_ledger=delivery_ledger,
-        source_system="SOURCE-A",
-    )
-    source_b = PvEventNormalizer(
-        PeriodResolver(period_repository),
-        InMemoryEventRegistry(),
-        refund_ledger,
-        order_repository=order_ledger,
-        delivery_ledger=delivery_ledger,
-        source_system="SOURCE-B",
-    )
-
-    first = source_a.normalize_refund(payload)
-    other_source = source_b.normalize_refund(payload)
-
-    assert first.identity == "SOURCE-A:R-SHARED"
-    assert first.effective_pv_delta_units == -100_250_000
-    assert other_source.identity == "SOURCE-B:R-SHARED"
-    assert other_source.disposition == "DUPLICATE_NOOP"
-    assert other_source.effective_pv_delta_units == 0
-
-
 class _RecordingStageServices:
     def __init__(self, calls, *, fail_placement_once=False):
         self.calls = calls
@@ -1136,10 +1144,10 @@ def test_dispatch_coordinator_acks_after_all_three_stages(
     assert first.disposition == "APPLY"
     assert duplicate.disposition == "DUPLICATE_NOOP"
     assert calls == [
-        ("user_stats", "U-DISPATCH", "PV_EVENT_DEV_ADAPTER:O-DISPATCH"),
-        ("placement", "U-DISPATCH", "PV_EVENT_DEV_ADAPTER:O-DISPATCH"),
-        ("elite_bonus", "U-DISPATCH", "PV_EVENT_DEV_ADAPTER:O-DISPATCH"),
-        ("ack", "PV_EVENT_DEV_ADAPTER:O-DISPATCH"),
+        ("user_stats", "U-DISPATCH", "O-DISPATCH"),
+        ("placement", "U-DISPATCH", "O-DISPATCH"),
+        ("elite_bonus", "U-DISPATCH", "O-DISPATCH"),
+        ("ack", "O-DISPATCH"),
     ]
 
 
@@ -1166,12 +1174,12 @@ def test_dispatch_coordinator_keeps_pending_when_stage_fails(
     assert retried.disposition == "APPLY"
     assert duplicate.disposition == "DUPLICATE_NOOP"
     assert calls == [
-        ("user_stats", "U-STAGE-RETRY", "PV_EVENT_DEV_ADAPTER:O-STAGE-RETRY"),
-        ("placement", "U-STAGE-RETRY", "PV_EVENT_DEV_ADAPTER:O-STAGE-RETRY"),
-        ("user_stats", "U-STAGE-RETRY", "PV_EVENT_DEV_ADAPTER:O-STAGE-RETRY"),
-        ("placement", "U-STAGE-RETRY", "PV_EVENT_DEV_ADAPTER:O-STAGE-RETRY"),
-        ("elite_bonus", "U-STAGE-RETRY", "PV_EVENT_DEV_ADAPTER:O-STAGE-RETRY"),
-        ("ack", "PV_EVENT_DEV_ADAPTER:O-STAGE-RETRY"),
+        ("user_stats", "U-STAGE-RETRY", "O-STAGE-RETRY"),
+        ("placement", "U-STAGE-RETRY", "O-STAGE-RETRY"),
+        ("user_stats", "U-STAGE-RETRY", "O-STAGE-RETRY"),
+        ("placement", "U-STAGE-RETRY", "O-STAGE-RETRY"),
+        ("elite_bonus", "U-STAGE-RETRY", "O-STAGE-RETRY"),
+        ("ack", "O-STAGE-RETRY"),
     ]
 
 
@@ -1199,10 +1207,10 @@ def test_dispatch_ack_commit_then_disconnect_does_not_reapply(
 
     assert retried.disposition == "DUPLICATE_NOOP"
     assert calls == [
-        ("user_stats", "U-ACK", "PV_EVENT_DEV_ADAPTER:O-ACK-DISCONNECT"),
-        ("placement", "U-ACK", "PV_EVENT_DEV_ADAPTER:O-ACK-DISCONNECT"),
-        ("elite_bonus", "U-ACK", "PV_EVENT_DEV_ADAPTER:O-ACK-DISCONNECT"),
-        ("ack", "PV_EVENT_DEV_ADAPTER:O-ACK-DISCONNECT"),
+        ("user_stats", "U-ACK", "O-ACK-DISCONNECT"),
+        ("placement", "U-ACK", "O-ACK-DISCONNECT"),
+        ("elite_bonus", "U-ACK", "O-ACK-DISCONNECT"),
+        ("ack", "O-ACK-DISCONNECT"),
     ]
 
 
@@ -1489,8 +1497,8 @@ def test_dispatch_coordinator_routes_refund_delta_and_then_acks(
 
     assert event.effective_pv_delta_units == -100_250_000
     assert calls == [
-        ("user_stats", "U-REFUND", "PV_EVENT_DEV_ADAPTER:R-DISPATCH"),
-        ("placement", "U-REFUND", "PV_EVENT_DEV_ADAPTER:R-DISPATCH"),
-        ("elite_bonus", "U-REFUND", "PV_EVENT_DEV_ADAPTER:R-DISPATCH"),
-        ("ack", "PV_EVENT_DEV_ADAPTER:R-DISPATCH"),
+        ("user_stats", "U-REFUND", "R-DISPATCH"),
+        ("placement", "U-REFUND", "R-DISPATCH"),
+        ("elite_bonus", "U-REFUND", "R-DISPATCH"),
+        ("ack", "R-DISPATCH"),
     ]
