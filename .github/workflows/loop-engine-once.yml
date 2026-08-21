@@ -1,18 +1,24 @@
-# Loop Engine 单轮闭环：Codex 施工 → Claude 复核+UAT
-# 触发：手动（GitHub → Actions → Run workflow）。不用 push 触发——Job 1 里 Codex 自己会 push，
-# 若按 push 触发会自我循环。
-# 运行环境：self-hosted runner（redemption-codex-01，本机）。两个 Job 同机，
-# 直接操作 D:\ 绝对路径，不需要 checkout / artifact 传递 patch。
-# 前提：runner 以 Administrator 账户启动（run.cmd），codex/claude CLI 的登录态才可见。
+# Loop Engine single-round closure: Codex producer -> Claude verifier + UAT
+# Manual trigger only. Do not trigger on push because Job 1 pushes the candidate branch.
+# Runtime: Windows self-hosted runner, both jobs use the same D:\ paths.
+# Runner must run as Administrator so codex/claude CLI login state and SSH keys are visible.
 #
-# 编码纪律：run 脚本体一律 ASCII——GitHub runner 写给 PowerShell 5.1 的 .ps1 若含中文，
-# 存在按 ANSI 误读致 mojibake/解析劫难的风险。中文只允许出现在：yaml 注释（不进脚本）、
-# yaml env 值（经进程环境传递，不经脚本解析）、外部 UTF-8 文件（显式编码读取）。
+# PowerShell 5.1 discipline: YAML run-script bodies below are ASCII only.
+# Non-ASCII text is kept in YAML comments/env values or external UTF-8 files read explicitly.
 
 name: loop-engine-once
 
 on:
   workflow_dispatch:
+    inputs:
+      run_mode:
+        description: full = Codex + verifier; verifier-resume = resume existing candidate only
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - verifier-resume
 
 concurrency:
   group: loop-engine
@@ -26,23 +32,33 @@ env:
   BASELINE: 6281356d77306016cfb96567e84c14a66eefdbbb
   SSH_URL: git@github.com:l343765828/Redemption.git
 
-  # 含中文的路径全部走 env（进程环境传递不受脚本编码影响），脚本体内不写中文字面量
   PRODUCER_PROMPT: D:\Redemption\Redemption\WORK-PVAM-02_施工会话_启动提示词.md
   VERIFIER_PROMPT: D:\Redemption\Redemption\WORK-PVAM-02_复核与UAT会话_启动提示词.md
   PRODUCER_OVERRIDE: D:\Redemption\Redemption\.loop-engine\producer-override.md
   VERIFIER_OVERRIDE: D:\Redemption\Redemption\.loop-engine\automated-override.md
+  VERIFIER_SETTINGS: D:\Redemption\Redemption\.loop-engine\verifier-settings.json
+  VERIFIER_PROTOCOL: D:\Redemption\Redemption\.loop-engine\verifier-checkpoint-protocol.md
+  VERIFIER_PREPARE_SCRIPT: D:\Redemption\Redemption\.loop-engine\prepare-verifier-state.ps1
+  VERIFIER_RUNNER_SCRIPT: D:\Redemption\Redemption\.loop-engine\claude-verifier-runner.ps1
 
-  # 模型与推理强度：显式传入，不依赖用户级 config.toml（避免它变动导致本 workflow 行为静默改变）
+  VERIFIER_STATE_DIR: D:\Redemption\Redemption\.loop-output\verifier-state
+  VERIFIER_RUNTIME_DIR: D:\Redemption\Redemption\.loop-output\verifier-runtime
+  VERIFIER_HISTORY_DIR: D:\Redemption\Redemption\.loop-output\verifier-history
+  VERIFIER_PROGRESS: D:\Redemption\Redemption\.loop-output\verifier-state\verifier-progress.json
+  VERIFIER_RESUME_CONTEXT: D:\Redemption\Redemption\.loop-output\verifier-state\resume-context.md
+
   CODEX_MODEL: gpt-5.6-sol
-  CODEX_REASONING_EFFORT: xhigh          # codex 配置键：model_reasoning_effort
-  CLAUDE_MODEL: fable                    # 别名，等价 claude-fable-5
-  CLAUDE_EFFORT: ultracode               # 官方文档确认的特例值（v2.1.203+，本机 2.1.233 实测接受）：
-                                         # = xhigh 推理 + 自动多 agent 编排。-p 模式下提示词里的
-                                         # ultracode 关键词不触发编排（v2.1.210 起仅人工输入触发），
-                                         # headless 唯一入口就是本 flag。
+  CODEX_REASONING_EFFORT: xhigh
+  CLAUDE_MODEL: fable
+  CLAUDE_EFFORT: ultracode
+
+  # External checkpoint is authoritative. Session reuse saves context/tokens when possible.
+  # Set to "false" if a saved Claude session becomes unusable; DONE tasks still resume from ledger.
+  CLAUDE_REUSE_SESSION: "true"
 
 jobs:
   codex-producer:
+    if: ${{ inputs.run_mode == 'full' }}
     runs-on: self-hosted
     timeout-minutes: 720
     steps:
@@ -50,17 +66,11 @@ jobs:
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force $env:OUTDIR | Out-Null
-          # Clean stale verdict files: otherwise a crashed round could be judged by last round's outputs
           Remove-Item -Force -ErrorAction SilentlyContinue `
-            "$env:OUTDIR\codex-final.txt", "$env:OUTDIR\IMPLEMENTATION_HANDOFF.md", `
-            "$env:OUTDIR\uat-result.txt", "$env:OUTDIR\UAT_REPORT.md"
-          # A sandbox-account clone may linger from an earlier run; Administrator can force-remove it
+            "$env:OUTDIR\codex-final.txt", "$env:OUTDIR\IMPLEMENTATION_HANDOFF.md"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:OUTDIR\pvam-work02-publish"
           $head = (git -C $env:WORKTREE rev-parse HEAD).Trim()
           Write-Output "worktree HEAD = $head"
-          # A dirty worktree is ALLOWED: the producer contract leaves changes uncommitted, so a
-          # re-run legitimately starts from a previous round's work (see producer-override resume
-          # clause). Log it so the operator can see what is being carried forward.
           $status = git -C $env:WORKTREE status --porcelain
           if ($status) {
             Write-Output "--- worktree carries uncommitted changes from a previous run ---"
@@ -68,23 +78,17 @@ jobs:
           } else {
             Write-Output "worktree clean"
           }
-          # HEAD must be baseline or its descendant (allows resuming from a previous committed round)
           $mb = (git -C $env:WORKTREE merge-base $head $env:BASELINE).Trim()
           if ($mb -ne $env:BASELINE) { Write-Error "HEAD is not a descendant of baseline $env:BASELINE"; exit 1 }
 
       - name: Codex construct
         shell: powershell
         run: |
-          # PS5.1 pipes to native stdin using ANSI by default; force UTF-8 (known pitfall in this repo)
           $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
           if (-not (Test-Path $env:PRODUCER_OVERRIDE)) { Write-Error "producer override missing: $env:PRODUCER_OVERRIDE"; exit 1 }
-          # Prepend the automated-run override: the prompt's interactive gates ("report and wait
-          # for my confirmation") would otherwise stall every headless run - nobody can answer.
           $override = [IO.File]::ReadAllText($env:PRODUCER_OVERRIDE, [System.Text.Encoding]::UTF8)
           $prompt   = [IO.File]::ReadAllText($env:PRODUCER_PROMPT,   [System.Text.Encoding]::UTF8)
           $prompt   = $override + "`n" + $prompt
-          # --add-dir OUTDIR: workspace-write sandbox roots at WORKTREE; the handoff file must land
-          # in OUTDIR (outside the workspace), and writing it into the worktree would dirty git status
           $prompt | & codex exec `
             --model $env:CODEX_MODEL `
             -c "model_reasoning_effort=`"$env:CODEX_REASONING_EFFORT`"" `
@@ -99,27 +103,21 @@ jobs:
         shell: powershell
         run: |
           $final = [IO.File]::ReadAllText("$env:OUTDIR\codex-final.txt", [System.Text.Encoding]::UTF8)
-          # Verdict = last non-empty line, exact match. Substring -match would false-positive when
-          # the final message merely QUOTES contract wording like "not PRODUCER_BLOCKED".
           $lines = $final -split "`r?`n" | Where-Object { $_.Trim() -ne "" }
           if (-not $lines) { Write-Error "codex-final.txt is empty"; exit 1 }
           $verdict = ($lines[-1]).Trim()
           Write-Output "producer verdict line: '$verdict'"
           if ($verdict -eq "PRODUCER_BLOCKED") { Write-Error "Producer blocked. See codex-final.txt"; exit 1 }
-          if ($verdict -ne "READY_FOR_UAT")    { Write-Error "final line is not a bare status word: '$verdict'"; exit 1 }
+          if ($verdict -ne "READY_FOR_UAT") { Write-Error "final line is not a bare status word: '$verdict'"; exit 1 }
           if (-not (Test-Path "$env:OUTDIR\IMPLEMENTATION_HANDOFF.md")) { Write-Error "IMPLEMENTATION_HANDOFF.md missing in OUTDIR"; exit 1 }
-          # Producer leaves changes UNCOMMITTED by contract (it runs as a sandbox account with no
-          # write access to this repo's git metadata). Expect a dirty worktree with real changes.
           $status = git -C $env:WORKTREE status --porcelain
-          if (-not $status) { Write-Error "no changes in worktree - producer claimed READY_FOR_UAT but changed nothing"; exit 1 }
+          if (-not $status) { Write-Error "no changes in worktree - producer claimed READY_FOR_UAT but changed nothing. If the candidate was already pushed and only Claude review/UAT must continue, rerun with run_mode=verifier-resume."; exit 1 }
           Write-Output "--- producer change set ---"
           $status | ForEach-Object { Write-Output $_ }
 
       - name: Commit and push candidate
         shell: powershell
         run: |
-          # git runs here as the runner account (Administrator): it owns .git/worktrees metadata
-          # and ~/.ssh/id_ed25519, neither of which the codex sandbox account can touch.
           git -C $env:WORKTREE add -A
           if ($LASTEXITCODE -ne 0) { Write-Error "git add failed"; exit 1 }
           $msg = "WORK-PVAM-02 WP-0..WP-6 automated construction (loop-engine run $env:GITHUB_RUN_ID)"
@@ -127,67 +125,92 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Write-Error "git commit failed"; exit 1 }
           git -C $env:WORKTREE push $env:SSH_URL "HEAD:refs/heads/$env:BRANCH"
           if ($LASTEXITCODE -ne 0) { Write-Error "git push failed (check runner account SSH key access)"; exit 1 }
-          $local  = (git -C $env:WORKTREE rev-parse HEAD).Trim()
+          $local = (git -C $env:WORKTREE rev-parse HEAD).Trim()
           $remote = (git -C $env:WORKTREE ls-remote $env:SSH_URL "refs/heads/$env:BRANCH") -split "\s" | Select-Object -First 1
           Write-Output "local=$local  remote=$remote"
           if ($remote -ne $local) { Write-Error "push verification failed: remote != local HEAD"; exit 1 }
-          $local | Out-File -Encoding utf8 "$env:OUTDIR\pushed-sha.txt"
+          [IO.File]::WriteAllText("$env:OUTDIR\pushed-sha.txt", $local + "`n", (New-Object System.Text.UTF8Encoding($false)))
           git -C $env:WORKTREE log --oneline "$($env:BASELINE.Substring(0,8))..HEAD"
 
       - name: Upload producer output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: producer-output
+          name: producer-output-${{ github.run_id }}-${{ github.run_attempt }}
           path: D:\Redemption\Redemption\.loop-output\
-          # .loop-output is a dot-prefixed path; upload-artifact skips hidden files by default
           include-hidden-files: true
           if-no-files-found: warn
 
   claude-verifier:
     needs: codex-producer
+    if: ${{ always() && (needs.codex-producer.result == 'success' || (inputs.run_mode == 'verifier-resume' && needs.codex-producer.result == 'skipped')) }}
     runs-on: self-hosted
     timeout-minutes: 720
     steps:
-      - name: Env preflight
+      - name: Prepare verifier checkpoint
         shell: powershell
         run: |
+          if (-not (Test-Path $env:VERIFIER_PREPARE_SCRIPT)) { Write-Error "prepare script missing: $env:VERIFIER_PREPARE_SCRIPT"; exit 1 }
+          & $env:VERIFIER_PREPARE_SCRIPT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verifier permission smoke gate
+        shell: powershell
+        run: |
+          if (-not (Test-Path $env:VERIFIER_EFFECTIVE_SETTINGS)) { Write-Error "effective verifier settings missing: $env:VERIFIER_EFFECTIVE_SETTINGS"; exit 1 }
+          $cfg = [IO.File]::ReadAllText($env:VERIFIER_EFFECTIVE_SETTINGS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+          $allow = @($cfg.permissions.allow)
+          $deny = @($cfg.permissions.deny)
+          if ($allow -notcontains "Edit(.loop-output/**)") { Write-Error "effective verifier settings do not allow Edit(.loop-output/**)"; exit 1 }
+          $bad = @($deny | Where-Object { $_ -eq "Edit" -or $_ -eq "Write" })
+          if ($bad.Count -gt 0) { Write-Error "effective verifier settings contain a bare deny that overrides output writes: $($bad -join ', ')"; exit 1 }
+          Write-Output "permission smoke PASS: output edits allowed; no bare Edit/Write deny"
+
+      - name: UAT environment preflight
+        shell: powershell
+        run: |
+          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "verifier already complete for this fingerprint; skipping environment preflight"; exit 0 }
           $kc = "C:\Users\Administrator\AppData\Local\Temp\codex-pvam-kubectl\kubectl.exe"
-          if (-not (Test-Path $kc)) { Write-Error "kubectl missing at $kc (Temp may have been purged; move it to a stable path and update this workflow)"; exit 1 }
-          if (-not (Test-Path $env:VERIFIER_OVERRIDE)) { Write-Error "override file missing: $env:VERIFIER_OVERRIDE"; exit 1 }
-          # Job 2 can be re-run standalone; clean verdict files again (cannot rely on Job 1's cleanup)
-          Remove-Item -Force -ErrorAction SilentlyContinue "$env:OUTDIR\uat-result.txt", "$env:OUTDIR\UAT_REPORT.md"
-          # Deployment model (user decision 2026-08-15): enter node3 HOST via kubectl debug
-          # (GitHub SSH keys live on node3, not in pods); git runs ON node3. See Verifier prompt D-1.
+          if (-not (Test-Path $kc)) { Write-Error "kubectl missing at $kc; move it to a stable path and update this workflow"; exit 1 }
           foreach ($p in 8443, 36378) {
             $ok = Test-NetConnection -ComputerName 192.168.18.149 -Port $p -WarningAction SilentlyContinue -InformationLevel Quiet
             Write-Output "192.168.18.149:$p => $ok"
             if (-not $ok) { Write-Error "UAT_ENV_BLOCKED: cluster port $p unreachable"; exit 1 }
           }
 
-      - name: Claude review + UAT
+      - name: Claude review + UAT live view
         shell: powershell
         run: |
-          $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-          Set-Location $env:MAINREPO
-          # Override text lives in an external UTF-8 file, NOT a here-string in this script:
-          # (1) Chinese in the .ps1 body risks mojibake under PS5.1; (2) claude CLI silently
-          # ignores unknown flags (verified), so stdin-prepending beats --append-system-prompt.
-          $override = [IO.File]::ReadAllText($env:VERIFIER_OVERRIDE, [System.Text.Encoding]::UTF8)
-          $prompt   = [IO.File]::ReadAllText($env:VERIFIER_PROMPT,   [System.Text.Encoding]::UTF8)
-          # --effort ultracode enables multi-agent adversarial review (caught 2 BLOCKING findings
-          # in supervised sessions). verifier-settings.json allows Workflow/Agent; subagents run
-          # acceptEdits but inherit the same allowlist (deny still applies). In -p mode the
-          # workflow launch needs no approval. Cost: significantly more time and tokens per round.
-          ($override + "`n" + $prompt) | & claude -p --permission-mode dontAsk `
-            --model $env:CLAUDE_MODEL `
-            --effort $env:CLAUDE_EFFORT `
-            --settings "$env:MAINREPO\.loop-engine\verifier-settings.json" `
-            --add-dir "D:\Redemption\Worktrees\pvam-work02-m2-float64-test" `
-            --add-dir "D:\Redemption\Worktrees\pvam-governance"
-          Write-Output "claude exited: $LASTEXITCODE"
+          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "verifier already complete for this fingerprint; skipping Claude execution"; exit 0 }
+          if (-not (Test-Path $env:VERIFIER_RUNNER_SCRIPT)) { Write-Error "runner script missing: $env:VERIFIER_RUNNER_SCRIPT"; exit 1 }
+          & $env:VERIFIER_RUNNER_SCRIPT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Snapshot verifier progress
+        if: always()
+        shell: powershell
+        run: |
+          Write-Output "=== VERIFIER PROGRESS SNAPSHOT ==="
+          if (-not (Test-Path $env:VERIFIER_PROGRESS)) {
+            Write-Output "progress ledger missing"
+            exit 0
+          }
+          try {
+            $s = [IO.File]::ReadAllText($env:VERIFIER_PROGRESS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            Write-Output "candidate=$($s.candidate_sha)"
+            Write-Output "fingerprint=$($s.input_fingerprint)"
+            Write-Output "status=$($s.status)"
+            Write-Output "current_task=$($s.current_task_id)"
+            Write-Output "resume_count=$($s.resume_count)"
+            foreach ($t in @($s.tasks)) {
+              Write-Output ("[{0}] {1} | attempts={2} | {3}" -f $t.status, $t.id, $t.attempts, $t.title)
+            }
+          } catch {
+            Write-Output "progress ledger could not be parsed: $($_.Exception.Message)"
+          }
 
       - name: Read result
+        if: success()
         shell: powershell
         run: |
           $f = "$env:OUTDIR\uat-result.txt"
@@ -195,18 +218,17 @@ jobs:
           $r = ([IO.File]::ReadAllText($f, [System.Text.Encoding]::UTF8)).Trim()
           Write-Output "=== FINAL RESULT: $r ==="
           switch ($r) {
-            "PASS"     { exit 0 }
+            "PASS" { exit 0 }
             "REJECTED" { Write-Error "REJECTED - see UAT_REPORT.md; hand the report back to Codex for rework"; exit 1 }
-            "BLOCKED"  { Write-Error "BLOCKED - fix environment or make the pending human decision; do NOT change code"; exit 1 }
-            default    { Write-Error "invalid result: $r"; exit 1 }
+            "BLOCKED" { Write-Error "BLOCKED - fix environment or make the pending human decision; do NOT change code"; exit 1 }
+            default { Write-Error "invalid result: $r"; exit 1 }
           }
 
       - name: Upload verifier output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: verifier-output
+          name: verifier-output-${{ github.run_id }}-${{ github.run_attempt }}
           path: D:\Redemption\Redemption\.loop-output\
-          # .loop-output is a dot-prefixed path; upload-artifact skips hidden files by default
           include-hidden-files: true
           if-no-files-found: warn
