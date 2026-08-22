@@ -29,6 +29,7 @@ env:
   LOOP_STATE_SCRIPT: D:\Redemption\Redemption\.loop-engine\loop-state.ps1
   LOOP_STATE_FILE: D:\Redemption\Redemption\.loop-output\loop-state.json
   LOOP_CYCLES_DIR: D:\Redemption\Redemption\.loop-output\cycles
+  UAT_PERIOD_POOL_FILE: D:\Redemption\Redemption\.loop-engine\uat-period-pool.json
 
 jobs:
   prepare:
@@ -64,7 +65,7 @@ jobs:
     needs: [prepare, round1]
     if: >-
       ${{
-        always() &&
+        !cancelled() &&
         needs.prepare.result == 'success' &&
         (
           (needs.prepare.outputs.start_round == '2' && needs.prepare.outputs.start_action != 'none') ||
@@ -83,7 +84,7 @@ jobs:
     needs: [prepare, round1, round2]
     if: >-
       ${{
-        always() &&
+        !cancelled() &&
         needs.prepare.result == 'success' &&
         (
           (needs.prepare.outputs.start_round == '3' && needs.prepare.outputs.start_action != 'none') ||
@@ -99,7 +100,7 @@ jobs:
 
   finalize:
     needs: [prepare, round1, round2, round3]
-    if: ${{ always() && needs.prepare.result == 'success' }}
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
     runs-on: self-hosted
     steps:
       - name: Final loop status
@@ -109,10 +110,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload loop state
-        if: always()
+        if: ${{ !cancelled() }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: loop-state-${{ github.run_id }}-${{ github.run_attempt }}
-          path: D:\Redemption\Redemption\.loop-output\
+          path: |
+            D:\Redemption\Redemption\.loop-output\loop-state.json
+            D:\Redemption\Redemption\.loop-output\cycles\cycle-${{ needs.prepare.outputs.cycle }}\cycle-summary.md
           include-hidden-files: true
           if-no-files-found: warn
+          retention-days: 14
