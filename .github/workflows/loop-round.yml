@@ -50,6 +50,7 @@ env:
   LOOP_STATE_SCRIPT: D:\Redemption\Redemption\.loop-engine\loop-state.ps1
   LOOP_STATE_FILE: D:\Redemption\Redemption\.loop-output\loop-state.json
   LOOP_CYCLES_DIR: D:\Redemption\Redemption\.loop-output\cycles
+  UAT_PERIOD_POOL_FILE: D:\Redemption\Redemption\.loop-engine\uat-period-pool.json
 
   VERIFIER_STATE_DIR: D:\Redemption\Redemption\.loop-output\verifier-state
   VERIFIER_RUNTIME_DIR: D:\Redemption\Redemption\.loop-output\verifier-runtime
@@ -97,6 +98,23 @@ jobs:
             -RoundAction $env:LOOP_ROUND_ACTION `
             -PreviousReport $env:PREVIOUS_UAT_REPORT
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Validate round UAT period allocation
+        shell: powershell
+        run: |
+          foreach ($name in @("LOOP_UAT_PERIOD_SLOT", "LOOP_UAT_PERIOD_PRIMARY", "LOOP_UAT_PERIOD_SECONDARY", "LOOP_UAT_PERIOD_POOL_SHA256")) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if (-not $value) { Write-Error "missing durable UAT period environment: $name"; exit 1 }
+          }
+          $state = [IO.File]::ReadAllText($env:LOOP_STATE_FILE, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+          $cycleObject = @($state.cycles | Where-Object { [int]$_.cycle -eq [int]$env:LOOP_CYCLE } | Select-Object -First 1)[0]
+          $roundObject = @($cycleObject.rounds | Where-Object { [int]$_.round -eq [int]$env:LOOP_ROUND } | Select-Object -First 1)[0]
+          if (-not $roundObject) { Write-Error "round missing while validating UAT period allocation"; exit 1 }
+          if ([int]$roundObject.uat_period_slot -ne [int]$env:LOOP_UAT_PERIOD_SLOT) { Write-Error "UAT period slot differs from loop ledger"; exit 1 }
+          if ([int]$roundObject.uat_period_primary -ne [int]$env:LOOP_UAT_PERIOD_PRIMARY) { Write-Error "primary UAT period differs from loop ledger"; exit 1 }
+          if ([int]$roundObject.uat_period_secondary -ne [int]$env:LOOP_UAT_PERIOD_SECONDARY) { Write-Error "secondary UAT period differs from loop ledger"; exit 1 }
+          if ([string]$roundObject.uat_period_pool_sha256 -ne [string]$env:LOOP_UAT_PERIOD_POOL_SHA256) { Write-Error "UAT period pool hash differs from loop ledger"; exit 1 }
+          Write-Output "UAT period allocation PASS: slot=$env:LOOP_UAT_PERIOD_SLOT periods=$env:LOOP_UAT_PERIOD_PRIMARY/$env:LOOP_UAT_PERIOD_SECONDARY"
 
       - name: Preflight producer worktree
         if: ${{ inputs.action != 'resume-verifier' }}
@@ -299,7 +317,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Snapshot verifier progress
-        if: always()
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           Write-Output "=== VERIFIER PROGRESS SNAPSHOT ==="
@@ -332,10 +350,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload round output
-        if: always()
+        if: ${{ !cancelled() }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: loop-cycle-${{ inputs.cycle }}-round-${{ inputs.round }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: D:\Redemption\Redemption\.loop-output\
+          path: |
+            D:\Redemption\Redemption\.loop-output\loop-state.json
+            D:\Redemption\Redemption\.loop-output\cycles\cycle-${{ inputs.cycle }}\round-${{ inputs.round }}\
+            D:\Redemption\Redemption\.loop-output\verifier-state\
+            D:\Redemption\Redemption\.loop-output\UAT_REPORT.md
+            D:\Redemption\Redemption\.loop-output\uat-result.txt
+            D:\Redemption\Redemption\.loop-output\IMPLEMENTATION_HANDOFF.md
+            D:\Redemption\Redemption\.loop-output\codex-final.txt
           include-hidden-files: true
           if-no-files-found: warn
+          retention-days: 14
