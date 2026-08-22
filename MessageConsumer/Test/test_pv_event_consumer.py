@@ -34,6 +34,11 @@ class FakeRetriableKafkaError:
         return True
 
 
+class FakeNonRetriableKafkaError:
+    def retriable(self):
+        return False
+
+
 class FakeMessage:
     def __init__(
         self,
@@ -613,6 +618,33 @@ def test_latest_transient_failure_cannot_exhaust_an_older_bounded_budget(setting
     assert producer.records == []
 
 
+def test_bounded_budget_restarts_after_transient_failures(settings):
+    retry_settings = replace(settings, bounded_retry_attempts=2)
+    transient_failures = 3
+    coordinator = SequenceCoordinator(
+        [TransientFailure("redis down")] * transient_failures
+        + [RuntimeError("ambiguous")]
+    )
+    consumer = FakeConsumer()
+    producer = FakeProducer()
+    subject = build_subject(
+        retry_settings,
+        coordinator=coordinator,
+        consumer=consumer,
+        producer=producer,
+    )
+    message = FakeMessage(valid_order())
+
+    subject.process_message(message)
+
+    assert len(coordinator.calls) == (
+        transient_failures + retry_settings.bounded_retry_attempts
+    )
+    assert producer.records[-1]["payload"]["reason"] == "RETRY_EXHAUSTED"
+    assert consumer.commits == [(message, False)]
+    assert consumer.resumes == [PartitionRef(TOPIC_ORDERS, 0)]
+
+
 def test_mixed_transient_bounded_transient_sequence_never_commits(settings):
     retry_settings = replace(settings, bounded_retry_attempts=3)
     coordinator = SequenceCoordinator(
@@ -736,6 +768,36 @@ def test_retryable_exception_offset_commit_is_retried_without_losing_message(set
     assert consumer.commit_attempts == 2
     assert consumer.commits == [(message, False)]
     assert consumer.poll_count >= 1
+
+
+def test_non_retryable_exception_offset_commit_stops_and_closes(settings):
+    class NonRetryableCommitConsumer(FakeConsumer):
+        def __init__(self):
+            super().__init__()
+            self.commit_attempts = 0
+
+        def commit(self, *, message, asynchronous):
+            self.commit_attempts += 1
+            raise FakeKafkaException(FakeNonRetriableKafkaError())
+
+    consumer = NonRetryableCommitConsumer()
+    producer = FakeProducer()
+    subject = build_subject(
+        settings,
+        coordinator=SequenceCoordinator([EventIdentityConflict("drift")]),
+        consumer=consumer,
+        producer=producer,
+        kafka_exception_types=(FakeKafkaException,),
+    )
+    consumer.poll_results.append(FakeMessage(valid_order()))
+
+    subject.run()
+
+    assert subject.running is False
+    assert consumer.closed is True
+    assert consumer.commit_attempts == 1
+    assert consumer.commits == []
+    assert len(producer.records) == 1
 
 
 @pytest.mark.parametrize(

@@ -74,6 +74,7 @@ class PeriodRepository(Protocol):
     def resolve_current(self, period_num: int) -> PeriodSnapshot:
         ...
 
+
 class PeriodResolver:
     """校验 repository 按消息期号返回的不可变期间快照。"""
 
@@ -129,6 +130,7 @@ class ContractPeriodRepository:
             previous_period_num=period_num - 1 if period_num > 1 else None,
             source_checksum=source_checksum,
         )
+
 
 class MappingPeriodRepository:
     """用于 DEV/测试的确定性 AR_PERIOD 行适配器。

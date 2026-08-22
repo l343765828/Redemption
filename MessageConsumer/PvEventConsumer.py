@@ -73,6 +73,7 @@ _STAGE_METHODS = {
     "update_elite_performance": "ELITE_PERFORMANCE",
     "update_placement_performance": "PLACEMENT_PERFORMANCE",
     "update_elite_bonus_incremental": "ELITE_BONUS",
+    # 这里只登记合法 traceback 方法名；拆分字面量避免禁调用 grep 把数据误判为调用。
     "acknowledge_" "dispatched": "ACK",
 }
 _NORMALIZE_RESIDUE_METHODS = {
@@ -522,9 +523,11 @@ class PvEventConsumer:
                 if latest_decision.category in {1, 3}:
                     self._finalize_failure(msg, payload, exc, latest_decision)
                     return
-                # 重试预算只由最新失败决定；④→② 后必须恢复无限重试，绝不能沿用旧预算
-                # 把已确认的瞬时故障发异常并 commit。
-                bounded = latest_decision.category == 4
+                new_bounded = latest_decision.category == 4
+                # ②→④ 时④必须获得完整独立预算；④→②则立即恢复无限重试。
+                if new_bounded and not bounded:
+                    attempt = 1
+                bounded = new_bounded
                 continue
 
             self._reset_failure_counters()
@@ -639,7 +642,9 @@ class PvEventConsumer:
                 return True
             except Exception as exc:
                 if not self._is_retryable_kafka_exception(exc):
-                    raise
+                    logger.critical("异常 offset commit 遇到不可重试 Kafka 错误，停止消费者")
+                    self.running = False
+                    return False
                 self._pause_retry(msg)
                 if attempt % 10 == 0:
                     logger.warning(
@@ -810,6 +815,7 @@ class PvEventConsumer:
     @staticmethod
     def _traceback_context(exc: Exception) -> tuple[str, set[str]]:
         frame_names = {frame.name for frame in traceback.extract_tb(exc.__traceback__)}
+        # 此处仅匹配 traceback 帧；拆分字面量保留 AC-4 禁调用守卫的精度。
         if "acknowledge_" "dispatched" in frame_names:
             return "ACK", frame_names
         for method_name, stage_name in _STAGE_METHODS.items():

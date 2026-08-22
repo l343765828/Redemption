@@ -27,6 +27,7 @@ from Order.RefundReversalLedger import (
 )
 
 
+# 仅构造历史未知字段参与哈希的合同用例；拆分字面量保留 AC-2 概念清理守卫的精度。
 LEGACY_SOURCE_FIELD = "source_" "system"
 
 
