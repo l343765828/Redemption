@@ -1,0 +1,413 @@
+{
+  "schema_version": 8,
+  "debug_image_mode": "discover-flannel-daemonset",
+  "debug_image_pull_policy": "IfNotPresent",
+  "debug_image_sources": [
+    {
+      "namespace": "kube-flannel",
+      "name": "kube-flannel-ds",
+      "container": "kube-flannel"
+    },
+    {
+      "namespace": "kube-system",
+      "name": "kube-flannel-ds",
+      "container": "kube-flannel"
+    }
+  ],
+  "repo_remote_url": "git@github.com:l343765828/Redemption.git",
+  "kafka_topics": [
+    "pvam-pv-orders",
+    "pvam-pv-refunds"
+  ],
+  "redis_exact_cleanup_prefixes": [
+    "pvam:event_delivery:",
+    "pvam:order_ledger:",
+    "pvam:refund_reversal:",
+    "pvam:uat:work02:{uat_execution_id}:",
+    "system:idempotency:{period}:",
+    "system:idempotency:placement:{period}:",
+    "system:idempotency:elite:{period}:"
+  ],
+  "exec_profiles": {
+    "python-version": {
+      "required_tokens": [
+        "exec"
+      ],
+      "command": [
+        "python3",
+        "--version"
+      ]
+    },
+    "dask-client-versions": {
+      "required_tokens": [
+        "exec"
+      ],
+      "command": [
+        "python3",
+        "-c",
+        "import dask,distributed;print('dask='+dask.__version__);print('distributed='+distributed.__version__)"
+      ]
+    },
+    "dask-scheduler-info": {
+      "required_tokens": [
+        "exec"
+      ],
+      "command": [
+        "python3",
+        "-c",
+        "from distributed import Client;import json,os;c=Client(os.environ['PVAM_DASK_SCHEDULER']);print(json.dumps(c.scheduler_info(),sort_keys=True,default=str));c.close()"
+      ]
+    },
+    "dask-actor-inventory": {
+      "required_tokens": [
+        "exec"
+      ],
+      "command": [
+        "python3",
+        "-c",
+        "from distributed import Client;import json,os;c=Client(os.environ['PVAM_DASK_SCHEDULER']);x=c.run_on_scheduler(lambda dask_scheduler: sorted([str(k) for k,v in dask_scheduler.tasks.items() if bool(getattr(v,'actor',False))]));print(json.dumps(x));c.close()"
+      ]
+    },
+    "gpu-runtime-probe": {
+      "required_tokens": [
+        "exec"
+      ],
+      "command": [
+        "python3",
+        "-c",
+        "import cupy as cp;print('device_count='+str(cp.cuda.runtime.getDeviceCount()));print('device='+str(cp.cuda.runtime.getDevice()))"
+      ]
+    },
+    "dask-actor-rebuild": {
+      "required_tokens": [
+        "exec",
+        "restart"
+      ],
+      "command": [
+        "python3",
+        "-m",
+        "User.UserService"
+      ],
+      "repo_cwd": true
+    },
+    "runtime-summary": {
+      "required_tokens": [
+        "exec"
+      ],
+      "command": [
+        "python3",
+        "-c",
+        "import json,platform,sys;print(json.dumps({'python':sys.version.split()[0],'implementation':platform.python_implementation(),'system':platform.system(),'machine':platform.machine()},sort_keys=True))"
+      ]
+    },
+    "dask-list-datasets": {
+      "required_tokens": [
+        "exec"
+      ],
+      "repo_cwd": true,
+      "command": [
+        "python3",
+        "-c",
+        "from distributed import Client;import json,os;c=Client(os.environ['PVAM_DASK_SCHEDULER']);print(json.dumps(sorted([str(x) for x in c.list_datasets()])));c.close()"
+      ]
+    }
+  },
+  "debug_profiles": {
+    "host-kernel-summary": {
+      "required_tokens": [
+        "debug"
+      ],
+      "command": [
+        "chroot",
+        "/host",
+        "uname",
+        "-a"
+      ]
+    }
+  },
+  "listable_kinds": [
+    "pod",
+    "deployment",
+    "statefulset",
+    "daemonset",
+    "service",
+    "job",
+    "configmap"
+  ],
+  "redis_read_prefixes": [
+    "pvam:event_delivery:",
+    "pvam:order_ledger:",
+    "pvam:refund_reversal:",
+    "pvam:uat:work02:{uat_execution_id}:",
+    "system:idempotency:{period}:",
+    "system:idempotency:placement:{period}:",
+    "system:idempotency:elite:{period}:"
+  ],
+  "set_image_allowlist": [],
+  "required_success_actions_by_stage": {
+    "OPUS": [
+      "GitAudit",
+      "PytestFull",
+      "PytestSelected",
+      "DaskListDatasets",
+      "RedisDbSize",
+      "KafkaScenarioProduce",
+      "RedisDeleteExactKeys",
+      "GitUpdate",
+      "ConsumerLifecycle",
+      "RedisReadExactKeys",
+      "ConsumerObserve",
+      "UatProof"
+    ],
+    "FABLE": [
+      "GitAudit",
+      "PytestSelected",
+      "DaskListDatasets",
+      "RedisDbSize",
+      "KafkaScenarioProduce",
+      "RedisDeleteExactKeys",
+      "GitUpdate",
+      "ConsumerLifecycle",
+      "RedisReadExactKeys",
+      "ConsumerObserve",
+      "UatProof"
+    ]
+  },
+  "kafka_scenarios": [
+    "order",
+    "refund",
+    "cross-period-refund",
+    "duplicate",
+    "payload-drift",
+    "forbidden-field",
+    "schema-invalid",
+    "future-period",
+    "expired-period",
+    "drain-sentinel"
+  ],
+  "pytest_selected_prefixes": [
+    "tests/"
+  ],
+  "required_kafka_scenarios_by_stage": {
+    "OPUS": [
+      "order",
+      "refund",
+      "cross-period-refund",
+      "duplicate",
+      "payload-drift",
+      "forbidden-field",
+      "schema-invalid",
+      "future-period",
+      "expired-period",
+      "drain-sentinel"
+    ],
+    "FABLE": [
+      "order",
+      "refund",
+      "duplicate",
+      "payload-drift"
+    ]
+  },
+  "pytest_selected_exact": [
+    "MessageConsumer/Test/test_pv_event_consumer.py",
+    "User/Test/test_amount_dtype_migration.py"
+  ],
+  "redis_dbsize_required_phases": [
+    "before",
+    "after"
+  ],
+  "redis_dbsize_relation": "after_not_greater_than_before",
+  "pytest_selected_required_targets": [
+    "MessageConsumer/Test/test_pv_event_consumer.py",
+    "User/Test/test_amount_dtype_migration.py"
+  ],
+  "controller_evidence_schema": 10,
+  "required_idempotency_namespaces": [
+    "userstats",
+    "placement",
+    "elite"
+  ],
+  "git_change_allowlist": [
+    "Common/PeriodResolver.py",
+    "Model/Order/NormalizedPvEvent.py",
+    "MessageConsumer/PvEventSchema.py",
+    "MessageConsumer/PvEventNormalizer.py",
+    "MessageConsumer/PvEventConsumer.py",
+    "User/UserStatsService.py",
+    "User/EliteBonusService.py",
+    "Model/Config.py",
+    "Redishelper/BaseRedisModel.py",
+    "MessageConsumer/Test/test_pv_event_consumer.py",
+    "User/Test/test_period_resolver.py",
+    "User/Test/test_pv_event_normalizer.py",
+    "User/Test/test_amount_dtype_migration.py"
+  ],
+  "required_consumer_lifecycle_ops_by_stage": {
+    "OPUS": [
+      "bind-primary",
+      "bind-secondary",
+      "restore"
+    ],
+    "FABLE": [
+      "bind-primary",
+      "restore"
+    ]
+  },
+  "scenarios_require_dispatched_three_chain": [
+    "order",
+    "refund",
+    "cross-period-refund",
+    "duplicate",
+    "payload-drift"
+  ],
+  "consumer_observation_required_scenarios_by_stage": {
+    "OPUS": [
+      "order",
+      "refund",
+      "cross-period-refund",
+      "duplicate",
+      "payload-drift",
+      "forbidden-field",
+      "schema-invalid",
+      "future-period",
+      "future-period-replay",
+      "expired-period",
+      "drain-sentinel"
+    ],
+    "FABLE": [
+      "order",
+      "refund",
+      "duplicate",
+      "payload-drift"
+    ]
+  },
+  "consumer_exception_topic": "pvam-pv-exceptions",
+  "consumer_exception_tail_per_partition": 500,
+  "consumer_exception_observe_timeout_seconds": 15,
+  "scenario_expected_exception_reason": {
+    "payload-drift": "EVENT_IDENTITY_CONFLICT",
+    "forbidden-field": "D9B_FORBIDDEN_FIELD",
+    "schema-invalid": "SCHEMA_VIOLATION",
+    "expired-period": "EXPIRED_PERIOD"
+  },
+  "scenario_expected_offset_semantics": {
+    "order": "committed",
+    "refund": "committed",
+    "cross-period-refund": "committed",
+    "duplicate": "committed",
+    "payload-drift": "committed",
+    "forbidden-field": "committed",
+    "schema-invalid": "committed",
+    "expired-period": "committed",
+    "future-period": "not-committed",
+    "drain-sentinel": "not-committed",
+    "future-period-replay": "committed"
+  },
+  "scenario_period_role": {
+    "order": "primary",
+    "refund": "primary",
+    "cross-period-refund": "primary",
+    "duplicate": "primary",
+    "payload-drift": "primary",
+    "forbidden-field": "primary",
+    "schema-invalid": "primary",
+    "future-period": "secondary",
+    "expired-period": "primary",
+    "drain-sentinel": "secondary"
+  },
+  "scenario_required_bound_role": {
+    "order": "primary",
+    "refund": "primary",
+    "cross-period-refund": "primary",
+    "duplicate": "primary",
+    "payload-drift": "primary",
+    "forbidden-field": "primary",
+    "schema-invalid": "primary",
+    "future-period": "primary",
+    "expired-period": "secondary",
+    "drain-sentinel": "primary"
+  },
+  "scenario_observe_bound_role": {
+    "order": "primary",
+    "refund": "primary",
+    "cross-period-refund": "secondary",
+    "duplicate": "primary",
+    "payload-drift": "primary",
+    "forbidden-field": "primary",
+    "schema-invalid": "primary",
+    "future-period": "primary",
+    "expired-period": "secondary",
+    "drain-sentinel": "primary",
+    "future-period-replay": "secondary"
+  },
+  "consumer_lifecycle_targets": [],
+  "git_hunk_allowlist": {
+    "User/UserStatsService.py": [
+      {
+        "old_start": 32,
+        "old_count": 1,
+        "new_start": 32,
+        "new_count": 1
+      }
+    ],
+    "User/EliteBonusService.py": [
+      {
+        "old_start": 56,
+        "old_count": 1,
+        "new_start": 56,
+        "new_count": 1
+      }
+    ]
+  },
+  "scenarios_require_no_redis_side_effects": [
+    "forbidden-field",
+    "schema-invalid",
+    "expired-period"
+  ],
+  "mandatory_uat_proofs_by_stage": {
+    "OPUS": [
+      "cross-period-refund-routing",
+      "duplicate-no-double",
+      "pending-dispatched-recovery",
+      "int64-end-to-end",
+      "pause-rebalance",
+      "dispatch-p99"
+    ],
+    "FABLE": [
+      "duplicate-no-double",
+      "int64-end-to-end",
+      "dispatch-p99"
+    ]
+  },
+  "redis_proof_contracts": {
+    "cross-period-refund-ledgers": {
+      "scenario": "cross-period-refund",
+      "required_key_roles": [
+        "order-ledger",
+        "refund-ledger",
+        "delivery-order",
+        "delivery-refund"
+      ],
+      "require_untruncated": true
+    },
+    "duplicate-ledgers": {
+      "scenario": "duplicate",
+      "required_key_roles": [
+        "order-ledger",
+        "delivery-order"
+      ],
+      "require_untruncated": true
+    }
+  },
+  "dispatch_p99_sample_count": 20,
+  "dispatch_p99_max_ms": 5000,
+  "required_redis_proofs_by_stage": {
+    "OPUS": [
+      "cross-period-refund-ledgers",
+      "duplicate-ledgers"
+    ],
+    "FABLE": [
+      "duplicate-ledgers"
+    ]
+  }
+}

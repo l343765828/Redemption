@@ -19,6 +19,14 @@ on:
         required: false
         type: string
         default: ""
+      findings_source:
+        required: false
+        type: string
+        default: ""
+      findings_ref:
+        required: false
+        type: string
+        default: ""
     outputs:
       verdict:
         description: PASS, REJECTED, or BLOCKED when verifier completed normally
@@ -29,6 +37,18 @@ on:
       candidate_sha:
         description: Candidate SHA verified in this round
         value: ${{ jobs.round.outputs.candidate_sha }}
+      opus_result:
+        description: Normalized Loop Core Opus result (NO_BUG or BUG_FOUND; empty when execution is BLOCKED)
+        value: ${{ jobs.round.outputs.opus_result }}
+      fable_result:
+        description: Normalized Loop Core Fable result (FINAL_PASS or FINAL_REJECT; empty when absent/BLOCKED)
+        value: ${{ jobs.round.outputs.fable_result }}
+      state_status:
+        description: Durable Loop Core status after this round
+        value: ${{ jobs.round.outputs.state_status }}
+      pause_reason:
+        description: Durable pause reason when PAUSED_AWAITING_USER
+        value: ${{ jobs.round.outputs.pause_reason }}
 
 env:
   WORKTREE: D:\Redemption\Worktrees\pvam-work02-m2-float64-test
@@ -51,17 +71,31 @@ env:
   LOOP_STATE_FILE: D:\Redemption\Redemption\.loop-output\loop-state.json
   LOOP_CYCLES_DIR: D:\Redemption\Redemption\.loop-output\cycles
   UAT_PERIOD_POOL_FILE: D:\Redemption\Redemption\.loop-engine\uat-period-pool.json
+  MASTER_AGENTS_FILE: D:\Redemption\Redemption\AGENTS.md
+  KUBECTL_PATH: D:\Redemption\Redemption\K8S\kubectl.exe
+  KUBECONFIG_PATH: D:\Redemption\Redemption\K8S\admin.conf
+  UAT_ACTION_PROXY_SCRIPT: D:\Redemption\Redemption\.loop-engine\uat-action-proxy.ps1
+  UAT_ACTION_POLICY_FILE: D:\Redemption\Redemption\.loop-engine\uat-action-policy.json
+  UAT_READINESS_FILE: D:\Redemption\Redemption\.loop-engine\uat-environment-readiness.json
+  UAT_READINESS_SCRIPT: D:\Redemption\Redemption\.loop-engine\assert-uat-environment-readiness.ps1
+  UAT_ACTION_PROXY_ALLOW: Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:/Redemption/Redemption/.loop-engine/uat-action-proxy.ps1)
+  PROTECTED_EVIDENCE_HASH_SCRIPT: D:\Redemption\Redemption\.loop-engine\protected-evidence-hash.ps1
+  PROXY_PERIOD_VERIFY_SCRIPT: D:\Redemption\Redemption\.loop-engine\verify-proxy-period-evidence.ps1
+  CONTROLLER_PROXY_EVIDENCE_ROOT: D:\Redemption\Redemption\.loop-output\controller-evidence\schema-10
 
-  VERIFIER_STATE_DIR: D:\Redemption\Redemption\.loop-output\verifier-state
-  VERIFIER_RUNTIME_DIR: D:\Redemption\Redemption\.loop-output\verifier-runtime
-  VERIFIER_HISTORY_DIR: D:\Redemption\Redemption\.loop-output\verifier-history
-  VERIFIER_PROGRESS: D:\Redemption\Redemption\.loop-output\verifier-state\verifier-progress.json
-  VERIFIER_RESUME_CONTEXT: D:\Redemption\Redemption\.loop-output\verifier-state\resume-context.md
+  OPUS_VERIFIER_STATE_DIR: D:\Redemption\Redemption\.loop-output\verifier-state\opus
+  OPUS_VERIFIER_RUNTIME_DIR: D:\Redemption\Redemption\.loop-output\verifier-runtime\opus
+  OPUS_VERIFIER_HISTORY_DIR: D:\Redemption\Redemption\.loop-output\verifier-history\opus
+  FABLE_VERIFIER_STATE_DIR: D:\Redemption\Redemption\.loop-output\verifier-state\fable
+  FABLE_VERIFIER_RUNTIME_DIR: D:\Redemption\Redemption\.loop-output\verifier-runtime\fable
+  FABLE_VERIFIER_HISTORY_DIR: D:\Redemption\Redemption\.loop-output\verifier-history\fable
 
   CODEX_MODEL: gpt-5.6-sol
   CODEX_REASONING_EFFORT: xhigh
-  CLAUDE_MODEL: fable
-  CLAUDE_EFFORT: ultracode
+  OPUS_CLAUDE_MODEL: opus
+  OPUS_CLAUDE_EFFORT: ultracode
+  FABLE_CLAUDE_MODEL: fable
+  FABLE_CLAUDE_EFFORT: ultracode
   CLAUDE_REUSE_SESSION: "true"
 
 jobs:
@@ -72,11 +106,17 @@ jobs:
       verdict: ${{ steps.finalize.outputs.verdict }}
       report_path: ${{ steps.finalize.outputs.report_path }}
       candidate_sha: ${{ steps.finalize.outputs.candidate_sha }}
+      opus_result: ${{ steps.finalize.outputs.opus_result }}
+      fable_result: ${{ steps.finalize.outputs.fable_result }}
+      state_status: ${{ steps.finalize.outputs.state_status }}
+      pause_reason: ${{ steps.finalize.outputs.pause_reason }}
     env:
       LOOP_CYCLE: ${{ inputs.cycle }}
       LOOP_ROUND: ${{ inputs.round }}
       LOOP_ROUND_ACTION: ${{ inputs.action }}
       PREVIOUS_UAT_REPORT: ${{ inputs.previous_report }}
+      FINDINGS_SOURCE: ${{ inputs.findings_source }}
+      FINDINGS_REF: ${{ inputs.findings_ref }}
     steps:
       - name: Windows PowerShell contract smoke
         shell: powershell
@@ -85,6 +125,45 @@ jobs:
           if (-not (Test-Path $smoke)) { Write-Error "Windows smoke script missing: $smoke"; exit 1 }
           & $smoke
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Bind local master AGENTS.md snapshot
+        shell: powershell
+        run: |
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $contextDir = "$env:LOOP_CYCLES_DIR\cycle-$env:LOOP_CYCLE\round-$env:LOOP_ROUND\context"
+          $snapshot = Join-Path $contextDir "master-AGENTS.md"
+          $hashFile = Join-Path $contextDir "master-AGENTS.sha256.txt"
+
+          if (Test-Path $snapshot) {
+            $actualHash = (Get-FileHash -Algorithm SHA256 $snapshot).Hash.ToLowerInvariant()
+            if (Test-Path $hashFile) {
+              $expectedHash = ([IO.File]::ReadAllText($hashFile, [System.Text.Encoding]::UTF8)).Trim().ToLowerInvariant()
+              if ($expectedHash -ne $actualHash) { Write-Error "pinned master AGENTS snapshot hash mismatch for this logical round"; exit 1 }
+            } else {
+              [IO.File]::WriteAllText($hashFile, $actualHash + "`n", $utf8)
+            }
+            Write-Output "reusing pinned master AGENTS snapshot for this logical round: $snapshot sha256=$actualHash"
+          } else {
+            if (-not (Test-Path $env:MASTER_AGENTS_FILE)) { Write-Error "local master AGENTS.md missing: $env:MASTER_AGENTS_FILE"; exit 1 }
+            $branch = (git -C $env:MAINREPO rev-parse --abbrev-ref HEAD).Trim()
+            if ($LASTEXITCODE -ne 0) { Write-Error "cannot determine MAINREPO branch"; exit 1 }
+            if ($branch -ne "master") { Write-Error "MAINREPO must be on local master before a new logical round snapshots AGENTS.md; actual branch=$branch"; exit 1 }
+            New-Item -ItemType Directory -Force $contextDir | Out-Null
+            $content = [IO.File]::ReadAllText($env:MASTER_AGENTS_FILE, [System.Text.Encoding]::UTF8)
+            $temp = "$snapshot.tmp.$PID.$([Guid]::NewGuid().ToString('N'))"
+            try {
+              [IO.File]::WriteAllText($temp, $content, $utf8)
+              [IO.File]::Move($temp, $snapshot)
+            } finally {
+              if (Test-Path $temp) { Remove-Item -Force -ErrorAction SilentlyContinue $temp }
+            }
+            $actualHash = (Get-FileHash -Algorithm SHA256 $snapshot).Hash.ToLowerInvariant()
+            [IO.File]::WriteAllText($hashFile, $actualHash + "`n", $utf8)
+            Write-Output "new logical round snapshots local master AGENTS.md once: $snapshot sha256=$actualHash"
+          }
+
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "LOOP_MASTER_AGENTS_SNAPSHOT=$snapshot`n", $utf8)
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "LOOP_MASTER_AGENTS_SHA256=$actualHash`n", $utf8)
 
       - name: Begin round
         shell: powershell
@@ -142,6 +221,20 @@ jobs:
           if (-not (Test-Path $env:PRODUCER_PROMPT)) { Write-Error "producer prompt missing: $env:PRODUCER_PROMPT"; exit 1 }
           $override = [IO.File]::ReadAllText($env:PRODUCER_OVERRIDE, [System.Text.Encoding]::UTF8)
           $basePrompt = [IO.File]::ReadAllText($env:PRODUCER_PROMPT, [System.Text.Encoding]::UTF8)
+          if (-not $env:LOOP_MASTER_AGENTS_SNAPSHOT -or -not (Test-Path $env:LOOP_MASTER_AGENTS_SNAPSHOT)) { Write-Error "pinned master AGENTS snapshot missing before Codex"; exit 1 }
+          $masterAgentsHash = (Get-FileHash -Algorithm SHA256 $env:LOOP_MASTER_AGENTS_SNAPSHOT).Hash.ToLowerInvariant()
+          if ($masterAgentsHash -ne ([string]$env:LOOP_MASTER_AGENTS_SHA256).ToLowerInvariant()) { Write-Error "pinned master AGENTS snapshot hash mismatch before Codex"; exit 1 }
+          $masterAgents = [IO.File]::ReadAllText($env:LOOP_MASTER_AGENTS_SNAPSHOT, [System.Text.Encoding]::UTF8)
+          $currentCandidateSha = (git -C $env:WORKTREE rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or $currentCandidateSha -notmatch '^[0-9a-f]{40}$') { Write-Error "cannot resolve current Candidate SHA before Codex"; exit 1 }
+          $masterAgentsContext = @(
+            "# AUTHORITATIVE LOCAL MASTER AGENTS.md",
+            "Source: local master snapshot pinned for this logical Loop Engine round",
+            "SHA-256: $masterAgentsHash",
+            "The candidate worktree may contain another AGENTS.md. For this Loop Engine round, use this pinned local-master snapshot as the authoritative project guidance unless a higher-priority runtime instruction conflicts.",
+            "",
+            $masterAgents
+          ) -join "`n"
 
           if ($env:LOOP_ROUND_ACTION -eq "rework") {
             if (-not (Test-Path $env:PRODUCER_REWORK_OVERRIDE)) { Write-Error "rework override missing: $env:PRODUCER_REWORK_OVERRIDE"; exit 1 }
@@ -152,14 +245,20 @@ jobs:
             $prompt = @(
               $override,
               "",
+              $masterAgentsContext,
+              "",
               $reworkOverride,
               "",
               "# LOOP CONTEXT",
               "Cycle: $env:LOOP_CYCLE",
               "Round: $env:LOOP_ROUND",
-              "Previous UAT report path: $env:PREVIOUS_UAT_REPORT",
+              "Current Candidate SHA: $currentCandidateSha",
               "",
-              "# PREVIOUS UAT_REPORT.md",
+              "# FINDINGS SOURCE",
+              "Source: $env:FINDINGS_SOURCE",
+              "Findings ref: $env:FINDINGS_REF",
+              "",
+              "# PREVIOUS REVIEW FINDINGS",
               $previousReport,
               "",
               "# ORIGINAL CONSTRUCTION CONTRACT",
@@ -169,11 +268,15 @@ jobs:
             $prompt = @(
               $override,
               "",
+              $masterAgentsContext,
+              "",
               "# LOOP CONTEXT",
               "Cycle: $env:LOOP_CYCLE",
               "Round: $env:LOOP_ROUND",
               "Action: construct",
+              "Current Candidate SHA: $currentCandidateSha",
               "",
+              "# ORIGINAL CONSTRUCTION CONTRACT",
               $basePrompt
             ) -join "`n"
           }
@@ -277,64 +380,527 @@ jobs:
 
           Write-Output "candidate validation PASS: pushed/local/state/remote all equal $candidate"
 
-      - name: Prepare verifier checkpoint
+      - name: Refresh controller candidate contract in handoff
+        shell: powershell
+        run: |
+          $handoff = "$env:OUTDIR\IMPLEMENTATION_HANDOFF.md"
+          if (-not (Test-Path -LiteralPath $handoff -PathType Leaf)) { Write-Error "IMPLEMENTATION_HANDOFF.md missing before controller contract binding"; exit 1 }
+          $candidate = ([IO.File]::ReadAllText("$env:OUTDIR\pushed-sha.txt", [System.Text.Encoding]::UTF8)).Trim().ToLowerInvariant()
+          if ($candidate -notmatch '^[0-9a-f]{40}$') { Write-Error "invalid candidate SHA before controller handoff binding"; exit 1 }
+          $changed = @(git -C $env:WORKTREE diff --name-only "$env:BASELINE..$candidate" | ForEach-Object { ([string]$_).Replace('\','/').Trim() } | Where-Object { $_ } | Select-Object -Unique)
+          if ($LASTEXITCODE -ne 0 -or $changed.Count -lt 1) { Write-Error "cannot derive candidate changed-file contract"; exit 1 }
+          $text = [IO.File]::ReadAllText($handoff, [System.Text.Encoding]::UTF8)
+          $marker = "## CONTROLLER CANDIDATE CONTRACT"
+          $idx = $text.LastIndexOf($marker, [StringComparison]::Ordinal)
+          if ($idx -ge 0) { $text = $text.Substring(0, $idx).TrimEnd() + "`n`n" }
+          $lines = New-Object System.Collections.Generic.List[string]
+          $lines.Add($marker)
+          $lines.Add("Candidate SHA: $candidate")
+          $lines.Add("Baseline SHA: $env:BASELINE")
+          $lines.Add("Target branch: $env:BRANCH")
+          $lines.Add("Changed files:")
+          foreach ($file in $changed) { $lines.Add("- ``$file``") }
+          $payload = $text + (($lines.ToArray() -join "`n") + "`n")
+          [IO.File]::WriteAllText($handoff, $payload, (New-Object System.Text.UTF8Encoding($false)))
+          Write-Output "CONTROLLER CANDIDATE CONTRACT bound: candidate=$candidate files=$($changed.Count)"
+
+      - name: Rotate legacy verifier UAT period for v8 Opus
+        shell: powershell
+        run: |
+          & $env:LOOP_STATE_SCRIPT -Operation RotateLegacyVerifierPeriod -Cycle ([int]$env:LOOP_CYCLE) -Round ([int]$env:LOOP_ROUND)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Bind explicit Opus UAT write authorization
+        shell: powershell
+        run: |
+          & $env:LOOP_STATE_SCRIPT -Operation BindUatWriteAuthorization `
+            -Cycle ([int]$env:LOOP_CYCLE) `
+            -Round ([int]$env:LOOP_ROUND) `
+            -VerifierStage "OPUS"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # v19 candidate-binding gate: verifier evidence must be tied to the exact pushed candidate.
+          if ($env:LOOP_CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') {
+            Write-Error "LOOP_CANDIDATE_SHA missing/invalid after stage authorization binding"
+            exit 1
+          }
+          $candidate = ([IO.File]::ReadAllText("$env:OUTDIR\pushed-sha.txt", [Text.Encoding]::UTF8)).Trim().ToLowerInvariant()
+          if ($candidate -ne $env:LOOP_CANDIDATE_SHA) {
+            Write-Error "LOOP_CANDIDATE_SHA disagrees with pushed-sha.txt"
+            exit 1
+          }
+
+      - name: Select Opus verifier stage
+        shell: powershell
+        run: |
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $values = [ordered]@{
+            VERIFIER_STAGE = "OPUS"
+            VERIFIER_STATE_DIR = $env:OPUS_VERIFIER_STATE_DIR
+            VERIFIER_RUNTIME_DIR = $env:OPUS_VERIFIER_RUNTIME_DIR
+            VERIFIER_HISTORY_DIR = $env:OPUS_VERIFIER_HISTORY_DIR
+            VERIFIER_PROGRESS = "$env:OPUS_VERIFIER_STATE_DIR\verifier-progress.json"
+            VERIFIER_RESUME_CONTEXT = "$env:OPUS_VERIFIER_STATE_DIR\resume-context.md"
+            VERIFIER_RESULT_FILE = "$env:OUTDIR\opus-result.txt"
+            CLAUDE_MODEL = $env:OPUS_CLAUDE_MODEL
+            CLAUDE_EFFORT = $env:OPUS_CLAUDE_EFFORT
+          }
+          foreach ($item in $values.GetEnumerator()) {
+            [IO.File]::AppendAllText($env:GITHUB_ENV, "$($item.Key)=$($item.Value)`n", $utf8)
+          }
+
+      - name: Prepare Opus verifier checkpoint
         shell: powershell
         run: |
           if (-not (Test-Path $env:VERIFIER_PREPARE_SCRIPT)) { Write-Error "prepare script missing: $env:VERIFIER_PREPARE_SCRIPT"; exit 1 }
           & $env:VERIFIER_PREPARE_SCRIPT
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Verifier permission smoke gate
+      - name: Opus verifier permission smoke gate
         shell: powershell
         run: |
           if (-not (Test-Path $env:VERIFIER_EFFECTIVE_SETTINGS)) { Write-Error "effective verifier settings missing: $env:VERIFIER_EFFECTIVE_SETTINGS"; exit 1 }
           $cfg = [IO.File]::ReadAllText($env:VERIFIER_EFFECTIVE_SETTINGS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
           $allow = @($cfg.permissions.allow)
           $deny = @($cfg.permissions.deny)
-          if ($allow -notcontains "Edit(.loop-output/**)") { Write-Error "effective verifier settings do not allow Edit(.loop-output/**)"; exit 1 }
+          foreach ($required in @("Edit(.loop-output/UAT_REPORT.md)", "Edit(.loop-output/opus-result.txt)", "Edit(.loop-output/verifier-state/opus/**)", "Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:/Redemption/Redemption/.loop-engine/uat-action-proxy.ps1)")) {
+            if ($allow -notcontains $required) { Write-Error "Opus effective settings missing required allow: $required"; exit 1 }
+          }
+          foreach ($rule in $allow) {
+            $t = [string]$rule
+            if (($t -match '^(Bash|PowerShell)') -and $t -ne "Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:/Redemption/Redemption/.loop-engine/uat-action-proxy.ps1)") { Write-Error "Opus effective settings contain unauthorized shell allow: $t"; exit 1 }
+          }
+          if ($allow -contains "Edit(.loop-output/loop-state.json)") { Write-Error "Opus must not edit loop-state.json"; exit 1 }
+          if ($deny -notcontains "Edit(.loop-output/controller-evidence/**)") { Write-Error "Opus effective settings missing controller-evidence deny"; exit 1 }
           $bad = @($deny | Where-Object { $_ -eq "Edit" -or $_ -eq "Write" })
           if ($bad.Count -gt 0) { Write-Error "effective verifier settings contain a bare deny that overrides output writes: $($bad -join ', ')"; exit 1 }
-          Write-Output "permission smoke PASS: output edits allowed; no bare Edit/Write deny"
+          Write-Output "Opus permission smoke PASS"
 
-      - name: UAT environment preflight
+      - name: Opus UAT environment preflight
         shell: powershell
         run: |
-          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "verifier already complete for this fingerprint; skipping environment preflight"; exit 0 }
-          $kc = "C:\Users\Administrator\AppData\Local\Temp\codex-pvam-kubectl\kubectl.exe"
-          if (-not (Test-Path $kc)) { Write-Error "kubectl missing at $kc; move it to a stable path and update this workflow"; exit 1 }
+          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "Opus verifier already complete for this fingerprint; skipping environment preflight"; exit 0 }
+          if (-not (Test-Path $env:KUBECTL_PATH)) { Write-Error "kubectl missing at governed path: $env:KUBECTL_PATH"; exit 1 }
+          if (-not (Test-Path $env:KUBECONFIG_PATH)) { Write-Error "kubeconfig missing at governed path: $env:KUBECONFIG_PATH"; exit 1 }
+          # Project contract: the first Kubernetes API operation must be the read-only readyz probe.
+          $previousReadyzErrorActionPreference = $ErrorActionPreference
+          try {
+            $ErrorActionPreference = "Continue"
+            $readyz = @(& $env:KUBECTL_PATH --kubeconfig $env:KUBECONFIG_PATH get --raw=/readyz --request-timeout=15s 2>&1)
+            $readyzExit = $LASTEXITCODE
+          } finally {
+            $ErrorActionPreference = $previousReadyzErrorActionPreference
+          }
+          if ($readyzExit -ne 0) { Write-Error "UAT_ENV_BLOCKED: Kubernetes readyz failed: $($readyz -join ' ')"; exit 1 }
+          if ((($readyz -join "`n").Trim()).ToLowerInvariant() -notmatch '^ok') { Write-Error "UAT_ENV_BLOCKED: Kubernetes readyz returned unexpected output: $($readyz -join ' ')"; exit 1 }
+          Write-Output "Kubernetes readyz PASS"
           foreach ($p in 8443, 36378) {
             $ok = Test-NetConnection -ComputerName 192.168.18.149 -Port $p -WarningAction SilentlyContinue -InformationLevel Quiet
             Write-Output "192.168.18.149:$p => $ok"
             if (-not $ok) { Write-Error "UAT_ENV_BLOCKED: cluster port $p unreachable"; exit 1 }
           }
 
-      - name: Claude review + UAT live view
+      - name: Opus full UAT readiness gate
         shell: powershell
         run: |
-          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "verifier already complete for this fingerprint; skipping Claude execution"; exit 0 }
+          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "Opus verifier already complete for this fingerprint; skipping readiness gate"; exit 0 }
+          if (-not (Test-Path $env:UAT_READINESS_SCRIPT)) { Write-Error "UAT readiness script missing: $env:UAT_READINESS_SCRIPT"; exit 1 }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:UAT_READINESS_SCRIPT -Mode FullUat -Stage "OPUS" -ReadinessFile $env:UAT_READINESS_FILE -PolicyFile $env:UAT_ACTION_POLICY_FILE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Opus review + UAT live view
+        shell: powershell
+        run: |
+          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "Opus verifier already complete for this fingerprint; skipping Claude execution"; exit 0 }
           if (-not (Test-Path $env:VERIFIER_RUNNER_SCRIPT)) { Write-Error "runner script missing: $env:VERIFIER_RUNNER_SCRIPT"; exit 1 }
           & $env:VERIFIER_RUNNER_SCRIPT
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Snapshot verifier progress
+      - name: Snapshot Opus verifier progress
         if: ${{ !cancelled() }}
         shell: powershell
         run: |
-          Write-Output "=== VERIFIER PROGRESS SNAPSHOT ==="
+          Write-Output "=== OPUS VERIFIER PROGRESS SNAPSHOT ==="
           if (-not (Test-Path $env:VERIFIER_PROGRESS)) { Write-Output "progress ledger missing"; exit 0 }
           try {
             $s = [IO.File]::ReadAllText($env:VERIFIER_PROGRESS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-            Write-Output "candidate=$($s.candidate_sha)"
-            Write-Output "fingerprint=$($s.input_fingerprint)"
-            Write-Output "status=$($s.status)"
-            Write-Output "current_task=$($s.current_task_id)"
-            Write-Output "resume_count=$($s.resume_count)"
-            foreach ($t in @($s.tasks)) {
-              Write-Output ("[{0}] {1} | attempts={2} | {3}" -f $t.status, $t.id, $t.attempts, $t.title)
-            }
-          } catch {
-            Write-Output "progress ledger could not be parsed: $($_.Exception.Message)"
+            Write-Output "stage=$($s.verifier_stage) candidate=$($s.candidate_sha) fingerprint=$($s.input_fingerprint) status=$($s.status)"
+            foreach ($t in @($s.tasks)) { Write-Output ("[{0}] {1} | attempts={2} | {3}" -f $t.status, $t.id, $t.attempts, $t.title) }
+          } catch { Write-Output "progress ledger could not be parsed: $($_.Exception.Message)" }
+
+      - name: Gate Opus verifier verdict
+        id: opus_gate
+        shell: powershell
+        run: |
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $f = "$env:OUTDIR\opus-result.txt"
+          if (-not (Test-Path $f)) { Write-Error "opus-result.txt missing - Opus did not complete its stage contract"; exit 1 }
+          $r = ([IO.File]::ReadAllText($f, [System.Text.Encoding]::UTF8)).Trim()
+          if ($r -notin @("PRECHECK_PASS", "REJECTED", "BLOCKED")) { Write-Error "invalid Opus result: $r"; exit 1 }
+          if (-not (Test-Path "$env:OUTDIR\UAT_REPORT.md")) { Write-Error "UAT_REPORT.md missing after Opus stage"; exit 1 }
+          $core = switch ($r) {
+            "PRECHECK_PASS" { "NO_BUG" }
+            "REJECTED" { "BUG_FOUND" }
+            "BLOCKED" { "" }
           }
+          Write-Output "=== OPUS UAT ADAPTER RESULT: $r ==="
+          if ($core) {
+            Write-Output "=== OPUS CORE RESULT: $core ==="
+            [IO.File]::WriteAllText("$env:OUTDIR\opus-core-result.txt", "RESULT=$core`n", $utf8)
+          } else {
+            Write-Output "=== OPUS EXECUTION STATUS: BLOCKED ==="
+            [IO.File]::WriteAllText("$env:OUTDIR\opus-core-result.txt", "STATUS=BLOCKED`n", $utf8)
+          }
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "opus_verdict=$r`n", $utf8)
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "opus_result=$core`n", $utf8)
+          if ($core -eq "NO_BUG") {
+            [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "run_fable=true`n", $utf8)
+          } else {
+            # Opus BUG_FOUND ends this review attempt. GitHub Actions alone decides whether another Codex Round is legal.
+            [IO.File]::WriteAllText("$env:OUTDIR\uat-result.txt", $r + "`n", $utf8)
+            [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "run_fable=false`n", $utf8)
+          }
+
+      - name: Verify actual proxy period usage for Opus
+        env:
+          OPUS_VERDICT: ${{ steps.opus_gate.outputs.opus_verdict }}
+        shell: powershell
+        run: |
+          if (-not (Test-Path $env:PROXY_PERIOD_VERIFY_SCRIPT)) { Write-Error "proxy period evidence verifier missing: $env:PROXY_PERIOD_VERIFY_SCRIPT"; exit 1 }
+          $mode = if ($env:OPUS_VERDICT -eq "PRECHECK_PASS") { "RequireComplete" } else { "ValidateExistingOnly" }
+          & $env:PROXY_PERIOD_VERIFY_SCRIPT `
+            -Stage OPUS `
+            -EvidenceDir "$env:CONTROLLER_PROXY_EVIDENCE_ROOT\cycle-$env:LOOP_CYCLE\round-$env:LOOP_ROUND\opus" `
+            -ExpectedSlot ([int]$env:LOOP_UAT_PERIOD_SLOT) `
+            -ExpectedPrimary ([int]$env:LOOP_UAT_PERIOD_PRIMARY) `
+            -ExpectedSecondary ([int]$env:LOOP_UAT_PERIOD_SECONDARY) `
+            -ExpectedPoolSha256 $env:LOOP_UAT_PERIOD_POOL_SHA256 `
+            -ExpectedAuthorizationScopeSha256 $env:LOOP_UAT_AUTHORIZATION_SCOPE_SHA256 `
+            -ExpectedExecutionId $env:LOOP_UAT_EXECUTION_ID `
+            -PolicyPath $env:UAT_ACTION_POLICY_FILE `
+            -VerificationMode $mode `
+            -ExpectedCandidateSha $env:LOOP_CANDIDATE_SHA `
+            -ExpectedBaselineSha $env:BASELINE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Allocate Fable final-audit period
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          & $env:LOOP_STATE_SCRIPT -Operation AllocateFinalAuditPeriod -Cycle ([int]$env:LOOP_CYCLE) -Round ([int]$env:LOOP_ROUND)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Bind explicit Fable UAT write authorization
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          & $env:LOOP_STATE_SCRIPT -Operation BindUatWriteAuthorization `
+            -Cycle ([int]$env:LOOP_CYCLE) `
+            -Round ([int]$env:LOOP_ROUND) `
+            -VerifierStage "FABLE"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # v19 candidate-binding gate: verifier evidence must be tied to the exact pushed candidate.
+          if ($env:LOOP_CANDIDATE_SHA -notmatch '^[0-9a-f]{40}$') {
+            Write-Error "LOOP_CANDIDATE_SHA missing/invalid after stage authorization binding"
+            exit 1
+          }
+          $candidate = ([IO.File]::ReadAllText("$env:OUTDIR\pushed-sha.txt", [Text.Encoding]::UTF8)).Trim().ToLowerInvariant()
+          if ($candidate -ne $env:LOOP_CANDIDATE_SHA) {
+            Write-Error "LOOP_CANDIDATE_SHA disagrees with pushed-sha.txt"
+            exit 1
+          }
+
+      - name: Validate Fable final-audit period allocation
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          foreach ($name in @("LOOP_FINAL_UAT_PERIOD_SLOT", "LOOP_FINAL_UAT_PERIOD_PRIMARY", "LOOP_FINAL_UAT_PERIOD_SECONDARY", "LOOP_FINAL_UAT_PERIOD_POOL_SHA256")) {
+            if (-not [Environment]::GetEnvironmentVariable($name)) { Write-Error "missing durable Fable final-audit period environment: $name"; exit 1 }
+          }
+          if ([int]$env:LOOP_FINAL_UAT_PERIOD_SLOT -eq [int]$env:LOOP_UAT_PERIOD_SLOT) { Write-Error "Fable final audit must not reuse Opus UAT period slot"; exit 1 }
+          Write-Output "Fable final-audit period PASS: slot=$env:LOOP_FINAL_UAT_PERIOD_SLOT periods=$env:LOOP_FINAL_UAT_PERIOD_PRIMARY/$env:LOOP_FINAL_UAT_PERIOD_SECONDARY"
+
+      - name: Pin Opus UAT_REPORT before Fable
+        id: opus_pin
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $report = "$env:OUTDIR\UAT_REPORT.md"
+          $pin = "$env:OPUS_VERIFIER_STATE_DIR\UAT_REPORT.pre-fable.md"
+          if (-not (Test-Path $report)) { Write-Error "UAT_REPORT.md missing before Fable"; exit 1 }
+          if (Test-Path $pin) {
+            $prefix = [IO.File]::ReadAllText($pin, [System.Text.Encoding]::UTF8)
+            $current = [IO.File]::ReadAllText($report, [System.Text.Encoding]::UTF8)
+            if (-not $current.StartsWith($prefix, [System.StringComparison]::Ordinal)) { Write-Error "current UAT_REPORT.md no longer preserves pinned Opus report prefix"; exit 1 }
+            Write-Output "reusing pinned Opus UAT report prefix"
+          } else {
+            New-Item -ItemType Directory -Force $env:OPUS_VERIFIER_STATE_DIR | Out-Null
+            $content = [IO.File]::ReadAllText($report, [System.Text.Encoding]::UTF8)
+            $temp = "$pin.tmp.$PID.$([Guid]::NewGuid().ToString('N'))"
+            try {
+              [IO.File]::WriteAllText($temp, $content, $utf8)
+              [IO.File]::Move($temp, $pin)
+            } finally {
+              if (Test-Path $temp) { Remove-Item -Force -ErrorAction SilentlyContinue $temp }
+            }
+            Write-Output "pinned Opus UAT report for Fable final audit: $pin"
+          }
+          $pinHash = (Get-FileHash -Algorithm SHA256 $pin).Hash.ToLowerInvariant()
+          $pinLength = [IO.File]::ReadAllBytes($pin).LongLength
+          & $env:LOOP_STATE_SCRIPT -Operation BindOpusReportBaseline -Cycle ([int]$env:LOOP_CYCLE) -Round ([int]$env:LOOP_ROUND) -OpusReportSha256 $pinHash -OpusReportLength $pinLength
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "report_sha256=$pinHash`n", $utf8)
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "report_length=$pinLength`n", $utf8)
+          Write-Output "Opus report baseline bound to durable loop ledger and workflow step output: sha256=$pinHash bytes=$pinLength"
+
+      - name: Capture protected evidence surface before Fable
+        id: protected_pin
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          if (-not (Test-Path $env:PROTECTED_EVIDENCE_HASH_SCRIPT)) { Write-Error "protected evidence hash script missing: $env:PROTECTED_EVIDENCE_HASH_SCRIPT"; exit 1 }
+          $stateSnapshot = "$env:OPUS_VERIFIER_STATE_DIR\loop-state.pre-fable.json"
+          if (-not (Test-Path $stateSnapshot)) {
+            if (-not (Test-Path $env:LOOP_STATE_FILE)) { Write-Error "loop-state.json missing before protected evidence pin"; exit 1 }
+            $utf8 = New-Object System.Text.UTF8Encoding($false)
+            $bytes = [IO.File]::ReadAllBytes($env:LOOP_STATE_FILE)
+            $temp = "$stateSnapshot.tmp.$PID.$([Guid]::NewGuid().ToString('N'))"
+            try {
+              [IO.File]::WriteAllBytes($temp, $bytes)
+              [IO.File]::Move($temp, $stateSnapshot)
+            } finally {
+              if (Test-Path $temp) { Remove-Item -Force -ErrorAction SilentlyContinue $temp }
+            }
+          }
+          $raw = @(& $env:PROTECTED_EVIDENCE_HASH_SCRIPT)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $matches = @($raw | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Where-Object { $_ -match '^[0-9a-f]{64}$' })
+          if ($matches.Count -ne 1) { Write-Error "protected evidence hash script did not return exactly one SHA-256 digest"; exit 1 }
+          $digest = [string]$matches[0]
+          & $env:LOOP_STATE_SCRIPT -Operation BindProtectedEvidenceBaseline -Cycle ([int]$env:LOOP_CYCLE) -Round ([int]$env:LOOP_ROUND) -ProtectedEvidenceSha256 $digest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "protected_digest=$digest`n", $utf8)
+          Write-Output "protected evidence stable digest pinned durably before Fable: $digest"
+
+      - name: Select Fable final auditor stage
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          Write-Output "Loop Core stage=FABLE_FINAL_REVIEW"
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $values = [ordered]@{
+            VERIFIER_STAGE = "FABLE"
+            VERIFIER_STATE_DIR = $env:FABLE_VERIFIER_STATE_DIR
+            VERIFIER_RUNTIME_DIR = $env:FABLE_VERIFIER_RUNTIME_DIR
+            VERIFIER_HISTORY_DIR = $env:FABLE_VERIFIER_HISTORY_DIR
+            VERIFIER_PROGRESS = "$env:FABLE_VERIFIER_STATE_DIR\verifier-progress.json"
+            VERIFIER_RESUME_CONTEXT = "$env:FABLE_VERIFIER_STATE_DIR\resume-context.md"
+            VERIFIER_RESULT_FILE = "$env:OUTDIR\uat-result.txt"
+            CLAUDE_MODEL = $env:FABLE_CLAUDE_MODEL
+            CLAUDE_EFFORT = $env:FABLE_CLAUDE_EFFORT
+          }
+          foreach ($item in $values.GetEnumerator()) {
+            [IO.File]::AppendAllText($env:GITHUB_ENV, "$($item.Key)=$($item.Value)`n", $utf8)
+          }
+
+      - name: Prepare Fable final auditor checkpoint
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          & $env:VERIFIER_PREPARE_SCRIPT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Fable final auditor permission smoke gate
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          $cfg = [IO.File]::ReadAllText($env:VERIFIER_EFFECTIVE_SETTINGS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+          $allow = @($cfg.permissions.allow)
+          $deny = @($cfg.permissions.deny)
+          foreach ($required in @("Edit(.loop-output/UAT_REPORT.md)", "Edit(.loop-output/uat-result.txt)", "Edit(.loop-output/verifier-state/fable/**)")) {
+            if ($allow -notcontains $required) { Write-Error "Fable effective settings missing required allow: $required"; exit 1 }
+          }
+          foreach ($protected in @("Edit(.loop-output/verifier-state/opus/**)", "Edit(.loop-output/loop-state.json)", "Edit(.loop-output/controller-evidence/**)")) {
+            if ($allow -contains $protected) { Write-Error "Fable effective settings unexpectedly allow protected evidence: $protected"; exit 1 }
+            if ($deny -notcontains $protected) { Write-Error "Fable effective settings missing protected-evidence deny: $protected"; exit 1 }
+          }
+          $proxyAllow = ([string]$env:UAT_ACTION_PROXY_ALLOW).Trim()
+          if ($allow -notcontains $proxyAllow) { Write-Error "Fable effective settings missing fixed UAT proxy allow"; exit 1 }
+          $shellAllows = @($allow | Where-Object { ([string]$_) -match '^(Bash|PowerShell)' })
+          foreach ($shellRule in $shellAllows) {
+            if ([string]$shellRule -ne $proxyAllow) { Write-Error "Fable effective settings contain unapproved shell allow: $shellRule"; exit 1 }
+            if ([string]$shellRule -match '(?i)git\s+bundle') { Write-Error "Fable effective settings must not allow git bundle"; exit 1 }
+          }
+          if ($deny -notcontains "Agent") { Write-Error "Fable final audit must deny Agent subtask fan-out"; exit 1 }
+          $bad = @($deny | Where-Object { $_ -eq "Edit" -or $_ -eq "Write" })
+          if ($bad.Count -gt 0) { Write-Error "Fable settings contain bare Edit/Write deny"; exit 1 }
+          Write-Output "Fable permission smoke PASS"
+
+      - name: Fable final-audit environment preflight
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "Fable final audit already complete; skipping environment preflight"; exit 0 }
+          if (-not (Test-Path $env:KUBECTL_PATH)) { Write-Error "kubectl missing at governed path: $env:KUBECTL_PATH"; exit 1 }
+          if (-not (Test-Path $env:KUBECONFIG_PATH)) { Write-Error "kubeconfig missing at governed path: $env:KUBECONFIG_PATH"; exit 1 }
+          $previousReadyzErrorActionPreference = $ErrorActionPreference
+          try {
+            $ErrorActionPreference = "Continue"
+            $readyz = @(& $env:KUBECTL_PATH --kubeconfig $env:KUBECONFIG_PATH get --raw=/readyz --request-timeout=15s 2>&1)
+            $readyzExit = $LASTEXITCODE
+          } finally {
+            $ErrorActionPreference = $previousReadyzErrorActionPreference
+          }
+          if ($readyzExit -ne 0) { Write-Error "UAT_ENV_BLOCKED: Kubernetes readyz failed: $($readyz -join ' ')"; exit 1 }
+          if ((($readyz -join "`n").Trim()).ToLowerInvariant() -notmatch '^ok') { Write-Error "UAT_ENV_BLOCKED: Kubernetes readyz returned unexpected output: $($readyz -join ' ')"; exit 1 }
+          Write-Output "Kubernetes readyz PASS"
+          foreach ($p in 8443, 36378) {
+            $ok = Test-NetConnection -ComputerName 192.168.18.149 -Port $p -WarningAction SilentlyContinue -InformationLevel Quiet
+            if (-not $ok) { Write-Error "UAT_ENV_BLOCKED: cluster port $p unreachable"; exit 1 }
+          }
+
+      - name: Fable full UAT readiness gate
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "Fable final audit already complete; skipping readiness gate"; exit 0 }
+          if (-not (Test-Path $env:UAT_READINESS_SCRIPT)) { Write-Error "UAT readiness script missing: $env:UAT_READINESS_SCRIPT"; exit 1 }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:UAT_READINESS_SCRIPT -Mode FullUat -Stage "FABLE" -ReadinessFile $env:UAT_READINESS_FILE -PolicyFile $env:UAT_ACTION_POLICY_FILE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Fable final audit
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "Fable final audit already complete; skipping Claude execution"; exit 0 }
+          & $env:VERIFIER_RUNNER_SCRIPT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Snapshot Fable final-auditor progress
+        if: ${{ !cancelled() && steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          Write-Output "=== FABLE FINAL AUDITOR PROGRESS SNAPSHOT ==="
+          if (-not (Test-Path $env:VERIFIER_PROGRESS)) { Write-Output "progress ledger missing"; exit 0 }
+          try {
+            $s = [IO.File]::ReadAllText($env:VERIFIER_PROGRESS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            Write-Output "stage=$($s.verifier_stage) candidate=$($s.candidate_sha) fingerprint=$($s.input_fingerprint) status=$($s.status)"
+            foreach ($t in @($s.tasks)) { Write-Output ("[{0}] {1} | attempts={2} | {3}" -f $t.status, $t.id, $t.attempts, $t.title) }
+          } catch { Write-Output "progress ledger could not be parsed: $($_.Exception.Message)" }
+
+      - name: Gate Fable final verdict
+        id: fable_gate
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $f = "$env:OUTDIR\uat-result.txt"
+          if (-not (Test-Path $f)) { Write-Error "uat-result.txt missing after Fable"; exit 1 }
+          $r = ([IO.File]::ReadAllText($f, [System.Text.Encoding]::UTF8)).Trim()
+          if ($r -notin @("PASS", "REJECTED", "BLOCKED")) { Write-Error "invalid Fable final result: $r"; exit 1 }
+          $core = switch ($r) {
+            "PASS" { "FINAL_PASS" }
+            "REJECTED" { "FINAL_REJECT" }
+            "BLOCKED" { "" }
+          }
+          if ($core) {
+            [IO.File]::WriteAllText("$env:OUTDIR\fable-core-result.txt", "RESULT=$core`n", $utf8)
+          } else {
+            [IO.File]::WriteAllText("$env:OUTDIR\fable-core-result.txt", "STATUS=BLOCKED`n", $utf8)
+          }
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "fable_verdict=$r`n", $utf8)
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "fable_result=$core`n", $utf8)
+          Write-Output "=== FABLE UAT ADAPTER RESULT: $r ==="
+          if ($core) { Write-Output "=== FABLE CORE RESULT: $core ===" } else { Write-Output "=== FABLE EXECUTION STATUS: BLOCKED ===" }
+
+      - name: Verify actual proxy period usage for Fable
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        env:
+          FABLE_VERDICT: ${{ steps.fable_gate.outputs.fable_verdict }}
+        shell: powershell
+        run: |
+          if (-not (Test-Path $env:PROXY_PERIOD_VERIFY_SCRIPT)) { Write-Error "proxy period evidence verifier missing: $env:PROXY_PERIOD_VERIFY_SCRIPT"; exit 1 }
+          $mode = if ($env:FABLE_VERDICT -eq "PASS") { "RequireComplete" } else { "ValidateExistingOnly" }
+          & $env:PROXY_PERIOD_VERIFY_SCRIPT `
+            -Stage FABLE `
+            -EvidenceDir "$env:CONTROLLER_PROXY_EVIDENCE_ROOT\cycle-$env:LOOP_CYCLE\round-$env:LOOP_ROUND\fable" `
+            -ExpectedSlot ([int]$env:LOOP_FINAL_UAT_PERIOD_SLOT) `
+            -ExpectedPrimary ([int]$env:LOOP_FINAL_UAT_PERIOD_PRIMARY) `
+            -ExpectedSecondary ([int]$env:LOOP_FINAL_UAT_PERIOD_SECONDARY) `
+            -ExpectedPoolSha256 $env:LOOP_FINAL_UAT_PERIOD_POOL_SHA256 `
+            -ExpectedAuthorizationScopeSha256 $env:LOOP_UAT_AUTHORIZATION_SCOPE_SHA256 `
+            -ExpectedExecutionId $env:LOOP_UAT_EXECUTION_ID `
+            -PolicyPath $env:UAT_ACTION_POLICY_FILE `
+            -VerificationMode $mode `
+            -ExpectedCandidateSha $env:LOOP_CANDIDATE_SHA `
+            -ExpectedBaselineSha $env:BASELINE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify protected evidence surface after Fable
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          $expected = "${{ steps.protected_pin.outputs.protected_digest }}".Trim().ToLowerInvariant()
+          if ($expected -notmatch '^[0-9a-f]{64}$') { Write-Error "protected evidence pre-Fable digest missing/invalid"; exit 1 }
+          $state = [IO.File]::ReadAllText($env:LOOP_STATE_FILE, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+          $cycleObject = @($state.cycles | Where-Object { [int]$_.cycle -eq [int]$env:LOOP_CYCLE } | Select-Object -First 1)[0]
+          $roundObject = @($cycleObject.rounds | Where-Object { [int]$_.round -eq [int]$env:LOOP_ROUND } | Select-Object -First 1)[0]
+          $durableExpected = ([string]$roundObject.protected_evidence_sha256).Trim().ToLowerInvariant()
+          if ($durableExpected -notmatch '^[0-9a-f]{64}$') { Write-Error "durable protected evidence baseline missing/invalid"; exit 1 }
+          if ($durableExpected -ne $expected) { Write-Error "protected evidence workflow output disagrees with durable Round baseline"; exit 1 }
+          $raw = @(& $env:PROTECTED_EVIDENCE_HASH_SCRIPT)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $matches = @($raw | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Where-Object { $_ -match '^[0-9a-f]{64}$' })
+          if ($matches.Count -ne 1) { Write-Error "protected evidence hash script did not return exactly one SHA-256 digest after Fable"; exit 1 }
+          $actual = [string]$matches[0]
+          if ($actual -ne $expected) { Write-Error "protected evidence surface changed during Fable: expected=$expected actual=$actual"; exit 1 }
+          & $env:LOOP_STATE_SCRIPT -Operation BindProtectedEvidenceBaseline -Cycle ([int]$env:LOOP_CYCLE) -Round ([int]$env:LOOP_ROUND) -ProtectedEvidenceSha256 $expected
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Output "protected evidence stable digest and durable Round contract PASS after Fable: $actual"
+
+      - name: Verify Fable preserved Opus report
+        if: ${{ steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          $report = "$env:OUTDIR\UAT_REPORT.md"
+          $pin = "$env:OPUS_VERIFIER_STATE_DIR\UAT_REPORT.pre-fable.md"
+          if (-not (Test-Path $report) -or -not (Test-Path $pin)) { Write-Error "report/prefix evidence missing after Fable"; exit 1 }
+          $state = [IO.File]::ReadAllText($env:LOOP_STATE_FILE, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+          $cycleObject = @($state.cycles | Where-Object { [int]$_.cycle -eq [int]$env:LOOP_CYCLE } | Select-Object -First 1)[0]
+          $roundObject = @($cycleObject.rounds | Where-Object { [int]$_.round -eq [int]$env:LOOP_ROUND } | Select-Object -First 1)[0]
+          $expectedHash = ([string]$roundObject.opus_report_sha256).ToLowerInvariant()
+          $expectedLength = [long]$roundObject.opus_report_length
+          if ($expectedHash -notmatch '^[0-9a-f]{64}$' -or $expectedLength -le 0) { Write-Error "durable Opus report baseline metadata missing/invalid"; exit 1 }
+          $workflowExpectedHash = "${{ steps.opus_pin.outputs.report_sha256 }}".Trim().ToLowerInvariant()
+          $workflowExpectedLengthText = "${{ steps.opus_pin.outputs.report_length }}".Trim()
+          $workflowExpectedLength = 0L
+          if ($workflowExpectedHash -notmatch '^[0-9a-f]{64}$' -or -not [long]::TryParse($workflowExpectedLengthText, [ref]$workflowExpectedLength) -or $workflowExpectedLength -le 0) { Write-Error "Opus report workflow step output baseline metadata missing/invalid"; exit 1 }
+          if ($expectedHash -ne $workflowExpectedHash -or $expectedLength -ne $workflowExpectedLength) { Write-Error "durable Opus report baseline disagrees with immutable workflow step output"; exit 1 }
+
+          $pinBytes = [IO.File]::ReadAllBytes($pin)
+          $pinHash = (Get-FileHash -Algorithm SHA256 $pin).Hash.ToLowerInvariant()
+          if ($pinBytes.LongLength -ne $expectedLength -or $pinHash -ne $expectedHash) { Write-Error "pinned Opus baseline hash differs from durable loop ledger"; exit 1 }
+
+          $currentBytes = [IO.File]::ReadAllBytes($report)
+          if ($currentBytes.LongLength -le $expectedLength) { Write-Error "Fable did not append a final-audit section to UAT_REPORT.md"; exit 1 }
+          $prefixBytes = New-Object byte[] ([int]$expectedLength)
+          [Array]::Copy($currentBytes, 0, $prefixBytes, 0, [int]$expectedLength)
+          $sha = [System.Security.Cryptography.SHA256]::Create()
+          try { $prefixHash = ([BitConverter]::ToString($sha.ComputeHash($prefixBytes))).Replace("-", "").ToLowerInvariant() }
+          finally { $sha.Dispose() }
+          if ($prefixHash -ne $expectedHash) { Write-Error "Fable modified the Opus report byte prefix"; exit 1 }
+          $suffix = [System.Text.Encoding]::UTF8.GetString($currentBytes, [int]$expectedLength, [int]($currentBytes.LongLength - $expectedLength))
+          if (-not $suffix.Contains("## Fable Final Audit")) { Write-Error "appended UAT_REPORT.md suffix missing required Fable Final Audit section"; exit 1 }
+          $result = "$env:OUTDIR\uat-result.txt"
+          if (-not (Test-Path $result)) { Write-Error "uat-result.txt missing after Fable"; exit 1 }
+          $r = ([IO.File]::ReadAllText($result, [System.Text.Encoding]::UTF8)).Trim()
+          if ($r -notin @("PASS", "REJECTED", "BLOCKED")) { Write-Error "invalid Fable final result: $r"; exit 1 }
+          $protectedDigest = "${{ steps.protected_pin.outputs.protected_digest }}".Trim().ToLowerInvariant()
+          if ($protectedDigest -notmatch '^[0-9a-f]{64}$') { Write-Error "protected evidence workflow digest missing before final-audit evidence marker"; exit 1 }
+          & $env:LOOP_STATE_SCRIPT -Operation MarkFinalAuditEvidenceVerified -Cycle ([int]$env:LOOP_CYCLE) -Round ([int]$env:LOOP_ROUND) -Verdict $r -ProtectedEvidenceSha256 $protectedDigest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Output "Fable final audit verdict=$r and durable Opus report baseline preserved"
 
       - name: Complete round and expose outputs
         id: finalize
@@ -342,11 +908,13 @@ jobs:
         shell: powershell
         run: |
           $f = "$env:OUTDIR\uat-result.txt"
-          if (-not (Test-Path $f)) { Write-Error "uat-result.txt missing - verifier did not complete its contract"; exit 1 }
+          if (-not (Test-Path $f)) { Write-Error "uat-result.txt missing - staged verifier did not complete its contract"; exit 1 }
           $r = ([IO.File]::ReadAllText($f, [System.Text.Encoding]::UTF8)).Trim()
           if ($r -notin @("PASS", "REJECTED", "BLOCKED")) { Write-Error "invalid result: $r"; exit 1 }
-          Write-Output "=== ROUND RESULT: $r ==="
-          & $env:LOOP_STATE_SCRIPT -Operation CompleteRound -Cycle ([int]$env:LOOP_CYCLE) -Round ([int]$env:LOOP_ROUND) -Verdict $r
+          $opusCore = "${{ steps.opus_gate.outputs.opus_result }}"
+          $fableCore = "${{ steps.fable_gate.outputs.fable_result }}"
+          Write-Output "=== ROUND RESULT: legacy=$r opus=$opusCore fable=$fableCore ==="
+          & $env:LOOP_STATE_SCRIPT -Operation CompleteRound -Cycle ([int]$env:LOOP_CYCLE) -Round ([int]$env:LOOP_ROUND) -Verdict $r -OpusResult $opusCore -FableResult $fableCore
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload round output
@@ -359,7 +927,11 @@ jobs:
             D:\Redemption\Redemption\.loop-output\loop-state.json
             D:\Redemption\Redemption\.loop-output\cycles\cycle-${{ inputs.cycle }}\round-${{ inputs.round }}\
             D:\Redemption\Redemption\.loop-output\verifier-state\
+            D:\Redemption\Redemption\.loop-output\controller-evidence\schema-10\cycle-${{ inputs.cycle }}\round-${{ inputs.round }}\
             D:\Redemption\Redemption\.loop-output\UAT_REPORT.md
+            D:\Redemption\Redemption\.loop-output\opus-result.txt
+            D:\Redemption\Redemption\.loop-output\opus-core-result.txt
+            D:\Redemption\Redemption\.loop-output\fable-core-result.txt
             D:\Redemption\Redemption\.loop-output\uat-result.txt
             D:\Redemption\Redemption\.loop-output\IMPLEMENTATION_HANDOFF.md
             D:\Redemption\Redemption\.loop-output\codex-final.txt

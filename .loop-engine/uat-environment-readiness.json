@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "historical_compatibility": {
+    "v8_v9_r2_history": "NOT_PRESENT",
+    "basis": "2026-08-25 local .loop-output forensic audit"
+  },
+  "period_pool": {
+    "reservation_status": "CONFIRMED",
+    "reservation_basis": "DEC-020 D15",
+    "range": [990001, 990020],
+    "real_pvam_db_occupancy": "NOT_VERIFIED"
+  },
+  "consumer_lifecycle": {
+    "status": "UNAVAILABLE",
+    "targets_configured": false,
+    "deployment_required": false,
+    "basis": "Current UAT cluster has no legal PvEventConsumer lifecycle target; Dask scheduler/worker must not be substituted",
+    "loop_core_impact": "NONE",
+    "full_uat_impact": "BLOCKED_WHEN_CONSUMER_LIFECYCLE_IS_REQUIRED"
+  },
+  "windows_runtime_gate": "PENDING_SELF_HOSTED_RUNNER"
+}

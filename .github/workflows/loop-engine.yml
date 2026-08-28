@@ -1,6 +1,6 @@
 # Operator entry point for Loop Engine.
-# auto: initialize or recover the current cycle and continue from durable state.
-# new-cycle: only after LOOP_EXHAUSTED; opens a new cycle with a fresh three-round budget.
+# auto: initialize or recover the current Cycle and continue from durable state.
+# next-cycle: MANUAL governance action, allowed only after PAUSED_AWAITING_USER.
 
 name: loop-engine
 
@@ -8,13 +8,48 @@ on:
   workflow_dispatch:
     inputs:
       run_mode:
-        description: auto = start/recover current cycle; new-cycle = continue after LOOP_EXHAUSTED with another 3-round budget
+        description: auto = start/recover current Cycle; next-cycle = manually continue after PAUSED_AWAITING_USER
         required: true
         default: auto
         type: choice
         options:
           - auto
-          - new-cycle
+          - next-cycle
+      uat_write_authorization_confirmed:
+        description: One workflow dispatch is the explicit non-interactive preauthorization point for the current Cycle; the durable scope covers later Round/Candidate stages in that Cycle.
+        required: true
+        default: false
+        type: boolean
+      uat_authorization_id:
+        description: Required when write authorization is confirmed; use a change ticket, approval record, or operator confirmation ID.
+        required: false
+        default: ""
+        type: string
+      uat_authorized_actions:
+        description: "Comma-separated allowed mutable actions: test-data-write,exec,debug,git-update,deploy,restart,scale,delete. Use none when not authorizing writes."
+        required: false
+        default: none
+        type: string
+      uat_target_namespace:
+        description: Exact Kubernetes namespace allowed for this Cycle UAT scope.
+        required: false
+        default: ""
+        type: string
+      uat_resource_scope:
+        description: "Comma/semicolon-separated allowed resources as kind/name or kind/prefix* (for example deployment/pvam-consumer,node/node3,pod/pvam-uat-*)."
+        required: false
+        default: ""
+        type: string
+      uat_target_branch:
+        description: Exact Git branch allowed for git-update operations in this Cycle.
+        required: false
+        default: codex/pvam-work02-uat-candidate-20260813
+        type: string
+      uat_impact_scope:
+        description: Impact boundary for the Cycle authorization. v13 accepts isolated-uat-only.
+        required: false
+        default: isolated-uat-only
+        type: string
 
 concurrency:
   group: loop-engine
@@ -40,14 +75,64 @@ jobs:
       start_action: ${{ steps.state.outputs.start_action }}
       previous_report: ${{ steps.state.outputs.previous_report }}
       state_status: ${{ steps.state.outputs.state_status }}
+      findings_source: ${{ steps.state.outputs.findings_source }}
+      findings_ref: ${{ steps.state.outputs.findings_ref }}
+      candidate_branch: ${{ steps.state.outputs.candidate_branch }}
+      cycle_start_sha: ${{ steps.state.outputs.cycle_start_sha }}
+      current_candidate_sha: ${{ steps.state.outputs.current_candidate_sha }}
     steps:
       - name: Reconcile durable loop state
         id: state
         shell: powershell
+        env:
+          INPUT_RUN_MODE: ${{ inputs.run_mode }}
         run: |
           if (-not (Test-Path $env:LOOP_STATE_SCRIPT)) { Write-Error "loop state script missing: $env:LOOP_STATE_SCRIPT"; exit 1 }
-          & $env:LOOP_STATE_SCRIPT -Operation Prepare -RunMode "${{ inputs.run_mode }}"
+          & $env:LOOP_STATE_SCRIPT -Operation Prepare -RunMode $env:INPUT_RUN_MODE
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Bind or reuse non-interactive Cycle UAT authorization
+        if: ${{ steps.state.outputs.start_action != 'none' }}
+        shell: powershell
+        env:
+          PREPARED_CYCLE: ${{ steps.state.outputs.cycle }}
+          INPUT_AUTH_CONFIRMED: ${{ inputs.uat_write_authorization_confirmed }}
+          INPUT_AUTH_ID: ${{ inputs.uat_authorization_id }}
+          INPUT_AUTH_ACTIONS: ${{ inputs.uat_authorized_actions }}
+          INPUT_AUTH_NAMESPACE: ${{ inputs.uat_target_namespace }}
+          INPUT_AUTH_RESOURCE_SCOPE: ${{ inputs.uat_resource_scope }}
+          INPUT_AUTH_TARGET_BRANCH: ${{ inputs.uat_target_branch }}
+          INPUT_AUTH_IMPACT_SCOPE: ${{ inputs.uat_impact_scope }}
+          AUTH_ACTOR: ${{ github.actor }}
+          AUTH_RUN_ID: ${{ github.run_id }}
+          AUTH_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          & $env:LOOP_STATE_SCRIPT -Operation BindCycleUatAuthorization `
+            -Cycle ([int]$env:PREPARED_CYCLE) `
+            -AuthorizationConfirmed $env:INPUT_AUTH_CONFIRMED `
+            -AuthorizationId $env:INPUT_AUTH_ID `
+            -AuthorizedActions $env:INPUT_AUTH_ACTIONS `
+            -AuthorizationActor $env:AUTH_ACTOR `
+            -AuthorizationRunId $env:AUTH_RUN_ID `
+            -AuthorizationRunAttempt $env:AUTH_RUN_ATTEMPT `
+            -TargetNamespace $env:INPUT_AUTH_NAMESPACE `
+            -ResourceScope $env:INPUT_AUTH_RESOURCE_SCOPE `
+            -TargetBranch $env:INPUT_AUTH_TARGET_BRANCH `
+            -ImpactScope $env:INPUT_AUTH_IMPACT_SCOPE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload reconciled cycle evidence
+        if: ${{ !cancelled() && steps.state.outputs.cycle != '' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: loop-reconcile-cycle-${{ steps.state.outputs.cycle }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            D:\Redemption\Redemption\.loop-output\loop-state.json
+            D:\Redemption\Redemption\.loop-output\cycles\cycle-${{ steps.state.outputs.cycle }}\
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
 
   round1:
     name: round-1
@@ -59,6 +144,8 @@ jobs:
       round: "1"
       action: ${{ needs.prepare.outputs.start_action }}
       previous_report: ${{ needs.prepare.outputs.previous_report }}
+      findings_source: ${{ needs.prepare.outputs.findings_source }}
+      findings_ref: ${{ needs.prepare.outputs.findings_ref }}
 
   round2:
     name: round-2
@@ -69,7 +156,7 @@ jobs:
         needs.prepare.result == 'success' &&
         (
           (needs.prepare.outputs.start_round == '2' && needs.prepare.outputs.start_action != 'none') ||
-          (needs.prepare.outputs.start_round == '1' && needs.round1.result == 'success' && needs.round1.outputs.verdict == 'REJECTED')
+          (needs.prepare.outputs.start_round == '1' && needs.round1.result == 'success' && needs.round1.outputs.opus_result == 'BUG_FOUND')
         )
       }}
     uses: ./.github/workflows/loop-round.yml
@@ -78,6 +165,8 @@ jobs:
       round: "2"
       action: ${{ needs.prepare.outputs.start_round == '2' && needs.prepare.outputs.start_action || 'rework' }}
       previous_report: ${{ needs.prepare.outputs.start_round == '2' && needs.prepare.outputs.previous_report || needs.round1.outputs.report_path }}
+      findings_source: ${{ needs.prepare.outputs.start_round == '2' && needs.prepare.outputs.findings_source || 'OPUS' }}
+      findings_ref: ${{ needs.prepare.outputs.start_round == '2' && needs.prepare.outputs.findings_ref || needs.round1.outputs.report_path }}
 
   round3:
     name: round-3
@@ -88,7 +177,7 @@ jobs:
         needs.prepare.result == 'success' &&
         (
           (needs.prepare.outputs.start_round == '3' && needs.prepare.outputs.start_action != 'none') ||
-          (needs.round2.result == 'success' && needs.round2.outputs.verdict == 'REJECTED')
+          (needs.round2.result == 'success' && needs.round2.outputs.opus_result == 'BUG_FOUND')
         )
       }}
     uses: ./.github/workflows/loop-round.yml
@@ -97,6 +186,8 @@ jobs:
       round: "3"
       action: ${{ needs.prepare.outputs.start_round == '3' && needs.prepare.outputs.start_action || 'rework' }}
       previous_report: ${{ needs.prepare.outputs.start_round == '3' && needs.prepare.outputs.previous_report || needs.round2.outputs.report_path }}
+      findings_source: ${{ needs.prepare.outputs.start_round == '3' && needs.prepare.outputs.findings_source || 'OPUS' }}
+      findings_ref: ${{ needs.prepare.outputs.start_round == '3' && needs.prepare.outputs.findings_ref || needs.round2.outputs.report_path }}
 
   finalize:
     needs: [prepare, round1, round2, round3]
