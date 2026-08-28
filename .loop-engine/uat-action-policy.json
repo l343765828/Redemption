@@ -52,20 +52,22 @@
       "required_tokens": [
         "exec"
       ],
+      "repo_cwd": true,
       "command": [
         "python3",
         "-c",
-        "from distributed import Client;import json,os;c=Client(os.environ['PVAM_DASK_SCHEDULER']);print(json.dumps(c.scheduler_info(),sort_keys=True,default=str));c.close()"
+        "from distributed import Client;from Model import Config;import json;c=Client(Config.SCHEDULE_ADDRESS);print(json.dumps(c.scheduler_info(),sort_keys=True,default=str));c.close()"
       ]
     },
     "dask-actor-inventory": {
       "required_tokens": [
         "exec"
       ],
+      "repo_cwd": true,
       "command": [
         "python3",
         "-c",
-        "from distributed import Client;import json,os;c=Client(os.environ['PVAM_DASK_SCHEDULER']);x=c.run_on_scheduler(lambda dask_scheduler: sorted([str(k) for k,v in dask_scheduler.tasks.items() if bool(getattr(v,'actor',False))]));print(json.dumps(x));c.close()"
+        "from distributed import Client;from Model import Config;import json;c=Client(Config.SCHEDULE_ADDRESS);x=c.run_on_scheduler(lambda dask_scheduler: sorted([str(k) for k,v in dask_scheduler.tasks.items() if bool(getattr(v,'actor',False))]));print(json.dumps(x));c.close()"
       ]
     },
     "gpu-runtime-probe": {
@@ -108,7 +110,7 @@
       "command": [
         "python3",
         "-c",
-        "from distributed import Client;import json,os;c=Client(os.environ['PVAM_DASK_SCHEDULER']);print(json.dumps(sorted([str(x) for x in c.list_datasets()])));c.close()"
+        "from distributed import Client;from Model import Config;import json;c=Client(Config.SCHEDULE_ADDRESS);print(json.dumps(sorted([str(x) for x in c.list_datasets()])));c.close()"
       ]
     }
   },
@@ -340,7 +342,21 @@
     "drain-sentinel": "primary",
     "future-period-replay": "secondary"
   },
-  "consumer_lifecycle_targets": [],
+  "consumer_runtime_target": {
+    "mode": "scheduler-pod-temporary-process",
+    "namespace": "dask-operator",
+    "host_deployment": "dask-cluster-scheduler",
+    "container": "scheduler",
+    "pod_name_prefix": "dask-cluster-scheduler-",
+    "repo_path": "/mnt/dask/Redemption/Redemption",
+    "module": "MessageConsumer.PvEventConsumer",
+    "kafka_bootstrap": "my-cluster-kafka-bootstrap.kafka-prod.svc:9092",
+    "calc_month_by_role": {
+      "primary": 209906,
+      "secondary": 209907
+    },
+    "elite_rate_percent": "15"
+  },
   "git_hunk_allowlist": {
     "User/UserStatsService.py": [
       {

@@ -139,24 +139,28 @@ foreach($file in $files) {
     }
     elseif($action -eq 'ConsumerLifecycle'){
         if(-not $semantic -or [string]$semantic.kind -ne 'ConsumerLifecycleResult'){throw "ConsumerLifecycleResult semantic evidence missing in $($file.Name)"}
+        if([string]$semantic.runtime_mode -ne 'scheduler-pod-temporary-process'){throw "ConsumerLifecycle runtime mode mismatch in $($file.Name)"}
         $op=([string]$semantic.operation).ToLowerInvariant();if($op){$lifecycleOps[$op]=$semantic;$lifecycleOrder[$op]=$successOrdinal}
         if($op -eq 'bind-primary'){if([int]$semantic.bound_period -ne $ExpectedPrimary){throw 'ConsumerLifecycle primary bound period mismatch'}}
         if($op -eq 'bind-secondary'){if([int]$semantic.bound_period -ne $ExpectedSecondary){throw 'ConsumerLifecycle secondary bound period mismatch'}}
 
         if($op -eq 'restore'){
             if(-not [bool]$semantic.restored){throw 'ConsumerLifecycle restore semantic evidence missing'}
+            if([int]$semantic.matching_process_count -ne 0){throw 'ConsumerLifecycle restore did not prove governed process absence'}
             $baselineSha=([string]$semantic.baseline_sha256).Trim().ToLowerInvariant()
             if($baselineSha -notmatch '^[0-9a-f]{64}$'){throw 'ConsumerLifecycle restore baseline SHA-256 missing/invalid'}
         }
         if($op -like 'bind-*'){
             if([string]$semantic.ledger_prefix -ne "pvam:uat:work02:${ExpectedExecutionId}:"){throw 'ConsumerLifecycle ledger prefix mismatch'}
             if([int]$semantic.matching_process_count -lt 1){throw 'ConsumerLifecycle did not prove a running consumer PID'}
+            if(-not ([string]$semantic.pod).Trim() -or -not ([string]$semantic.pod_uid).Trim() -or -not ([string]$semantic.container).Trim()){throw 'ConsumerLifecycle scheduler Pod identity evidence missing'}
             if(([string]$semantic.candidate_sha).ToLowerInvariant() -ne $ExpectedCandidateSha){throw 'ConsumerLifecycle runtime candidate SHA mismatch'}
             foreach($podHead in @($semantic.pod_repo_heads)){if(([string]$podHead.head).ToLowerInvariant() -ne $ExpectedCandidateSha){throw 'ConsumerLifecycle Pod/NFS candidate SHA mismatch'}}
         }
     }
     elseif($action -eq 'ConsumerObserve'){
         if(-not $semantic -or [string]$semantic.kind -ne 'ConsumerObserveResult'){throw "ConsumerObserveResult semantic evidence missing in $($file.Name)"}
+        if([string]$semantic.runtime_mode -ne 'scheduler-pod-temporary-process'){throw "ConsumerObserve runtime mode mismatch in $($file.Name)"}
         $scenario=([string]$semantic.scenario).Trim();if(-not $scenario){throw 'ConsumerObserve scenario missing'};$observedScenarios[$scenario]=$semantic;$observeOrder[$scenario]=$successOrdinal
         if([int]$semantic.log_line_count -lt 1){throw 'required consumer observation missing consumer logs'}
         if(([string]$semantic.candidate_sha).ToLowerInvariant() -ne $ExpectedCandidateSha){throw 'ConsumerObserve runtime candidate SHA mismatch'}
@@ -211,7 +215,7 @@ foreach($file in $files) {
         $proofId=([string]$semantic.proof_id).Trim();if(-not $proofId -or -not [bool]$semantic.passed){throw 'UatProof semantic proof_id/passed invalid'}
         $allowed=@($policy.mandatory_uat_proofs_by_stage.$Stage|ForEach-Object{[string]$_});if($allowed -notcontains $proofId){throw "UatProof proof_id outside required policy for ${Stage}: $proofId"}
         if($proofId -eq 'dispatch-p99'){if([int]$semantic.sample_count -lt [int]$policy.dispatch_p99_sample_count -or [double]$semantic.p99_ms -gt [double]$policy.dispatch_p99_max_ms -or -not [string]$semantic.p99_nonce -or @($semantic.sample_completed_at).Count -lt [int]$policy.dispatch_p99_sample_count){throw 'dispatch p99 proof threshold/sample/freshness failed'};if(([string]$semantic.candidate_sha).ToLowerInvariant() -ne $ExpectedCandidateSha){throw 'dispatch p99 runtime Candidate SHA mismatch'}}
-        if($proofId -eq 'pending-dispatched-recovery'){if(-not [bool]$semantic.pending_before_restart -or -not [bool]$semantic.crash_window_injected -or -not [bool]$semantic.idempotency_present_before_restart -or -not [bool]$semantic.restart_completed -or -not [bool]$semantic.dispatched_after_restart -or -not [bool]$semantic.three_chain_after_restart -or -not [bool]$semantic.business_unchanged_after_replay){throw 'PENDING -> DISPATCHED crash-window restart/no-double recovery proof invalid'};if(([string]$semantic.candidate_sha).ToLowerInvariant() -ne $ExpectedCandidateSha){throw 'pending recovery runtime Candidate SHA mismatch'}}
+        if($proofId -eq 'pending-dispatched-recovery'){if([string]$semantic.runtime_mode -ne 'scheduler-pod-temporary-process'){throw 'pending recovery Consumer runtime mode mismatch'};if(-not [bool]$semantic.pending_before_restart -or -not [bool]$semantic.crash_window_injected -or -not [bool]$semantic.idempotency_present_before_restart -or -not [bool]$semantic.restart_completed -or -not [bool]$semantic.dispatched_after_restart -or -not [bool]$semantic.three_chain_after_restart -or -not [bool]$semantic.business_unchanged_after_replay){throw 'PENDING -> DISPATCHED crash-window process-restart/no-double recovery proof invalid'};if(([string]$semantic.candidate_sha).ToLowerInvariant() -ne $ExpectedCandidateSha){throw 'pending recovery runtime Candidate SHA mismatch'}}
         if($proofId -eq 'cross-period-refund-routing'){if(-not [bool]$semantic.business_value_proof_ok -or [long]$semantic.secondary_business_delta_units -ne [long]$semantic.refund_delta_units -or [long]$semantic.primary_business_delta_units -ne [long]$semantic.primary_order_amount_units){throw 'cross-period UatProof business delta invalid'}}
         if($proofId -eq 'duplicate-no-double'){if(-not [bool]$semantic.business_value_proof_ok -or [long]$semantic.duplicate_business_delta_units -ne [long]$semantic.expected_amount_units){throw 'duplicate UatProof business delta invalid'}}
         if($proofId -eq 'int64-end-to-end'){if(-not [bool]$semantic.runtime_integer_amount_proved -or -not [bool]$semantic.runtime_business_amount_version_proved){throw 'int64 end-to-end runtime proof invalid'}}

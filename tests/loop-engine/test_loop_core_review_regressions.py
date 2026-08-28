@@ -146,8 +146,8 @@ def test_consumer_proof_helpers_use_pod_prefix_and_string_pod_names_end_to_end()
     assert proxy.count("Get-ConsumerLifecycleTarget $Policy $deployment $container") >= 2
     assert "Get-ConsumerLifecycleSelectedPods $deployment $target" not in pending
     assert "Get-ConsumerLifecycleSelectedPods $deployment $target" not in dispatch
-    assert pending.count("Get-ConsumerLifecycleSelectedPods $deployment ([string]$target.pod_name_prefix)") == 2
-    assert dispatch.count("Get-ConsumerLifecycleSelectedPods $deployment ([string]$target.pod_name_prefix)") == 1
+    assert pending.count("Get-ConsumerLifecycleSelectedPods $deployment $container ([string]$target.pod_name_prefix)") == 1
+    assert dispatch.count("Get-ConsumerLifecycleSelectedPods $deployment $container ([string]$target.pod_name_prefix)") == 1
     assert "$pods[0].Name" not in pending
     assert "$newPods[0].Name" not in pending
     assert "$pods[0].Name" not in dispatch
@@ -168,10 +168,20 @@ def test_r6_readiness_contract_records_only_confirmed_environment_facts():
     assert readiness["schema_version"] == 1
     assert readiness["historical_compatibility"]["v8_v9_r2_history"] == "NOT_PRESENT"
     assert readiness["period_pool"]["reservation_status"] == "CONFIRMED"
-    assert readiness["period_pool"]["real_pvam_db_occupancy"] == "NOT_VERIFIED"
-    assert readiness["consumer_lifecycle"]["status"] == "UNAVAILABLE"
-    assert readiness["consumer_lifecycle"]["targets_configured"] is False
-    assert readiness["consumer_lifecycle"]["deployment_required"] is False
+    assert readiness["period_pool"]["real_pvam_db_occupancy"] == "CONFIRMED"
+    verification = readiness["period_pool"]["occupancy_verification"]
+    assert verification["result"] == "PASS"
+    assert verification["mode"] == "READ_ONLY"
+    assert verification["period_range"] == [990001, 990020]
+    assert verification["period_reference_key_count"] == 0
+    assert verification["idempotency_key_count"] == 0
+    assert verification["uat_prefix_key_count"] == 0
+    assert verification["dbsize_before"] == verification["dbsize_after"] == 7
+    assert readiness["consumer_runtime"]["status"] == "AVAILABLE"
+    assert readiness["consumer_runtime"]["mode"] == "scheduler-pod-temporary-process"
+    assert readiness["consumer_runtime"]["targets_configured"] is True
+    assert readiness["consumer_runtime"]["deployment_required"] is False
+    assert readiness["consumer_runtime"]["full_uat_impact"] == "READY"
     assert readiness["windows_runtime_gate"] == "PENDING_SELF_HOSTED_RUNNER"
 
 
@@ -181,7 +191,7 @@ def test_r6_full_uat_gate_has_deterministic_fail_closed_blockers_without_invalid
     source = text(gate)
     assert 'ValidateSet("Core", "FullUat")' in source
     assert 'UAT_PERIOD_DB_OCCUPANCY_NOT_CONFIRMED' in source
-    assert 'CONSUMER_LIFECYCLE_UNAVAILABLE' in source
+    assert 'CONSUMER_RUNTIME_UNAVAILABLE' in source
     assert 'UAT_ENVIRONMENT_READINESS=READY' in source
     assert 'UAT_ENVIRONMENT_READINESS=BLOCKED' in source
     assert 'if ($Mode -eq "Core")' in source

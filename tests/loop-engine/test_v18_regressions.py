@@ -9,6 +9,7 @@ VERIFY = (ROOT / '.loop-engine' / 'verify-proxy-period-evidence.ps1').read_text(
 PREP = (ROOT / '.loop-engine' / 'prepare-verifier-state.ps1').read_text(encoding='utf-8')
 WF = (ROOT / '.github' / 'workflows' / 'loop-round.yml').read_text(encoding='utf-8')
 RUNNER = (ROOT / '.loop-engine' / 'claude-verifier-runner.ps1').read_text(encoding='utf-8')
+CONTROLLER = (ROOT / '.loop-engine' / 'consumer-runtime-controller.py').read_text(encoding='utf-8')
 
 
 def test_policy_schema_and_controller_evidence_are_versioned():
@@ -23,9 +24,9 @@ def test_policy_schema_and_controller_evidence_are_versioned():
 
 def test_consumer_lifecycle_is_structured_and_required():
     assert '"ConsumerLifecycle"' in PROXY
-    assert 'PVAM_BOUND_PERIOD' in PROXY
-    assert 'PVAM_CALC_MONTH' in PROXY
-    assert 'PVAM_LEDGER_KEY_PREFIX' in PROXY
+    assert 'PVAM_BOUND_PERIOD' in CONTROLLER
+    assert 'PVAM_CALC_MONTH' in CONTROLLER
+    assert 'PVAM_LEDGER_KEY_PREFIX' in CONTROLLER
     assert 'ConsumerLifecycleResult' in PROXY
     assert 'bind-primary' in PROXY and 'bind-secondary' in PROXY
     assert 'ConsumerLifecycle' in POLICY['required_success_actions_by_stage']['OPUS']
@@ -100,8 +101,11 @@ def test_runner_contract_mentions_lifecycle_and_semantic_assertions():
 def test_consumer_lifecycle_calc_month_and_runtime_sha_are_controller_owned():
     assert ('ConsumerLifecycle calc_month is controller-owned' in PROXY or
             'ConsumerLifecycle calc_month is controller governed' in PROXY)
-    assert ('existing deployment PVAM_CALC_MONTH' in PROXY or
-            'ConsumerLifecycle governed PVAM_CALC_MONTH' in PROXY)
+    assert 'calc_month_by_role' in PROXY
+    assert POLICY['consumer_runtime_target']['calc_month_by_role'] == {
+        'primary': 209906,
+        'secondary': 209907,
+    }
     assert "Verify-PodGitView" in PROXY
     assert "pod_repo_heads" in PROXY
     assert "ConsumerLifecycle runtime candidate SHA mismatch" in VERIFY
@@ -133,20 +137,21 @@ def test_consumer_observe_single_delivery_is_serialized_as_json_array():
     assert 'ConvertTo-Json -Depth 20 -InputObject @($records' in PROXY
 
 
-def test_consumer_rebind_reads_calc_month_without_probing_old_pods_first():
-    assert 'function Get-DeploymentGovernedEnv' in PROXY
+def test_consumer_rebind_uses_policy_calc_month_and_process_replace_without_deployment_mutation():
+    assert 'function Get-DeploymentGovernedEnv' not in PROXY
     lifecycle_start = PROXY.index('function Invoke-ConsumerLifecycle')
     bind_start = PROXY.index("if($op -in @('bind-primary','bind-secondary'))", lifecycle_start)
-    set_pos = PROXY.index("$set=Invoke-Kubectl", bind_start)
-    state_pos = PROXY.index("$state=Get-DeploymentConsumerState", set_pos)
-    before_pos = PROXY.index('$before=Get-DeploymentGovernedEnv', lifecycle_start)
-    assert lifecycle_start < before_pos < bind_start < set_pos < state_pos
-    assert 'Get-DeploymentConsumerState' not in PROXY[lifecycle_start:set_pos]
+    replace_pos = PROXY.index("Invoke-ConsumerRuntimeController $pod $container 'replace'", bind_start)
+    assert lifecycle_start < bind_start < replace_pos
+    lifecycle = PROXY[lifecycle_start:PROXY.index('function Get-KafkaScenarioSemantic', lifecycle_start)]
+    assert "set','env" not in lifecycle
+    assert "'scale'" not in lifecycle
+    assert "'rollout','restart'" not in lifecycle
 
 
 def test_runner_does_not_tell_verifier_to_supply_controller_owned_calc_month():
     assert 'Do not supply `calc_month`' in RUNNER
-    assert 'controller reads the governed Deployment' in RUNNER
+    assert 'controller resolves the unique Running+Ready scheduler Pod' in RUNNER
     assert 'Supply the approved six-digit `calc_month`' not in RUNNER
 
 
@@ -165,7 +170,7 @@ def test_windows_smoke_covers_current_schema_and_lifecycle_contract_without_k8s_
     assert '[V20-CONTROLLER-CONTRACT-SMOKE] PASS' in smoke
     assert 'controller-evidence\\schema-{0}\\cycle-{1}\\round-{2}\\{3}' in smoke
     assert 'ConsumerLifecycle calc_month is controller governed' in smoke
-    assert 'Get-DeploymentGovernedEnv' in smoke
+    assert 'consumer-runtime-controller.py' in smoke
     assert 'controller-evidence\\schema-10\\cycle-{0}\\round-{1}\\opus' in smoke
 
 
@@ -178,9 +183,9 @@ def test_readme_deploys_v20_and_preserves_v18_v19_history():
     assert 'REVIEW-FIXES-v18.md' in readme and 'docs/LOOP-ENGINE-V18-DESIGN.md' in readme
     assert 'Before the first v20 `auto`' in readme
     assert 'controller-evidence/schema-10' in readme
-    assert 'consumer_lifecycle_targets' in readme
+    assert 'consumer_runtime_target' in readme
     assert 'ConsumerLifecycle restore' in readme
-    assert 'deploy,restart,scale' in readme
+    assert 'scheduler-pod-temporary-process' in readme
     assert 'immutable Cycle grant' in readme
     assert 'new Cycle' in readme
 
@@ -224,9 +229,10 @@ def test_opus_lifecycle_sequence_requires_primary_drain_then_secondary():
     assert "'drain-sentinel'" in VERIFY
 
 
-def test_drain_observation_checks_previous_container_logs_before_rebind():
-    assert "'--previous'" in PROXY
-    assert 'previousLogText' in PROXY
+def test_drain_observation_reads_governed_process_log_across_rebind():
+    assert 'Get-ConsumerRuntimeLogs' in PROXY
+    assert "'--previous'" not in PROXY
+    assert 'previousLogText' not in PROXY
     assert "PERIOD DRAIN COMPLETE" in PROXY
 
 

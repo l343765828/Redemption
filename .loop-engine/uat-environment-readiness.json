@@ -8,15 +8,37 @@
     "reservation_status": "CONFIRMED",
     "reservation_basis": "DEC-020 D15",
     "range": [990001, 990020],
-    "real_pvam_db_occupancy": "NOT_VERIFIED"
+    "real_pvam_db_occupancy": "CONFIRMED",
+    "occupancy_verification": {
+      "result": "PASS",
+      "verified_on": "2026-08-28",
+      "mode": "READ_ONLY",
+      "namespace": "dask-operator",
+      "scheduler_pod": "dask-cluster-scheduler-6bd5b9cbd5-rx92d",
+      "redis_db": 0,
+      "period_range": [990001, 990020],
+      "keys_scanned": 7,
+      "period_reference_key_count": 0,
+      "idempotency_key_count": 0,
+      "uat_prefix_key_count": 0,
+      "default_ledger_key_count": 0,
+      "dbsize_before": 7,
+      "dbsize_after": 7,
+      "basis": "Complete live Redis scan from the unique Running/Ready scheduler Pod; all supported key types including RedisJSON were read without emitting key values or secrets"
+    }
   },
-  "consumer_lifecycle": {
-    "status": "UNAVAILABLE",
-    "targets_configured": false,
+  "consumer_runtime": {
+    "status": "AVAILABLE",
+    "mode": "scheduler-pod-temporary-process",
+    "namespace": "dask-operator",
+    "host_deployment": "dask-cluster-scheduler",
+    "container": "scheduler",
+    "pod_name_prefix": "dask-cluster-scheduler-",
+    "targets_configured": true,
     "deployment_required": false,
-    "basis": "Current UAT cluster has no legal PvEventConsumer lifecycle target; Dask scheduler/worker must not be substituted",
+    "basis": "User-confirmed UAT topology and 2026-08-28 live read-only cluster verification: PvEventConsumer is a temporary process in the unique Running/Ready Dask scheduler Pod",
     "loop_core_impact": "NONE",
-    "full_uat_impact": "BLOCKED_WHEN_CONSUMER_LIFECYCLE_IS_REQUIRED"
+    "full_uat_impact": "READY"
   },
   "windows_runtime_gate": "PENDING_SELF_HOSTED_RUNNER"
 }

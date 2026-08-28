@@ -497,7 +497,7 @@ function Find-PodGitRepoByRemote([string]$Pod, [string]$Container, [string]$Expe
     foreach ($gitDir in @($find.Output | Where-Object { ([string]$_).Trim().EndsWith("/.git") })) {
         $repo = ([string]$gitDir).Trim().Substring(0, ([string]$gitDir).Trim().Length - 5)
         if (-not $repo -or $repo -match '[\x00\r\n]') { continue }
-        $remote = Invoke-Kubectl ($args + @("--", "git", "-C", $repo, "config", "--get", "remote.origin.url"))
+        $remote = Invoke-Kubectl ($args + @("--", "git", "-c", ("safe.directory={0}" -f $repo), "-C", $repo, "config", "--get", "remote.origin.url"))
         if ($remote.ExitCode -eq 0 -and (($remote.Output -join "`n").Trim()) -eq $ExpectedRemote) { $matches.Add($repo) }
     }
     $unique = @($matches.ToArray() | Select-Object -Unique)
@@ -509,7 +509,7 @@ function Verify-PodGitView([string]$Pod, [string]$Container, [string]$ExpectedRe
     $repo = Find-PodGitRepoByRemote $Pod $Container $ExpectedRemote
     $args = @("--kubeconfig", $Kubeconfig, "exec", $Pod, "-n", $TargetNamespace)
     if ($Container) { $args += @("-c", $Container) }
-    $head = Invoke-Kubectl ($args + @("--", "git", "-C", $repo, "rev-parse", "HEAD"))
+    $head = Invoke-Kubectl ($args + @("--", "git", "-c", ("safe.directory={0}" -f $repo), "-C", $repo, "rev-parse", "HEAD"))
     $text = (($head.Output -join "`n").Trim()).ToLowerInvariant()
     if ($head.ExitCode -ne 0 -or $text -ne $Candidate) { throw "GIT_POD_VIEW_FAILED: pod NFS HEAD=$text expected=$Candidate" }
     return $repo
@@ -527,6 +527,36 @@ function Invoke-PodCommand([string]$Pod, [string]$Container, [string[]]$Command)
     return Invoke-Kubectl ($args + @("--") + @($Command))
 }
 
+function Invoke-RuntimePythonCommand([string]$Pod,[string]$Container,[string]$Repo,$Policy,[string]$Code,[string[]]$Arguments) {
+    $expectedRepo=([string]$Policy.consumer_runtime_target.repo_path).Trim()
+    if(-not $expectedRepo -or $Repo -ne $expectedRepo){throw 'UAT_ACTION_POLICY_DENIED: runtime Python repository path is not the version-controlled target'}
+    $kafka=([string]$Policy.consumer_runtime_target.kafka_bootstrap).Trim()
+    if(-not $kafka -or $kafka -match '[\x00\r\n ]'){throw 'UAT_ACTION_POLICY_DENIED: runtime Kafka bootstrap is missing or invalid'}
+    if(-not $Code){throw 'UAT_ACTION_POLICY_DENIED: runtime Python code is missing'}
+    $codeB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Code))
+    $launcher=@'
+import base64, os, sys
+repo, kafka, code_b64 = sys.argv[1:4]
+if repo not in sys.path:
+    sys.path.insert(0, repo)
+from Model import Config as runtime_config
+values = {
+    "PVAM_DASK_SCHEDULER": runtime_config.SCHEDULE_ADDRESS,
+    "PVAM_REDIS_HOST": runtime_config.REDIS_HOST,
+    "PVAM_REDIS_PORT": runtime_config.REDIS_PORT,
+    "PVAM_REDIS_DB": runtime_config.REDIS_DB,
+    "PVAM_REDIS_PASSWORD": runtime_config.REDIS_PASSWORD,
+}
+if any(value is None or str(value) == "" for value in values.values()):
+    raise RuntimeError("runtime Model.Config is incomplete")
+os.environ.update({name: str(value) for name, value in values.items()})
+os.environ["PVAM_KAFKA_BOOTSTRAP"] = kafka
+sys.argv = ["<uat-runtime>"] + sys.argv[4:]
+exec(compile(base64.b64decode(code_b64), "<uat-runtime>", "exec"), {"__name__": "__main__"})
+'@
+    return Invoke-PodCommand $Pod $Container (@('python3','-c',$launcher,$Repo,$kafka,$codeB64)+@($Arguments))
+}
+
 function Get-CurrentCandidateSha() {
     $candidatePath = Join-Path $MainRepo ".loop-output\pushed-sha.txt"
     if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) { throw "GIT_POD_VIEW_FAILED: pushed-sha.txt missing before runtime repo use" }
@@ -538,7 +568,10 @@ function Get-CurrentCandidateSha() {
 function Get-PodRepoRoot([string]$Pod, [string]$Container, $Policy) {
     $remote = ([string]$Policy.repo_remote_url).Trim()
     if (-not $remote) { throw "UAT_ACTION_POLICY_DENIED: repo_remote_url is missing" }
-    return Verify-PodGitView $Pod $Container $remote (Get-CurrentCandidateSha)
+    $repo=Verify-PodGitView $Pod $Container $remote (Get-CurrentCandidateSha)
+    $expectedRepo=([string]$Policy.consumer_runtime_target.repo_path).Trim()
+    if(-not $expectedRepo -or $repo -ne $expectedRepo){throw 'UAT_ACTION_POLICY_DENIED: runtime repository path does not match consumer_runtime_target'}
+    return $repo
 }
 
 function Invoke-PolicyExecProfile($Request, $Policy, [string]$ProfileName = "") {
@@ -556,88 +589,22 @@ function Invoke-PolicyExecProfile($Request, $Policy, [string]$ProfileName = "") 
     return Invoke-PodCommand $pod $container $command
 }
 
-# V19-GET-DEPLOYMENTGOVERNEDENV
-function Get-DeploymentGovernedEnv([string]$Deployment,[string]$Container) {
-    Assert-ResourceAllowed "deployment" $Deployment
-    if (-not $Container) { throw "UAT_ACTION_POLICY_DENIED: exact deployment container is required" }
-    $dep = Get-KubectlJson @('--kubeconfig',$Kubeconfig,'get','deployment',$Deployment,'-n',$TargetNamespace) "UAT_ENV_BLOCKED: cannot read deployment"
-    $containers=@($dep.spec.template.spec.containers)
-    $matches=@($containers | Where-Object { ([string]$_.name) -eq $Container })
-    if($matches.Count -ne 1){throw "UAT_ACTION_POLICY_DENIED: exact deployment container not found/ambiguous: $Container"}
-    $selected=$matches[0]
-    $containerName=[string]$selected.name
-    $envMap=@{}
-    $envExists=@{}
-    foreach($e in @($selected.env)){
-        $name=[string]$e.name
-        if($name){
-            $envExists[$name]=$true
-            if($null -ne $e.value){$envMap[$name]=[string]$e.value}else{$envMap[$name]=''}
-        }
-    }
-    return [pscustomobject]@{deployment_object=$dep;container=$containerName;env=$envMap;env_exists=$envExists}
-}
-
-function Get-DeploymentConsumerState([string]$Deployment,[string]$Container) {
-    $governed=Get-DeploymentGovernedEnv $Deployment $Container
-    $dep=$governed.deployment_object
-    $containerName=[string]$governed.container
-    $envMap=$governed.env
-    $labels=@($dep.spec.selector.matchLabels.PSObject.Properties|Sort-Object Name)
-    if($labels.Count -lt 1){throw "UAT_ENV_BLOCKED: deployment selector.matchLabels is empty"}
-    $selector=(@($labels|ForEach-Object{"$($_.Name)=$($_.Value)"}) -join ',')
-    $podsObj=Get-KubectlJson @("--kubeconfig",$Kubeconfig,"get","pods","-n",$TargetNamespace,"-l",$selector) "UAT_ENV_BLOCKED"
-    $pods=New-Object System.Collections.Generic.List[object]
-    $probe=@'
-import json,os
-rows=[]
-for name in os.listdir('/proc'):
-    if not name.isdigit():
-        continue
-    try:
-        raw=open('/proc/'+name+'/cmdline','rb').read().replace(b'\x00',b' ').decode('utf-8','replace').strip()
-        if 'PvEventConsumer' not in raw and 'MessageConsumer.PvEventConsumer' not in raw:
-            continue
-        env={}
-        for item in open('/proc/'+name+'/environ','rb').read().split(b'\x00'):
-            if b'=' in item:
-                k,v=item.split(b'=',1); env[k.decode('utf-8','replace')]=v.decode('utf-8','replace')
-        rows.append({'pid':int(name),'cmdline':raw[:512],'bound_period':env.get('PVAM_BOUND_PERIOD'),'calc_month':env.get('PVAM_CALC_MONTH'),'ledger_prefix':env.get('PVAM_LEDGER_KEY_PREFIX')})
-    except Exception:
-        pass
-print(json.dumps({'kind':'ConsumerProcessState','processes':rows},sort_keys=True))
-'@
-    $probeB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($probe))
-    $launcher="import base64,sys;exec(compile(base64.b64decode(sys.argv[1]),'<consumer-probe>','exec'))"
-    foreach($podObj in @($podsObj.items)){
-        $podName=[string]$podObj.metadata.name
-        Assert-ResourceAllowed "pod" $podName
-        $pr=Invoke-PodCommand $podName $containerName @('python3','-c',$launcher,$probeB64)
-        if($pr.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: consumer process probe failed in $podName"}
-        $json=(@($pr.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1)
-        if(-not $json){throw "UAT_ENV_BLOCKED: consumer process probe returned no JSON in $podName"}
-        $ps=([string]$json)|ConvertFrom-Json
-        $pods.Add([pscustomobject]@{name=$podName;uid=[string]$podObj.metadata.uid;phase=[string]$podObj.status.phase;processes=@($ps.processes)})
-    }
-    return [pscustomobject]@{deployment=$Deployment;container=$containerName;env=$envMap;generation=[long]$dep.metadata.generation;observed_generation=[long]$dep.status.observedGeneration;replicas=[int]$dep.status.replicas;available_replicas=[int]$dep.status.availableReplicas;pods=$pods.ToArray()}
-}
-
 # V19-CONSUMER-LIFECYCLE-GOVERNANCE
 function Get-ConsumerLifecycleTarget($Policy,[string]$Deployment,[string]$Container) {
-    $targets=@($Policy.consumer_lifecycle_targets)
-    if($targets.Count -lt 1){throw "UAT_ACTION_POLICY_DENIED: consumer_lifecycle_targets is empty; lifecycle mutation is fail-closed"}
-    $matches=@($targets | Where-Object {
-        ([string]$_.namespace).ToLowerInvariant() -eq $TargetNamespace -and
-        ([string]$_.deployment).ToLowerInvariant() -eq $Deployment.ToLowerInvariant() -and
-        ([string]$_.container) -eq $Container
-    })
-    if($matches.Count -ne 1){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle target is not uniquely allowlisted"}
-    $target=$matches[0]
+    $target=$Policy.consumer_runtime_target
+    if(-not $target){throw "UAT_ACTION_POLICY_DENIED: consumer_runtime_target is missing; lifecycle mutation is fail-closed"}
+    if(([string]$target.mode).ToLowerInvariant() -ne 'scheduler-pod-temporary-process'){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle runtime mode is not allowlisted"}
+    if(([string]$target.namespace).ToLowerInvariant() -ne $TargetNamespace){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle runtime namespace mismatch"}
+    $hostDeployment=([string]$target.host_deployment).Trim().ToLowerInvariant()
+    $targetContainer=([string]$target.container).Trim()
+    if(-not $hostDeployment -or -not $targetContainer){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle runtime target is incomplete"}
+    if($Deployment -and $Deployment.ToLowerInvariant() -ne $hostDeployment){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle host deployment is not allowlisted"}
+    if($Container -and $Container -ne $targetContainer){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle host container is not allowlisted"}
     $prefix=([string]$target.pod_name_prefix).Trim().ToLowerInvariant()
     if($prefix -notmatch '^[a-z0-9]([-a-z0-9.]*[a-z0-9])?-$'){
         throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle pod_name_prefix is invalid"
     }
-    return [pscustomobject]@{namespace=$TargetNamespace;deployment=$Deployment;container=$Container;pod_name_prefix=$prefix}
+    return $target
 }
 
 function Assert-ConsumerLifecyclePodPrefixCoveredByScope([string]$Prefix) {
@@ -654,7 +621,7 @@ function Assert-ConsumerLifecyclePodPrefixCoveredByScope([string]$Prefix) {
     if(-not $covered){throw "UAT_RESOURCE_SCOPE_DENIED: ConsumerLifecycle pod_name_prefix is not covered by Cycle pod scope"}
 }
 
-function Get-ConsumerLifecycleSelectedPods([string]$Deployment,[string]$PodPrefix) {
+function Get-ConsumerLifecycleSelectedPods([string]$Deployment,[string]$Container,[string]$PodPrefix) {
     $dep = Get-KubectlJson @('--kubeconfig',$Kubeconfig,'get','deployment',$Deployment,'-n',$TargetNamespace) "UAT_ENV_BLOCKED: cannot read deployment selector"
     $labels=@()
     foreach($p in @($dep.spec.selector.matchLabels.PSObject.Properties)){$labels += ("{0}={1}" -f $p.Name,[string]$p.Value)}
@@ -666,161 +633,135 @@ function Get-ConsumerLifecycleSelectedPods([string]$Deployment,[string]$PodPrefi
         $name=([string]$item.metadata.name).Trim().ToLowerInvariant()
         if(-not $name){continue}
         if(-not $name.StartsWith($PodPrefix,[StringComparison]::Ordinal)){throw "UAT_RESOURCE_SCOPE_DENIED: selected ConsumerLifecycle pod outside versioned pod prefix: $name"}
+        $matchingContainers=@($item.status.containerStatuses|Where-Object{([string]$_.name) -eq $Container})
+        if($matchingContainers.Count -ne 1){throw "UAT_ENV_BLOCKED: Consumer runtime host container not found/ambiguous in pod $name"}
+        if(([string]$item.status.phase) -ne 'Running' -or -not [bool]$matchingContainers[0].ready){continue}
         Assert-ResourceAllowed "pod" $name
         $names.Add($name)
     }
+    if($names.Count -ne 1){throw "UAT_ENV_BLOCKED: expected exactly one Running/Ready Consumer runtime host pod; found $($names.Count)"}
     return $names.ToArray()
 }
 
-function New-ConsumerLifecycleSnapshot([string]$Deployment,[string]$Container,[string]$PodPrefix) {
-    $before=Get-DeploymentGovernedEnv $Deployment $Container
-    $replicas=[int]$before.deployment_object.spec.replicas
-    if($replicas -lt 0 -or $replicas -gt 100){throw "UAT_ENV_BLOCKED: ConsumerLifecycle original replica count invalid"}
-    $entries=New-Object System.Collections.Generic.List[object]
-    foreach($name in @('PVAM_BOUND_PERIOD','PVAM_CALC_MONTH','PVAM_LEDGER_KEY_PREFIX')){
-        $exists=$before.env_exists.ContainsKey($name)
-        $value=if($exists){[string]$before.env[$name]}else{''}
-        $entries.Add([pscustomobject]@{name=$name;exists=[bool]$exists;value=$value})
-    }
-    return [pscustomobject]@{schema_version=1;namespace=$TargetNamespace;deployment=$Deployment;container=$Container;pod_name_prefix=$PodPrefix;replicas=$replicas;env_entries=$entries.ToArray();captured_at=(Get-Date).ToUniversalTime().ToString('o')}
+function Resolve-ConsumerRuntimeTarget($Request,$Policy,[string]$Action) {
+    $requestedContainer=([string]$Request.container).Trim()
+    $target=Get-ConsumerLifecycleTarget $Policy '' $requestedContainer
+    $deployment=([string]$target.host_deployment).Trim().ToLowerInvariant()
+    $container=([string]$target.container).Trim()
+    Assert-ResourceAllowed 'deployment' $deployment
+    Assert-ConsumerLifecyclePodPrefixCoveredByScope ([string]$target.pod_name_prefix)
+    $pods=@(Get-ConsumerLifecycleSelectedPods $deployment $container ([string]$target.pod_name_prefix))
+    $pod=[string]$pods[0]
+    $requestedPod=([string]$Request.pod).Trim().ToLowerInvariant()
+    if($requestedPod -and $requestedPod -ne $pod){throw "UAT_ACTION_POLICY_DENIED: $Action runtime pod is controller governed"}
+    if($requestedContainer -and $requestedContainer -ne $container){throw "UAT_ACTION_POLICY_DENIED: $Action runtime container is controller governed"}
+    $candidate=Get-CurrentCandidateSha
+    $repo=Verify-PodGitView $pod $container ([string]$Policy.repo_remote_url) $candidate
+    $expectedRepo=([string]$target.repo_path).Trim()
+    if(-not $expectedRepo -or $repo -ne $expectedRepo){throw "UAT_ACTION_POLICY_DENIED: $Action runtime repository path mismatch"}
+    return [pscustomobject]@{Target=$target;Deployment=$deployment;Pod=$pod;Container=$container;Candidate=$candidate;Repo=$repo}
 }
 
-function Get-ConsumerLifecycleBaselinePath([string]$Deployment,[string]$Container) {
-    $safe=("{0}--{1}.json" -f $Deployment,$Container)
-    return Join-Path $EvidenceDir ("consumer-lifecycle-baseline-" + $safe)
+function Invoke-ConsumerRuntimeController([string]$Pod,[string]$Container,[string]$Operation,$Payload) {
+    $controllerPath=Join-Path $PSScriptRoot 'consumer-runtime-controller.py'
+    if(-not (Test-Path -LiteralPath $controllerPath -PathType Leaf)){throw 'UAT_ENV_BLOCKED: consumer-runtime-controller.py is missing'}
+    $controllerText=[IO.File]::ReadAllText($controllerPath,[Text.Encoding]::UTF8)
+    $controllerB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($controllerText))
+    $payloadJson=$Payload|ConvertTo-Json -Depth 12 -Compress
+    $launcher="import base64,sys;code=base64.b64decode(sys.argv[1]);sys.argv=['consumer-runtime-controller.py']+sys.argv[2:];exec(compile(code,'<consumer-runtime-controller>','exec'),{'__name__':'__main__','__file__':'consumer-runtime-controller.py'})"
+    $runtime=Invoke-PodCommand $Pod $Container @('python3','-c',$launcher,$controllerB64,$Operation,$payloadJson)
+    if($runtime.ExitCode -ne 0){return $runtime}
+    $json=(@($runtime.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1)
+    if(-not $json){throw 'UAT_ENV_BLOCKED: Consumer runtime controller returned no JSON'}
+    try{$semantic=([string]$json)|ConvertFrom-Json}catch{throw 'UAT_ENV_BLOCKED: Consumer runtime controller returned invalid JSON'}
+    if([string]$semantic.kind -ne 'ConsumerRuntimeControllerResult'){throw 'UAT_ENV_BLOCKED: Consumer runtime controller semantic kind mismatch'}
+    $runtime|Add-Member -NotePropertyName Semantic -NotePropertyValue $semantic -Force
+    return $runtime
 }
 
-function Ensure-ConsumerLifecycleBaseline($Snapshot) {
-    $path=Get-ConsumerLifecycleBaselinePath ([string]$Snapshot.deployment) ([string]$Snapshot.container)
-    if(-not (Test-Path -LiteralPath $path -PathType Leaf)){
-        $json=$Snapshot | ConvertTo-Json -Depth 10
-        Write-Utf8NoBom $path ($json + "`n")
+function New-ConsumerRuntimePayload($Target,[string]$Role,[int]$Period,[int]$CalcMonth,[string]$Candidate,[string]$Repo) {
+    return [ordered]@{
+        execution_id=$ExecutionId
+        repo_path=$Repo
+        module=[string]$Target.module
+        candidate_sha=$Candidate
+        role=$Role
+        bound_period=$Period
+        calc_month=$CalcMonth
+        ledger_prefix="pvam:uat:work02:${ExecutionId}:"
+        kafka_bootstrap=[string]$Target.kafka_bootstrap
+        elite_rate_percent=[string]$Target.elite_rate_percent
     }
-    return $path
 }
 
-function Read-ConsumerLifecycleBaseline([string]$Deployment,[string]$Container) {
-    $path=Get-ConsumerLifecycleBaselinePath $Deployment $Container
-    if(-not (Test-Path -LiteralPath $path -PathType Leaf)){throw "UAT_ENV_BLOCKED: ConsumerLifecycle restore baseline missing"}
-    try{$snapshot=[IO.File]::ReadAllText($path,[Text.Encoding]::UTF8)|ConvertFrom-Json}catch{throw "UAT_ENV_BLOCKED: ConsumerLifecycle restore baseline invalid"}
-    return [pscustomobject]@{path=$path;snapshot=$snapshot}
-}
-
-function Restore-ConsumerLifecycleSnapshot($Snapshot,[bool]$Restart) {
-    if(([string]$Snapshot.namespace).ToLowerInvariant() -ne $TargetNamespace){throw "UAT_ENV_BLOCKED: ConsumerLifecycle rollback namespace mismatch"}
-    $deployment=([string]$Snapshot.deployment).ToLowerInvariant();$container=[string]$Snapshot.container
-    $envArgs=New-Object System.Collections.Generic.List[string]
-    foreach($entry in @($Snapshot.env_entries)){
-        $name=[string]$entry.name
-        if([bool]$entry.exists){$envArgs.Add(("{0}={1}" -f $name,[string]$entry.value))}else{$envArgs.Add(("{0}-" -f $name))}
-    }
-    $setArgs=@('--kubeconfig',$Kubeconfig,'set','env',("deployment/{0}" -f $deployment),'-n',$TargetNamespace,("--containers={0}" -f $container)) + @($envArgs.ToArray()) + @('--request-timeout=30s')
-    $set=Invoke-Kubectl $setArgs
-    if($set.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerLifecycle rollback/restore env failed"}
-    [int]$replicas=$Snapshot.replicas
-    if($replicas -lt 0 -or $replicas -gt 100){throw "UAT_ENV_BLOCKED: ConsumerLifecycle rollback/restore replica baseline invalid"}
-    $scale=Invoke-Kubectl @('--kubeconfig',$Kubeconfig,'scale',("deployment/{0}" -f $deployment),("--replicas={0}" -f $replicas),'-n',$TargetNamespace,'--request-timeout=30s')
-    if($scale.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerLifecycle rollback/restore scale failed"}
-    if($Restart){
-        $restart=Invoke-Kubectl @('--kubeconfig',$Kubeconfig,'rollout','restart',("deployment/{0}" -f $deployment),'-n',$TargetNamespace,'--request-timeout=30s')
-        if($restart.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerLifecycle rollback/restore restart failed"}
-    }
-    $roll=Invoke-Kubectl @('--kubeconfig',$Kubeconfig,'rollout','status',("deployment/{0}" -f $deployment),'-n',$TargetNamespace,'--timeout=300s','--request-timeout=30s')
-    if($roll.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerLifecycle rollback/restore rollout failed"}
+function Get-ConsumerRuntimeLogs([string]$Pod,[string]$Container) {
+    $runtime=Invoke-ConsumerRuntimeController $Pod $Container 'logs' ([ordered]@{execution_id=$ExecutionId})
+    if($runtime.ExitCode -ne 0){throw 'UAT_ENV_BLOCKED: Consumer runtime logs unavailable'}
+    return $runtime.Semantic
 }
 
 # V19-INVOKE-CONSUMERLIFECYCLE
 function Invoke-ConsumerLifecycle($Request,$Policy) {
     $op=([string]$Request.operation).Trim().ToLowerInvariant()
-    $deployment=([string]$Request.deployment).Trim().ToLowerInvariant()
-    $container=([string]$Request.container).Trim()
-    if(-not $deployment -or -not $container){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle requires exact deployment and container"}
-
-    # All target/scope/container/pod checks happen before any mutation.
-    $target=Get-ConsumerLifecycleTarget $Policy $deployment $container
+    $requestedDeployment=([string]$Request.deployment).Trim().ToLowerInvariant()
+    $requestedContainer=([string]$Request.container).Trim()
+    $target=Get-ConsumerLifecycleTarget $Policy $requestedDeployment $requestedContainer
+    $deployment=([string]$target.host_deployment).Trim().ToLowerInvariant()
+    $container=([string]$target.container).Trim()
     Assert-ResourceAllowed "deployment" $deployment
-    $before=Get-DeploymentGovernedEnv $deployment $container
-    if([string]$before.container -ne $container){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle exact container mismatch"}
     Assert-ConsumerLifecyclePodPrefixCoveredByScope ([string]$target.pod_name_prefix)
-    $selectedPods=@(Get-ConsumerLifecycleSelectedPods $deployment ([string]$target.pod_name_prefix))
+    $selectedPods=@(Get-ConsumerLifecycleSelectedPods $deployment $container ([string]$target.pod_name_prefix))
+    $pod=$selectedPods[0]
+    $podObject=Get-KubectlJson @('--kubeconfig',$Kubeconfig,'get','pod',$pod,'-n',$TargetNamespace) "UAT_ENV_BLOCKED: cannot read Consumer runtime host pod"
+    $podUid=([string]$podObject.metadata.uid).Trim()
+    if(-not $podUid){throw "UAT_ENV_BLOCKED: Consumer runtime host pod UID is missing"}
+    $candidate=Get-CurrentCandidateSha
+    $remote=([string]$Policy.repo_remote_url).Trim()
+    if(-not $remote){throw "UAT_ACTION_POLICY_DENIED: repo_remote_url is missing"}
+    $repo=Verify-PodGitView $pod $container $remote $candidate
+    $expectedRepo=([string]$target.repo_path).Trim()
+    if(-not $expectedRepo -or $repo -ne $expectedRepo){throw "UAT_ACTION_POLICY_DENIED: Consumer runtime repository path mismatch"}
+    $runtimeMode='scheduler-pod-temporary-process'
 
     if($op -in @('bind-primary','bind-secondary')){
-        Assert-RequiredTokens @('deploy','restart','scale') 'ConsumerLifecycle'
+        Assert-RequiredTokens @('exec') 'ConsumerLifecycle'
         if($Request.PSObject.Properties.Name -contains 'calc_month'){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle calc_month is controller governed"}
         $ctx=Get-StageUatPeriodContext
-        $period=if($op -eq 'bind-primary'){[int]$ctx.Primary}else{[int]$ctx.Secondary}
-        $calcMonth=([string]$before.env['PVAM_CALC_MONTH']).Trim()
-        if($calcMonth -notmatch '^[0-9]{6}$'){throw "UAT_ENV_BLOCKED: ConsumerLifecycle governed PVAM_CALC_MONTH must be YYYYMM"}
+        $role=if($op -eq 'bind-primary'){'primary'}else{'secondary'}
+        $period=if($role -eq 'primary'){[int]$ctx.Primary}else{[int]$ctx.Secondary}
+        $calcProperty=@($target.calc_month_by_role.PSObject.Properties|Where-Object{$_.Name -eq $role}|Select-Object -First 1)[0]
+        if(-not $calcProperty){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle calc month policy missing for role $role"}
+        $calcMonth=([string]$calcProperty.Value).Trim()
+        if($calcMonth -notmatch '^[0-9]{6}$'){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle governed calc month must be YYYYMM"}
         [int]$month=[int]$calcMonth.Substring(4,2)
-        if($month -lt 1 -or $month -gt 12){throw "UAT_ENV_BLOCKED: ConsumerLifecycle governed PVAM_CALC_MONTH month invalid"}
-        [int]$replicas=$before.deployment_object.spec.replicas
-        if($replicas -lt 1 -or $replicas -gt 10){throw "UAT_ENV_BLOCKED: ConsumerLifecycle governed replicas must be 1..10"}
+        if($month -lt 1 -or $month -gt 12){throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle governed calc month is invalid"}
         $ledgerPrefix="pvam:uat:work02:${ExecutionId}:"
-        $rollbackSnapshot=New-ConsumerLifecycleSnapshot $deployment $container ([string]$target.pod_name_prefix)
-        $baselinePath=Ensure-ConsumerLifecycleBaseline $rollbackSnapshot
-        $mutationAttempted=$false
-        try{
-            $mutationAttempted=$true
-            $setArgs=@('--kubeconfig',$Kubeconfig,'set','env',("deployment/{0}" -f $deployment),'-n',$TargetNamespace,("--containers={0}" -f $container),("PVAM_BOUND_PERIOD={0}" -f $period),("PVAM_CALC_MONTH={0}" -f $calcMonth),("PVAM_LEDGER_KEY_PREFIX={0}" -f $ledgerPrefix),'--request-timeout=30s')
-            $set=Invoke-Kubectl $setArgs;if($set.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerLifecycle set env failed"}
-            $scale=Invoke-Kubectl @('--kubeconfig',$Kubeconfig,'scale',("deployment/{0}" -f $deployment),("--replicas={0}" -f $replicas),'-n',$TargetNamespace,'--request-timeout=30s');if($scale.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerLifecycle scale-up failed"}
-            $restart=Invoke-Kubectl @('--kubeconfig',$Kubeconfig,'rollout','restart',("deployment/{0}" -f $deployment),'-n',$TargetNamespace,'--request-timeout=30s');if($restart.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerLifecycle rollout restart failed"}
-            $roll=Invoke-Kubectl @('--kubeconfig',$Kubeconfig,'rollout','status',("deployment/{0}" -f $deployment),'-n',$TargetNamespace,'--timeout=300s','--request-timeout=30s');if($roll.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerLifecycle rollout failed: $($roll.Output -join ' ')"}
-            $state=Get-DeploymentConsumerState $deployment $container
-            if([string]$state.container -ne $container){throw "UAT_ENV_BLOCKED: ConsumerLifecycle state resolved a different container"}
-            if([string]$state.env['PVAM_BOUND_PERIOD'] -ne [string]$period -or [string]$state.env['PVAM_CALC_MONTH'] -ne $calcMonth -or [string]$state.env['PVAM_LEDGER_KEY_PREFIX'] -ne $ledgerPrefix){throw "UAT_ENV_BLOCKED: ConsumerLifecycle deployment env verification failed"}
-            foreach($pod in @($state.pods)){
-                $podName=([string]$pod.name).ToLowerInvariant()
-                if(-not $podName.StartsWith(([string]$target.pod_name_prefix),[StringComparison]::Ordinal)){throw "UAT_RESOURCE_SCOPE_DENIED: post-rollout pod outside versioned prefix"}
-                Assert-ResourceAllowed "pod" $podName
-            }
-            $candidate=Get-CurrentCandidateSha
-            $remote=([string]$Policy.repo_remote_url).Trim();if(-not $remote){throw "UAT_ACTION_POLICY_DENIED: repo_remote_url is missing"}
-            $podHeads=New-Object System.Collections.Generic.List[object]
-            $matching=0
-            foreach($pod in @($state.pods)){
-                $repo=Verify-PodGitView ([string]$pod.name) $container $remote $candidate
-                $podHeads.Add([pscustomobject]@{pod=[string]$pod.name;repo=$repo;head=$candidate})
-                foreach($proc in @($pod.processes)){if([string]$proc.bound_period -eq [string]$period -and [string]$proc.calc_month -eq $calcMonth -and [string]$proc.ledger_prefix -eq $ledgerPrefix){$matching++}}
-            }
-            if($matching -lt 1){throw "UAT_ENV_BLOCKED: ConsumerLifecycle could not prove a running PvEventConsumer PID with expected bound period/calc month/ledger prefix"}
-            $semantic=[pscustomobject]@{kind='ConsumerLifecycleResult';operation=$op;deployment=$deployment;container=$container;pod_name_prefix=[string]$target.pod_name_prefix;bound_period=$period;calc_month=$calcMonth;ledger_prefix=$ledgerPrefix;matching_process_count=$matching;pods=@($state.pods);available_replicas=[int]$state.available_replicas;candidate_sha=$candidate;pod_repo_heads=$podHeads.ToArray();baseline_path=$baselinePath}
-            return [pscustomobject]@{ExitCode=0;Output=@("operation=$op","deployment=$deployment","container=$container","bound_period=$period","matching_process_count=$matching","candidate_sha=$candidate");Semantic=$semantic}
+        $payload=New-ConsumerRuntimePayload $target $role $period ([int]$calcMonth) $candidate $repo
+        $runtime=Invoke-ConsumerRuntimeController $pod $container 'replace' $payload
+        if($runtime.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerLifecycle runtime replace failed"}
+        $state=$runtime.Semantic
+        if(-not [bool]$state.running -or [string]$state.role -ne $role -or [string]$state.bound_period -ne [string]$period -or [string]$state.calc_month -ne $calcMonth -or [string]$state.candidate_sha -ne $candidate -or [string]$state.ledger_prefix -ne $ledgerPrefix){
+            throw "UAT_ENV_BLOCKED: ConsumerLifecycle runtime binding verification failed"
         }
-        catch{
-            $original=$_.Exception.Message
-            if($mutationAttempted){
-                try{Restore-ConsumerLifecycleSnapshot $rollbackSnapshot $false}
-                catch{throw "UAT_ENV_BLOCKED: ConsumerLifecycle rollback failed after bind error: original=$original rollback=$($_.Exception.Message)"}
-            }
-            throw $original
-        }
+        $podHeads=@([pscustomobject]@{pod=$pod;repo=$repo;head=$candidate})
+        $semantic=[pscustomobject]@{kind='ConsumerLifecycleResult';runtime_mode='scheduler-pod-temporary-process';operation=$op;deployment=$deployment;container=$container;pod=$pod;pod_uid=$podUid;pod_name_prefix=[string]$target.pod_name_prefix;bound_period=$period;calc_month=$calcMonth;ledger_prefix=$ledgerPrefix;matching_process_count=1;candidate_sha=$candidate;pod_repo_heads=$podHeads;runtime_controller_operation=[string]$state.operation;process_pid=[int]$state.pid}
+        return [pscustomobject]@{ExitCode=0;Output=@("runtime_mode=$runtimeMode","operation=$op","host_deployment=$deployment","pod=$pod","container=$container","bound_period=$period","matching_process_count=1","candidate_sha=$candidate");Semantic=$semantic}
     }
     elseif($op -eq 'status'){
         Assert-RequiredTokens @('exec') 'ConsumerLifecycle'
-        $state=Get-DeploymentConsumerState $deployment $container
-        if([string]$state.container -ne $container){throw "UAT_ENV_BLOCKED: ConsumerLifecycle status resolved a different container"}
-        $semantic=[pscustomobject]@{kind='ConsumerLifecycleResult';operation='status';deployment=$deployment;container=$container;pod_name_prefix=[string]$target.pod_name_prefix;bound_period=[string]$state.env['PVAM_BOUND_PERIOD'];calc_month=[string]$state.env['PVAM_CALC_MONTH'];ledger_prefix=[string]$state.env['PVAM_LEDGER_KEY_PREFIX'];pods=@($state.pods);available_replicas=[int]$state.available_replicas}
-        return [pscustomobject]@{ExitCode=0;Output=@("operation=status","deployment=$deployment","container=$container");Semantic=$semantic}
+        $runtime=Invoke-ConsumerRuntimeController $pod $container 'status' ([ordered]@{execution_id=$ExecutionId})
+        if($runtime.ExitCode -ne 0 -or -not [bool]$runtime.Semantic.running){throw "UAT_ENV_BLOCKED: governed PvEventConsumer is not running"}
+        $state=$runtime.Semantic
+        $semantic=[pscustomobject]@{kind='ConsumerLifecycleResult';runtime_mode='scheduler-pod-temporary-process';operation='status';deployment=$deployment;container=$container;pod=$pod;pod_uid=$podUid;pod_name_prefix=[string]$target.pod_name_prefix;bound_period=[int]$state.bound_period;calc_month=[int]$state.calc_month;ledger_prefix=[string]$state.ledger_prefix;matching_process_count=1;candidate_sha=[string]$state.candidate_sha;pod_repo_heads=@([pscustomobject]@{pod=$pod;repo=$repo;head=$candidate});process_pid=[int]$state.pid}
+        return [pscustomobject]@{ExitCode=0;Output=@("runtime_mode=$runtimeMode","operation=status","pod=$pod","container=$container","matching_process_count=1");Semantic=$semantic}
     }
     elseif($op -eq 'restore'){
-        Assert-RequiredTokens @('deploy','restart','scale') 'ConsumerLifecycle'
-        $baselineRecord=Read-ConsumerLifecycleBaseline $deployment $container
-        $snapshot=$baselineRecord.snapshot
-        if(([string]$snapshot.deployment).ToLowerInvariant() -ne $deployment -or [string]$snapshot.container -ne $container -or ([string]$snapshot.pod_name_prefix).ToLowerInvariant() -ne ([string]$target.pod_name_prefix).ToLowerInvariant()){
-            throw "UAT_ENV_BLOCKED: ConsumerLifecycle restore baseline target mismatch"
-        }
-        Restore-ConsumerLifecycleSnapshot $snapshot $true
-        $after=Get-DeploymentGovernedEnv $deployment $container
-        if([int]$after.deployment_object.spec.replicas -ne [int]$snapshot.replicas){throw "UAT_ENV_BLOCKED: ConsumerLifecycle restore replica verification failed"}
-        foreach($entry in @($snapshot.env_entries)){
-            $name=[string]$entry.name;$exists=$after.env_exists.ContainsKey($name)
-            if([bool]$entry.exists){if(-not $exists -or [string]$after.env[$name] -ne [string]$entry.value){throw "UAT_ENV_BLOCKED: ConsumerLifecycle restore env verification failed for $name"}}
-            elseif($exists){throw "UAT_ENV_BLOCKED: ConsumerLifecycle restore env presence verification failed for $name"}
-        }
-        $bytes=[Text.Encoding]::UTF8.GetBytes([IO.File]::ReadAllText($baselineRecord.path,[Text.Encoding]::UTF8));$sha=[Security.Cryptography.SHA256]::Create();try{$baselineSha=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
-        $semantic=[pscustomobject]@{kind='ConsumerLifecycleResult';operation='restore';deployment=$deployment;container=$container;pod_name_prefix=[string]$target.pod_name_prefix;restored=$true;replicas=[int]$snapshot.replicas;baseline_sha256=$baselineSha}
-        return [pscustomobject]@{ExitCode=0;Output=@("operation=restore","deployment=$deployment","container=$container","baseline_sha256=$baselineSha");Semantic=$semantic}
+        Assert-RequiredTokens @('exec') 'ConsumerLifecycle'
+        $runtime=Invoke-ConsumerRuntimeController $pod $container 'stop' ([ordered]@{execution_id=$ExecutionId})
+        if($runtime.ExitCode -ne 0 -or -not [bool]$runtime.Semantic.stopped){throw "UAT_ENV_BLOCKED: ConsumerLifecycle runtime stop failed"}
+        $baselineSha=Get-TextSha256 "runtime_mode=$runtimeMode;execution_id=$ExecutionId;baseline=consumer-absent"
+        $semantic=[pscustomobject]@{kind='ConsumerLifecycleResult';runtime_mode='scheduler-pod-temporary-process';operation='restore';deployment=$deployment;container=$container;pod=$pod;pod_uid=$podUid;pod_name_prefix=[string]$target.pod_name_prefix;restored=$true;matching_process_count=0;baseline_sha256=$baselineSha}
+        return [pscustomobject]@{ExitCode=0;Output=@("runtime_mode=$runtimeMode","operation=restore","pod=$pod","container=$container","matching_process_count=0","baseline_sha256=$baselineSha");Semantic=$semantic}
     }
     throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle operation must be bind-primary, bind-secondary, status, or restore"
 }
@@ -845,7 +786,7 @@ function Get-LatestConsumerLifecycleSemantic() {
         $fields=Read-ProxyEvidenceFields $file.FullName
         if([string]$fields['action'] -ne 'ConsumerLifecycle' -or [string]$fields['outcome'] -ne 'SUCCESS' -or -not $fields.ContainsKey('semantic_json_b64')){continue}
         try{$raw=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$fields['semantic_json_b64']));$sem=$raw|ConvertFrom-Json}catch{continue}
-        if([string]$sem.kind -eq 'ConsumerLifecycleResult' -and ([string]$sem.operation).StartsWith('bind-',[StringComparison]::OrdinalIgnoreCase)){$latest=$sem}
+        if([string]$sem.kind -eq 'ConsumerLifecycleResult' -and [string]$sem.runtime_mode -eq 'scheduler-pod-temporary-process' -and ([string]$sem.operation).StartsWith('bind-',[StringComparison]::OrdinalIgnoreCase)){$latest=$sem}
     }
     return $latest
 }
@@ -866,9 +807,9 @@ function Invoke-ConsumerObserve($Request,$Policy) {
     $observeBoundRole=Get-ScenarioPolicyValue $Policy.scenario_observe_bound_role $scenario 'scenario_observe_bound_role'
     $latestLife=Get-LatestConsumerLifecycleSemantic
     if(-not $latestLife -or ([string]$latestLife.operation).ToLowerInvariant() -ne ("bind-{0}" -f $observeBoundRole)){throw "UAT_ENV_BLOCKED: ConsumerObserve required Consumer binding mismatch for scenario $scenario expected=bind-$observeBoundRole"}
-    $pod=([string]$Request.pod).Trim();$container=([string]$Request.container).Trim();Assert-ResourceAllowed 'pod' $pod
-    $candidate=Get-CurrentCandidateSha
-    $repo=Verify-PodGitView $pod $container ([string]$Policy.repo_remote_url) $candidate
+    $runtimeTarget=Resolve-ConsumerRuntimeTarget $Request $Policy 'ConsumerObserve'
+    $pod=[string]$runtimeTarget.Pod;$container=[string]$runtimeTarget.Container;$candidate=[string]$runtimeTarget.Candidate;$repo=[string]$runtimeTarget.Repo
+    if(([string]$latestLife.pod).ToLowerInvariant() -ne $pod -or [string]$latestLife.container -ne $container){throw 'UAT_ENV_BLOCKED: ConsumerObserve binding refers to a replaced scheduler Pod'}
     $sourceScenario=if($isReplay){'future-period'}else{$scenario}
     $kafka=Get-KafkaScenarioSemantic $sourceScenario;if(-not $kafka){throw "UAT_ACTION_POLICY_DENIED: ConsumerObserve requires prior controller-owned KafkaScenarioProduce evidence for scenario $sourceScenario"}
     $records=@($kafka.deliveries)
@@ -936,27 +877,19 @@ try:
 finally:e.close()
 print(json.dumps({'kind':'ConsumerRuntimeObservation','observations':out,'exceptions':exceptions},sort_keys=True))
 '@
-    $codeB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($code));$launcher="import base64,sys;exec(compile(base64.b64decode(sys.argv[1]),'<consumer-observe>','exec'))"
-    $runtime=Invoke-PodCommand $pod $container @('python3','-c',$launcher,$codeB64,$inputB64,$ledgerPrefix,$scenario,$ExecutionId,$exceptionTopic,[string]$tail,[string]$timeout,[string]$ctx.Primary,[string]$ctx.Secondary)
+    $runtime=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @($inputB64,$ledgerPrefix,$scenario,$ExecutionId,$exceptionTopic,[string]$tail,[string]$timeout,[string]$ctx.Primary,[string]$ctx.Secondary)
     if($runtime.ExitCode -ne 0){return $runtime}
     $json=(@($runtime.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $json){throw "UAT_ENV_BLOCKED: ConsumerObserve runtime observation missing"};$obs=([string]$json)|ConvertFrom-Json
     if(-not $kafka.business_snapshot_before -or -not [string]$kafka.uat_user_id){throw 'UAT_ENV_BLOCKED: controller business snapshot before delivery is missing'}
     $businessSnapshotBefore=$kafka.business_snapshot_before
-    $businessSnapshotAfter=Invoke-UserStatsSnapshot $pod $container $repo ([string]$kafka.uat_user_id) @([int]$ctx.Primary,[int]$ctx.Secondary)
+    $businessSnapshotAfter=Invoke-UserStatsSnapshot $pod $container $repo $Policy ([string]$kafka.uat_user_id) @([int]$ctx.Primary,[int]$ctx.Secondary)
     $primaryBefore=Get-UserStatsPeriodSnapshot $businessSnapshotBefore ([int]$ctx.Primary);$primaryAfter=Get-UserStatsPeriodSnapshot $businessSnapshotAfter ([int]$ctx.Primary)
     $secondaryBefore=Get-UserStatsPeriodSnapshot $businessSnapshotBefore ([int]$ctx.Secondary);$secondaryAfter=Get-UserStatsPeriodSnapshot $businessSnapshotAfter ([int]$ctx.Secondary)
     $primaryBusinessDeltaUnits=[long]$primaryAfter.pv-[long]$primaryBefore.pv;$secondaryBusinessDeltaUnits=[long]$secondaryAfter.pv-[long]$secondaryBefore.pv
 
-    $logs=Invoke-Kubectl @('--kubeconfig',$Kubeconfig,'logs',$pod,'-n',$TargetNamespace,'--tail=400','--request-timeout=30s')
-    if($container){$logs=Invoke-Kubectl @('--kubeconfig',$Kubeconfig,'logs',$pod,'-n',$TargetNamespace,'-c',$container,'--tail=400','--request-timeout=30s')}
-    if($logs.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerObserve consumer logs unavailable"}
-    $logText=($logs.Output -join "`n");$previousLogText='';$previousLogLines=0
-    if($scenario -eq 'drain-sentinel'){
-        $previousArgs=@('--kubeconfig',$Kubeconfig,'logs',$pod,'-n',$TargetNamespace,'--previous','--tail=400','--request-timeout=30s')
-        if($container){$previousArgs=@('--kubeconfig',$Kubeconfig,'logs',$pod,'-n',$TargetNamespace,'-c',$container,'--previous','--tail=400','--request-timeout=30s')}
-        $previousLogs=Invoke-Kubectl $previousArgs;if($previousLogs.ExitCode -eq 0){$previousLogText=($previousLogs.Output -join "`n");$previousLogLines=@($previousLogs.Output).Count}
-    }
-    $combinedLogText=if($previousLogText){$logText+"`n"+$previousLogText}else{$logText};$drainDetected=$combinedLogText.Contains('PERIOD DRAIN COMPLETE')
+    $runtimeLogs=Get-ConsumerRuntimeLogs $pod $container
+    $combinedLogText=(@($runtimeLogs.lines) -join "`n")
+    $drainDetected=$combinedLogText.Contains('PERIOD DRAIN COMPLETE')
 
     $positive=(@($Policy.scenarios_require_dispatched_three_chain|ForEach-Object{[string]$_}) -contains $scenario) -or $isReplay
     if($positive){foreach($row in @($obs.observations)){if([string]$row.delivery_status -ne 'DISPATCHED'){throw "UAT_ENV_BLOCKED: delivery ledger is not DISPATCHED for $($row.identity)"};foreach($ns in @('userstats','placement','elite')){if(-not [bool]$row.idempotency_namespaces.$ns){throw "UAT_ENV_BLOCKED: missing $ns idempotency done key for $($row.identity)"}}}}
@@ -1042,8 +975,8 @@ print(json.dumps({'kind':'ConsumerRuntimeObservation','observations':out,'except
     if(-not $businessValueProofOk){throw "UAT_ENV_BLOCKED: controller business value delta proof failed for scenario $scenario primary_delta=$primaryBusinessDeltaUnits secondary_delta=$secondaryBusinessDeltaUnits"}
 
     if($scenario -eq 'drain-sentinel' -and -not $drainDetected){throw 'UAT_ENV_BLOCKED: PERIOD DRAIN COMPLETE log evidence missing'}
-    $totalLogLines=@($logs.Output).Count+$previousLogLines
-    $semantic=[pscustomobject]@{kind='ConsumerObserveResult';scenario=$scenario;source_scenario=$sourceScenario;delivery_status=($(if($positive){'DISPATCHED'}else{'scenario-specific'}));observations=@($obs.observations);exceptions=@($obs.exceptions);expected_exception_reason=$expectedReason;offset_expectation=$offsetExpectation;offset_semantics_ok=$offsetOk;no_redis_side_effects_ok=$noRedisSideEffectsOk;pause_barrier_ok=$pauseBarrierOk;future_replay_ok=$futureReplayOk;cross_period_refund_ok=$crossPeriodRefundOk;primary_order_amount_units=$primaryOrderAmountUnits;refund_original_amount_units=$refundOriginalAmountUnits;primary_refund_idempotency_absent=$primaryRefundIdempotencyAbsent;duplicate_no_double_ok=$duplicateNoDoubleOk;duplicate_delivery_count=$duplicateDeliveryCount;business_value_proof_ok=$businessValueProofOk;business_snapshot_before=$businessSnapshotBefore;business_snapshot_after=$businessSnapshotAfter;primary_business_delta_units=$primaryBusinessDeltaUnits;secondary_business_delta_units=$secondaryBusinessDeltaUnits;duplicate_business_delta_units=$duplicateBusinessDeltaUnits;idempotency_namespaces=@('userstats','placement','elite');log_line_count=$totalLogLines;previous_log_line_count=$previousLogLines;drain_detected=$drainDetected;consumer_log_sha256=(Get-TextSha256 $combinedLogText);candidate_sha=$candidate;pod_repo=$repo}
+    $totalLogLines=[int]$runtimeLogs.line_count
+    $semantic=[pscustomobject]@{kind='ConsumerObserveResult';runtime_mode='scheduler-pod-temporary-process';scenario=$scenario;source_scenario=$sourceScenario;delivery_status=($(if($positive){'DISPATCHED'}else{'scenario-specific'}));observations=@($obs.observations);exceptions=@($obs.exceptions);expected_exception_reason=$expectedReason;offset_expectation=$offsetExpectation;offset_semantics_ok=$offsetOk;no_redis_side_effects_ok=$noRedisSideEffectsOk;pause_barrier_ok=$pauseBarrierOk;future_replay_ok=$futureReplayOk;cross_period_refund_ok=$crossPeriodRefundOk;primary_order_amount_units=$primaryOrderAmountUnits;refund_original_amount_units=$refundOriginalAmountUnits;primary_refund_idempotency_absent=$primaryRefundIdempotencyAbsent;duplicate_no_double_ok=$duplicateNoDoubleOk;duplicate_delivery_count=$duplicateDeliveryCount;business_value_proof_ok=$businessValueProofOk;business_snapshot_before=$businessSnapshotBefore;business_snapshot_after=$businessSnapshotAfter;primary_business_delta_units=$primaryBusinessDeltaUnits;secondary_business_delta_units=$secondaryBusinessDeltaUnits;duplicate_business_delta_units=$duplicateBusinessDeltaUnits;idempotency_namespaces=@('userstats','placement','elite');log_line_count=$totalLogLines;previous_log_line_count=0;drain_detected=$drainDetected;consumer_log_sha256=(Get-TextSha256 $combinedLogText);candidate_sha=$candidate;pod=$pod;container=$container;pod_repo=$repo}
     return [pscustomobject]@{ExitCode=0;Output=@("scenario=$scenario","observations=$(@($obs.observations).Count)","exceptions=$(@($obs.exceptions).Count)","offset_expectation=$offsetExpectation","no_redis_side_effects_ok=$noRedisSideEffectsOk","pause_barrier_ok=$pauseBarrierOk","future_replay_ok=$futureReplayOk","cross_period_refund_ok=$crossPeriodRefundOk","duplicate_no_double_ok=$duplicateNoDoubleOk","business_value_proof_ok=$businessValueProofOk","primary_business_delta_units=$primaryBusinessDeltaUnits","secondary_business_delta_units=$secondaryBusinessDeltaUnits","candidate_sha=$candidate");Semantic=$semantic}
 }
 function Test-GitChangedPathAllowed([string]$Path, $Policy) {
@@ -1187,7 +1120,7 @@ function Assert-SafeProducerValue([string]$Value, [string]$Name, [bool]$AllowEmp
     if ($Value.Length -gt 256 -or $Value -match '[\x00\r\n]') { throw "UAT_ACTION_POLICY_DENIED: invalid $Name" }
 }
 
-function Invoke-UserStatsSnapshot($Pod,$Container,[string]$Repo,[string]$UserId,[int[]]$Periods) {
+function Invoke-UserStatsSnapshot($Pod,$Container,[string]$Repo,$Policy,[string]$UserId,[int[]]$Periods) {
     Assert-SafeProducerValue $UserId 'user_id'
     if(-not $Repo){throw 'UAT_ENV_BLOCKED: UserStats snapshot requires verified repository root'}
     $spec=[ordered]@{repo=$Repo;user_id=$UserId;periods=@($Periods|ForEach-Object{[int]$_})}
@@ -1208,9 +1141,7 @@ for period in periods:
         out[str(period)]={'exists':False,'pv':0,'pv_type':'int','amount_encoding_version':None,'pk':pk}
 print(json.dumps({'kind':'UserStatsSnapshot','user_id':user,'periods':out},sort_keys=True))
 '@
-    $codeB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($code))
-    $launcher="import base64,sys;exec(compile(base64.b64decode(sys.argv[1]),'<userstats-snapshot>','exec'))"
-    $r=Invoke-PodCommand $Pod $Container @('python3','-c',$launcher,$codeB64,$specB64)
+    $r=Invoke-RuntimePythonCommand $Pod $Container $Repo $Policy $code @($specB64)
     if($r.ExitCode -ne 0){throw 'UAT_ENV_BLOCKED: UserStats business snapshot command failed'}
     $json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1)
     if(-not $json){throw 'UAT_ENV_BLOCKED: UserStats business snapshot structured result missing'}
@@ -1235,7 +1166,7 @@ function Test-UserStatsPeriodStateEqual($Before,$After) {
     return ([bool]$Before.exists -eq [bool]$After.exists -and [long]$Before.pv -eq [long]$After.pv -and [string]$Before.amount_encoding_version -eq [string]$After.amount_encoding_version)
 }
 
-function Invoke-ControllerUatProducer($Pod,$Container,$Spec) {
+function Invoke-ControllerUatProducer($Pod,$Container,[string]$Repo,$Policy,$Spec) {
     $specJson=$Spec|ConvertTo-Json -Depth 20 -Compress
     $specB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($specJson))
     $code=@'
@@ -1295,17 +1226,19 @@ for item in plan:
     m=reports[0][1]
     print(json.dumps({'topic':item['topic'],'partition':m.partition(),'offset':m.offset(),'key':item['key'],'payload':item['payload'],'payload_sha256':hashlib.sha256(encoded).hexdigest(),'sent_at':datetime.now(timezone.utc).isoformat()},ensure_ascii=False,separators=(',',':')))
 '@
-    $codeB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($code));$launcher="import base64,sys;exec(compile(base64.b64decode(sys.argv[1]),'<controller-uat-producer>','exec'))"
-    return Invoke-PodCommand $Pod $Container @('python3','-c',$launcher,$codeB64,$specB64)
+    return Invoke-RuntimePythonCommand $Pod $Container $Repo $Policy $code @($specB64)
 }
 
 function Invoke-KafkaScenarioProduce($Request, $Policy) {
     Assert-RequiredTokens @("exec", "test-data-write") "KafkaScenarioProduce"
-    $pod=([string]$Request.pod).Trim();$container=([string]$Request.container).Trim();$scenario=([string]$Request.scenario).Trim()
+    $scenario=([string]$Request.scenario).Trim()
     if(@($Policy.kafka_scenarios|ForEach-Object{[string]$_}) -notcontains $scenario){throw 'UAT_ACTION_POLICY_DENIED: unsupported Kafka UAT scenario'}
     if($Request.PSObject.Properties.Name -contains 'period_role'){throw 'UAT_ACTION_POLICY_DENIED: KafkaScenarioProduce period_role is controller-owned'}
     $periodRole=Get-ScenarioPolicyValue $Policy.scenario_period_role $scenario 'scenario_period_role';$requiredBoundRole=Get-ScenarioPolicyValue $Policy.scenario_required_bound_role $scenario 'scenario_required_bound_role';$latestLife=Get-LatestConsumerLifecycleSemantic
     if(-not $latestLife -or ([string]$latestLife.operation).ToLowerInvariant() -ne ("bind-{0}" -f $requiredBoundRole)){throw "UAT_ENV_BLOCKED: scenario required Consumer binding mismatch for $scenario expected=bind-$requiredBoundRole"}
+    $runtimeTarget=Resolve-ConsumerRuntimeTarget $Request $Policy 'KafkaScenarioProduce'
+    $pod=[string]$runtimeTarget.Pod;$container=[string]$runtimeTarget.Container;$repo=[string]$runtimeTarget.Repo
+    if(([string]$latestLife.pod).ToLowerInvariant() -ne $pod -or [string]$latestLife.container -ne $container){throw 'UAT_ENV_BLOCKED: KafkaScenarioProduce binding refers to a replaced scheduler Pod'}
     $ctx=Get-StageUatPeriodContext;$period=if($periodRole -eq 'secondary'){[int]$ctx.Secondary}else{[int]$ctx.Primary};if($scenario -eq 'cross-period-refund' -and [int]$ctx.Secondary -ne [int]$ctx.Primary+1){throw 'UAT_ACTION_POLICY_DENIED: cross-period-refund requires adjacent stage periods'}
     $hash=Get-TextSha256 $ExecutionId;$seq=[int](([Convert]::ToUInt32($hash.Substring(0,8),16)%900000)+1000);if($Request.PSObject.Properties.Name -contains 'seq'){$tmp=0;if(-not [int]::TryParse(([string]$Request.seq),[ref]$tmp)-or $tmp -lt 1 -or $tmp -gt 2000000000){throw 'UAT_ACTION_POLICY_DENIED: invalid Kafka seq'};$seq=$tmp}
     $marker="uat-$ExecutionId-";$orderId=([string]$Request.order_id).Trim();if(-not $orderId){$orderId="$marker$scenario-$seq"};if(-not $orderId.StartsWith($marker,[StringComparison]::Ordinal)){throw 'UAT_ACTION_POLICY_DENIED: order_id must use durable execution marker'}
@@ -1314,10 +1247,9 @@ function Invoke-KafkaScenarioProduce($Request, $Policy) {
     foreach($name in @('user_id','bv','drift_bv')){Assert-SafeProducerValue ([string]$spec[$name]) $name};foreach($name in @('amount','approved_at','invalid_case')){if($null -ne $spec[$name]){Assert-SafeProducerValue ([string]$spec[$name]) $name}}
     foreach($name in @('original_order_id','refund_order_id')){if($spec[$name]){Assert-SafeProducerValue ([string]$spec[$name]) $name;if(-not ([string]$spec[$name]).StartsWith($marker,[StringComparison]::Ordinal)){throw "UAT_ACTION_POLICY_DENIED: $name must use durable execution marker"}}}
     if($scenario -eq 'cross-period-refund' -and -not $spec.refund_order_id){$spec.refund_order_id="$marker$scenario-refund-$($seq+1)"}
-    $repo=Get-PodRepoRoot $pod $container $Policy
-    $businessSnapshotBefore=Invoke-UserStatsSnapshot $pod $container $repo ([string]$spec.user_id) @([int]$ctx.Primary,[int]$ctx.Secondary)
-    $r=Invoke-ControllerUatProducer $pod $container $spec;if($r.ExitCode -ne 0){return $r};$allOutput=New-Object System.Collections.Generic.List[string];foreach($line in @($r.Output)){$allOutput.Add([string]$line)}
-    $futureGuardId='';if($scenario -eq 'future-period'){$futureGuardId="$marker"+"future-period-guard-$seq";$guardSpec=[ordered]@{scenario='order';period=[int]$ctx.Primary;seq=$seq+900001;order_id=$futureGuardId;user_id=[string]$spec.user_id;bv='0';partition=$selectedPartition};$guard=Invoke-ControllerUatProducer $pod $container $guardSpec;if($guard.ExitCode -ne 0){throw 'UAT_ENV_BLOCKED: future-period guard delivery failed'};foreach($line in @($guard.Output)){$allOutput.Add([string]$line)}}
+    $businessSnapshotBefore=Invoke-UserStatsSnapshot $pod $container $repo $Policy ([string]$spec.user_id) @([int]$ctx.Primary,[int]$ctx.Secondary)
+    $r=Invoke-ControllerUatProducer $pod $container $repo $Policy $spec;if($r.ExitCode -ne 0){return $r};$allOutput=New-Object System.Collections.Generic.List[string];foreach($line in @($r.Output)){$allOutput.Add([string]$line)}
+    $futureGuardId='';if($scenario -eq 'future-period'){$futureGuardId="$marker"+"future-period-guard-$seq";$guardSpec=[ordered]@{scenario='order';period=[int]$ctx.Primary;seq=$seq+900001;order_id=$futureGuardId;user_id=[string]$spec.user_id;bv='0';partition=$selectedPartition};$guard=Invoke-ControllerUatProducer $pod $container $repo $Policy $guardSpec;if($guard.ExitCode -ne 0){throw 'UAT_ENV_BLOCKED: future-period guard delivery failed'};foreach($line in @($guard.Output)){$allOutput.Add([string]$line)}}
     $records=New-Object System.Collections.Generic.List[object]
     foreach($line in @($allOutput.ToArray())){$t=([string]$line).Trim();if(-not $t.StartsWith('{')){continue};try{$o=$t|ConvertFrom-Json}catch{continue};if(@($Policy.kafka_topics|ForEach-Object{[string]$_}) -notcontains [string]$o.topic){throw 'KAFKA_DELIVERY_EVIDENCE_INVALID: unexpected topic'};if($null -eq $o.partition -or $null -eq $o.offset){throw 'KAFKA_DELIVERY_EVIDENCE_INVALID: partition/offset missing'};$key=([string]$o.key).Trim();if(-not $key.StartsWith($marker,[StringComparison]::Ordinal)-and -not($scenario -eq 'drain-sentinel'-and $key.StartsWith("drain-sentinel-$period-",[StringComparison]::Ordinal))){throw 'KAFKA_DELIVERY_EVIDENCE_INVALID: key is not bound to durable execution identity'};$role=$scenario;if($scenario -eq 'cross-period-refund'){$role=if([string]$o.topic -eq 'pvam-pv-orders'){'original-order'}else{'refund'}}elseif($scenario -eq 'future-period'){$role=if($key -eq $futureGuardId){'guard'}else{'future'}}elseif($scenario -eq 'duplicate'){$role='duplicate'};$records.Add([pscustomobject]@{topic=[string]$o.topic;key=$key;partition=[int]$o.partition;offset=[long]$o.offset;period=[int]$o.payload.period;role=$role;payload=$o.payload;payload_sha256=[string]$o.payload_sha256;sent_at=[string]$o.sent_at})}
     if($records.Count -lt 1){throw 'KAFKA_DELIVERY_EVIDENCE_INVALID: controller UAT producer returned no delivery evidence'}
@@ -1371,7 +1303,8 @@ function Test-RedisKeyGoverned([string]$Key,$Templates) {
 
 function Invoke-RedisExactCleanup($Request, $Policy) {
     Assert-RequiredTokens @("exec", "test-data-write") "RedisDeleteExactKeys"
-    $pod=([string]$Request.pod).Trim(); $container=([string]$Request.container).Trim()
+    $runtimeTarget=Resolve-ConsumerRuntimeTarget $Request $Policy 'RedisDeleteExactKeys'
+    $pod=[string]$runtimeTarget.Pod;$container=[string]$runtimeTarget.Container;$repo=[string]$runtimeTarget.Repo
     $keys=@($Request.keys | ForEach-Object { [string]$_ })
     if ($keys.Count -lt 1 -or $keys.Count -gt 100) { throw "UAT_ACTION_POLICY_DENIED: Redis cleanup requires 1..100 exact keys" }
     foreach ($key in $keys) { if (-not (Test-RedisKeyGoverned $key $Policy.redis_exact_cleanup_prefixes)) { throw "UAT_ACTION_POLICY_DENIED: Redis key outside durable execution/period scope or exact delivered Kafka identity: $key" } }
@@ -1379,7 +1312,7 @@ function Invoke-RedisExactCleanup($Request, $Policy) {
     if (-not $keysJson.TrimStart().StartsWith('[',[StringComparison]::Ordinal)) { throw "REDIS_CLEANUP_SHAPE_INVALID: serialized exact-key list is not a JSON array" }
     $b64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($keysJson))
     $code="import base64,json,os,sys,redis;r=redis.Redis(host=os.environ['PVAM_REDIS_HOST'],port=int(os.environ['PVAM_REDIS_PORT']),db=int(os.environ['PVAM_REDIS_DB']),password=os.environ.get('PVAM_REDIS_PASSWORD') or None,decode_responses=True);ks=json.loads(base64.b64decode(sys.argv[1]));assert isinstance(ks,list) and all(isinstance(k,str) for k in ks);deleted=int(r.delete(*ks));remaining=[k for k in ks if r.exists(k)];print(json.dumps({'kind':'RedisDeleteResult','requested_count':len(ks),'deleted_count':deleted,'remaining_count':len(remaining),'remaining':remaining,'requested_keys':ks},sort_keys=True))"
-    $r=Invoke-PodCommand $pod $container @('python3','-c',$code,$b64)
+    $r=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @($b64)
     if($r.ExitCode -eq 0){ $json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1); if(-not $json){throw 'REDIS_CLEANUP_RESULT_INVALID: no structured result'}; $s=([string]$json)|ConvertFrom-Json; if([int]$s.remaining_count -ne 0){throw 'REDIS_CLEANUP_INCOMPLETE: exact keys remain after delete'}; $r|Add-Member -NotePropertyName Semantic -NotePropertyValue $s -Force }
     return $r
 }
@@ -1454,7 +1387,8 @@ function Test-RedisProofExpectations([string]$ProofId,$ProofCtx,$Semantic) {
 
 function Invoke-RedisExactRead($Request, $Policy) {
     Assert-RequiredTokens @("exec") "RedisReadExactKeys"
-    $pod=([string]$Request.pod).Trim(); $container=([string]$Request.container).Trim()
+    $runtimeTarget=Resolve-ConsumerRuntimeTarget $Request $Policy 'RedisReadExactKeys'
+    $pod=[string]$runtimeTarget.Pod;$container=[string]$runtimeTarget.Container;$repo=[string]$runtimeTarget.Repo
     $proofId=([string]$Request.proof_id).Trim();$proofCtx=$null
     if($proofId){
         $proofCtx=Get-RedisProofKeys $proofId $Policy;$keys=@($proofCtx.Keys)
@@ -1465,7 +1399,7 @@ function Invoke-RedisExactRead($Request, $Policy) {
     foreach ($key in $keys) { if (-not (Test-RedisKeyGoverned $key $Policy.redis_read_prefixes)) { throw "UAT_ACTION_POLICY_DENIED: Redis read key outside durable execution/period scope or exact delivered Kafka identity: $key" } }
     $keysJson=ConvertTo-Json -InputObject $keys -Compress; $b64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($keysJson))
     $code=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("aW1wb3J0IGJhc2U2NAppbXBvcnQganNvbgppbXBvcnQgb3MKaW1wb3J0IHJlZGlzCmltcG9ydCBzeXMKCnIgPSByZWRpcy5SZWRpcygKICAgIGhvc3Q9b3MuZW52aXJvblsiUFZBTV9SRURJU19IT1NUIl0sCiAgICBwb3J0PWludChvcy5lbnZpcm9uWyJQVkFNX1JFRElTX1BPUlQiXSksCiAgICBkYj1pbnQob3MuZW52aXJvblsiUFZBTV9SRURJU19EQiJdKSwKICAgIHBhc3N3b3JkPW9zLmVudmlyb24uZ2V0KCJQVkFNX1JFRElTX1BBU1NXT1JEIikgb3IgTm9uZSwKICAgIGRlY29kZV9yZXNwb25zZXM9VHJ1ZSwKKQprcyA9IGpzb24ubG9hZHMoYmFzZTY0LmI2NGRlY29kZShzeXMuYXJndlsxXSkpCm1heF9pdGVtcyA9IDEwMAptYXhfdGV4dCA9IDQwOTYKb3V0ID0ge30KZm9yIGsgaW4ga3M6CiAgICB0ID0gci50eXBlKGspCiAgICBpdGVtID0geyJ0eXBlIjogdCwgInRydW5jYXRlZCI6IEZhbHNlfQogICAgaWYgdCA9PSAibm9uZSI6CiAgICAgICAgaXRlbVsidmFsdWUiXSA9IE5vbmUKICAgIGVsaWYgdCA9PSAic3RyaW5nIjoKICAgICAgICB2ID0gci5nZXQoaykKICAgICAgICBpdGVtWyJ2YWx1ZSJdID0gdls6bWF4X3RleHRdIGlmIHYgaXMgbm90IE5vbmUgZWxzZSBOb25lCiAgICAgICAgaXRlbVsidHJ1bmNhdGVkIl0gPSBib29sKHYgaXMgbm90IE5vbmUgYW5kIGxlbih2KSA+IG1heF90ZXh0KQogICAgZWxpZiB0ID09ICJoYXNoIjoKICAgICAgICB2YWxzID0gW10KICAgICAgICBmb3IgaSwgKGYsIHYpIGluIGVudW1lcmF0ZShyLmhzY2FuX2l0ZXIoaykpOgogICAgICAgICAgICBpZiBpID49IG1heF9pdGVtczoKICAgICAgICAgICAgICAgIGl0ZW1bInRydW5jYXRlZCJdID0gVHJ1ZQogICAgICAgICAgICAgICAgYnJlYWsKICAgICAgICAgICAgdmFscy5hcHBlbmQoW3N0cihmKVs6bWF4X3RleHRdLCBzdHIodilbOm1heF90ZXh0XV0pCiAgICAgICAgaXRlbVsidmFsdWUiXSA9IHZhbHMKICAgIGVsaWYgdCA9PSAibGlzdCI6CiAgICAgICAgdmFscyA9IHIubHJhbmdlKGssIDAsIG1heF9pdGVtcykKICAgICAgICBpdGVtWyJ0cnVuY2F0ZWQiXSA9IGxlbih2YWxzKSA+IG1heF9pdGVtcwogICAgICAgIGl0ZW1bInZhbHVlIl0gPSBbc3RyKHgpWzptYXhfdGV4dF0gZm9yIHggaW4gdmFsc1s6bWF4X2l0ZW1zXV0KICAgIGVsaWYgdCA9PSAic2V0IjoKICAgICAgICB2YWxzID0gW10KICAgICAgICBmb3IgaSwgdiBpbiBlbnVtZXJhdGUoci5zc2Nhbl9pdGVyKGspKToKICAgICAgICAgICAgaWYgaSA+PSBtYXhfaXRlbXM6CiAgICAgICAgICAgICAgICBpdGVtWyJ0cnVuY2F0ZWQiXSA9IFRydWUKICAgICAgICAgICAgICAgIGJyZWFrCiAgICAgICAgICAgIHZhbHMuYXBwZW5kKHN0cih2KVs6bWF4X3RleHRdKQogICAgICAgIGl0ZW1bInZhbHVlIl0gPSB2YWxzCiAgICBlbGlmIHQgPT0gInpzZXQiOgogICAgICAgIHZhbHMgPSByLnpyYW5nZShrLCAwLCBtYXhfaXRlbXMsIHdpdGhTY29yZXM9VHJ1ZSkKICAgICAgICBpdGVtWyJ0cnVuY2F0ZWQiXSA9IGxlbih2YWxzKSA+IG1heF9pdGVtcwogICAgICAgIGl0ZW1bInZhbHVlIl0gPSBbW3N0cih2KVs6bWF4X3RleHRdLCBmbG9hdChzKV0gZm9yIHYsIHMgaW4gdmFsc1s6bWF4X2l0ZW1zXV0KICAgIGVsaWYgdCA9PSAic3RyZWFtIjoKICAgICAgICB2YWxzID0gci54cmFuZ2UoaywgY291bnQ9bWF4X2l0ZW1zICsgMSkKICAgICAgICBpdGVtWyJ0cnVuY2F0ZWQiXSA9IGxlbih2YWxzKSA+IG1heF9pdGVtcwogICAgICAgIGl0ZW1bInZhbHVlIl0gPSBbCiAgICAgICAgICAgIFtzdHIoaSksIHtzdHIoZilbOm1heF90ZXh0XTogc3RyKHYpWzptYXhfdGV4dF0gZm9yIGYsIHYgaW4gZmllbGRzLml0ZW1zKCl9XQogICAgICAgICAgICBmb3IgaSwgZmllbGRzIGluIHZhbHNbOm1heF9pdGVtc10KICAgICAgICBdCiAgICBlbHNlOgogICAgICAgIGl0ZW1bInZhbHVlIl0gPSAiPHVuc3VwcG9ydGVkLXR5cGU+IgogICAgb3V0W2tdID0gaXRlbQpwcmludChqc29uLmR1bXBzKHsia2luZCI6ICJSZWRpc1JlYWRSZXN1bHQiLCAibWF4X2l0ZW1zIjogbWF4X2l0ZW1zLCAia2V5cyI6IG91dH0sIHNvcnRfa2V5cz1UcnVlKSkK"))
-    $r=Invoke-PodCommand $pod $container @('python3','-c',$code,$b64)
+    $r=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @($b64)
     if($r.ExitCode -eq 0){
         $json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $json){throw 'REDIS_READ_RESULT_INVALID: no structured result'}
         $s=([string]$json)|ConvertFrom-Json;$expectationsSatisfied=$true;$scenario=''
@@ -1476,12 +1410,13 @@ function Invoke-RedisExactRead($Request, $Policy) {
     }
     return $r
 }
-function Invoke-RedisDbSize($Request) {
+function Invoke-RedisDbSize($Request,$Policy) {
     Assert-RequiredTokens @("exec") "RedisDbSize"
-    $pod=([string]$Request.pod).Trim(); $container=([string]$Request.container).Trim()
+    $runtimeTarget=Resolve-ConsumerRuntimeTarget $Request $Policy 'RedisDbSize'
+    $pod=[string]$runtimeTarget.Pod;$container=[string]$runtimeTarget.Container;$repo=[string]$runtimeTarget.Repo
     $phase=([string]$Request.phase).Trim().ToLowerInvariant(); if($phase -notin @('before','after')){throw 'UAT_ACTION_POLICY_DENIED: RedisDbSize phase must be before or after'}
     $code="import json,os,redis,sys;r=redis.Redis(host=os.environ['PVAM_REDIS_HOST'],port=int(os.environ['PVAM_REDIS_PORT']),db=int(os.environ['PVAM_REDIS_DB']),password=os.environ.get('PVAM_REDIS_PASSWORD') or None);print(json.dumps({'kind':'RedisDbSizeResult','phase':sys.argv[1],'dbsize':int(r.dbsize())},sort_keys=True))"
-    $r=Invoke-PodCommand $pod $container @('python3','-c',$code,$phase)
+    $r=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @($phase)
     if($r.ExitCode -eq 0){$json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $json){throw 'REDIS_DBSIZE_RESULT_INVALID'};$r|Add-Member -NotePropertyName Semantic -NotePropertyValue (([string]$json)|ConvertFrom-Json) -Force}
     return $r
 }
@@ -1518,7 +1453,7 @@ function Invoke-PendingRecoveryProof($Request,$Policy) {
     $op=([string]$latestLife.operation).ToLowerInvariant();if($op -notin @('bind-primary','bind-secondary')){throw 'UAT_ENV_BLOCKED: pending recovery proof requires bound Consumer'}
     $ctx=Get-StageUatPeriodContext;$period=if($op -eq 'bind-secondary'){[int]$ctx.Secondary}else{[int]$ctx.Primary}
     $deployment=[string]$latestLife.deployment;$container=[string]$latestLife.container;$target=Get-ConsumerLifecycleTarget $Policy $deployment $container
-    $pods=@(Get-ConsumerLifecycleSelectedPods $deployment ([string]$target.pod_name_prefix));if($pods.Count -lt 1){throw 'UAT_ENV_BLOCKED: pending recovery proof has no Consumer pod'}
+    $pods=@(Get-ConsumerLifecycleSelectedPods $deployment $container ([string]$target.pod_name_prefix));if($pods.Count -lt 1){throw 'UAT_ENV_BLOCKED: pending recovery proof has no Consumer pod'}
     $pod=[string]$pods[0];Assert-ResourceAllowed 'pod' $pod
     $candidate=Get-CurrentCandidateSha
     $repo=Verify-PodGitView $pod $container ([string]$Policy.repo_remote_url) $candidate
@@ -1526,9 +1461,9 @@ function Invoke-PendingRecoveryProof($Request,$Policy) {
     $userId=if($Request.PSObject.Properties.Name -contains 'user_id'){([string]$Request.user_id).Trim()}else{'U-UAT-001'};Assert-SafeProducerValue $userId 'user_id'
     $ledgerPrefix="pvam:uat:work02:${ExecutionId}:";$deliveryKey=$ledgerPrefix+'event_delivery:'+$identity;$orderKey=$ledgerPrefix+'order_ledger:'+$identity
     $idemKeys=@("system:idempotency:${period}:${identity}:done","system:idempotency:placement:${period}:${identity}:done","system:idempotency:elite:${period}:${identity}:done")
-    $snapshotBeforeFirst=Invoke-UserStatsSnapshot $pod $container $repo $userId @($period)
+    $snapshotBeforeFirst=Invoke-UserStatsSnapshot $pod $container $repo $Policy $userId @($period)
     $prodSpec=[ordered]@{scenario='order';period=$period;seq=1;order_id=$identity;user_id=$userId;bv='1.00';partition=0}
-    $firstProd=Invoke-ControllerUatProducer $pod $container $prodSpec;if($firstProd.ExitCode -ne 0){return $firstProd}
+    $firstProd=Invoke-ControllerUatProducer $pod $container $repo $Policy $prodSpec;if($firstProd.ExitCode -ne 0){return $firstProd}
     $deliveryLine=(@($firstProd.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $deliveryLine){throw 'UAT_ENV_BLOCKED: pending recovery initial producer evidence missing'};$delivery=([string]$deliveryLine)|ConvertFrom-Json
     $waitCode=@'
 import json,os,redis,sys,time
@@ -1540,11 +1475,11 @@ while time.time()<end:
     time.sleep(.25)
 print(json.dumps({'status':status,'three_chain':all(bool(r.exists(x)) for x in keys),'keys':keys},sort_keys=True))
 '@
-    $waitB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($waitCode));$launcher="import base64,sys;exec(compile(base64.b64decode(sys.argv[1]),'<pending-wait>','exec'))";$idemJson=$idemKeys|ConvertTo-Json -Compress
-    $firstWait=Invoke-PodCommand $pod $container @('python3','-c',$launcher,$waitB64,$deliveryKey,$idemJson);if($firstWait.ExitCode -ne 0){return $firstWait}
+    $idemJson=$idemKeys|ConvertTo-Json -Compress
+    $firstWait=Invoke-RuntimePythonCommand $pod $container $repo $Policy $waitCode @($deliveryKey,$idemJson);if($firstWait.ExitCode -ne 0){return $firstWait}
     $firstJson=(@($firstWait.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $firstJson){throw 'UAT_ENV_BLOCKED: pending recovery initial completion evidence missing'};$firstSem=([string]$firstJson)|ConvertFrom-Json
     if([string]$firstSem.status -ne 'DISPATCHED' -or -not [bool]$firstSem.three_chain){throw 'UAT_ENV_BLOCKED: pending recovery could not establish a completed three-chain event'}
-    $snapshotBeforeReplay=Invoke-UserStatsSnapshot $pod $container $repo $userId @($period);$pre0=Get-UserStatsPeriodSnapshot $snapshotBeforeFirst $period;$preReplay=Get-UserStatsPeriodSnapshot $snapshotBeforeReplay $period
+    $snapshotBeforeReplay=Invoke-UserStatsSnapshot $pod $container $repo $Policy $userId @($period);$pre0=Get-UserStatsPeriodSnapshot $snapshotBeforeFirst $period;$preReplay=Get-UserStatsPeriodSnapshot $snapshotBeforeReplay $period
     if(([long]$preReplay.pv-[long]$pre0.pv) -ne 1000000 -or [int]$preReplay.amount_encoding_version -ne 2){throw 'UAT_ENV_BLOCKED: pending recovery initial business dispatch did not apply exactly once'}
 
     $injectCode=@'
@@ -1556,23 +1491,25 @@ if not all(r.exists(x) for x in keys): raise RuntimeError('stage idempotency mar
 r.hset(k,'status','PENDING')
 print(json.dumps({'crash_window_injected':True,'status':r.hget(k,'status'),'idempotency_present_before_restart':all(bool(r.exists(x)) for x in keys)},sort_keys=True))
 '@
-    $injectB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($injectCode));$inject=Invoke-PodCommand $pod $container @('python3','-c',$launcher,$injectB64,$deliveryKey,[string]$delivery.payload_sha256,$idemJson);if($inject.ExitCode -ne 0){return $inject}
+    $inject=Invoke-RuntimePythonCommand $pod $container $repo $Policy $injectCode @($deliveryKey,[string]$delivery.payload_sha256,$idemJson);if($inject.ExitCode -ne 0){return $inject}
     $injectJson=(@($inject.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $injectJson){throw 'UAT_ENV_BLOCKED: pending crash-window injection evidence missing'};$injectSem=([string]$injectJson)|ConvertFrom-Json
     if([string]$injectSem.status -ne 'PENDING' -or -not [bool]$injectSem.crash_window_injected -or -not [bool]$injectSem.idempotency_present_before_restart){throw 'UAT_ENV_BLOCKED: failed to establish PENDING-after-stages crash window'}
 
-    $restart=Invoke-Kubectl @('--kubeconfig',$Kubeconfig,'rollout','restart',("deployment/{0}" -f $deployment),'-n',$TargetNamespace,'--request-timeout=30s');if($restart.ExitCode -ne 0){throw 'UAT_ENV_BLOCKED: pending recovery rollout restart failed'}
-    $roll=Invoke-Kubectl @('--kubeconfig',$Kubeconfig,'rollout','status',("deployment/{0}" -f $deployment),'-n',$TargetNamespace,'--timeout=300s','--request-timeout=30s');if($roll.ExitCode -ne 0){throw 'UAT_ENV_BLOCKED: pending recovery rollout did not complete'}
-    $newPods=@(Get-ConsumerLifecycleSelectedPods $deployment ([string]$target.pod_name_prefix));if($newPods.Count -lt 1){throw 'UAT_ENV_BLOCKED: no Consumer pod after pending recovery restart'};$newPod=[string]$newPods[0];Assert-ResourceAllowed 'pod' $newPod
-    $newRepo=Verify-PodGitView $newPod $container ([string]$Policy.repo_remote_url) $candidate
-    $replay=Invoke-ControllerUatProducer $newPod $container $prodSpec;if($replay.ExitCode -ne 0){return $replay}
-    $secondWait=Invoke-PodCommand $newPod $container @('python3','-c',$launcher,$waitB64,$deliveryKey,$idemJson);if($secondWait.ExitCode -ne 0){return $secondWait}
+    $role=if($op -eq 'bind-secondary'){'secondary'}else{'primary'}
+    $runtimePayload=New-ConsumerRuntimePayload $target $role $period ([int]$latestLife.calc_month) $candidate $repo
+    $restart=Invoke-ConsumerRuntimeController $pod $container 'replace' $runtimePayload
+    if($restart.ExitCode -ne 0 -or -not [bool]$restart.Semantic.running){throw 'UAT_ENV_BLOCKED: pending recovery Consumer process restart failed'}
+    $newPod=$pod
+    $newRepo=$repo
+    $replay=Invoke-ControllerUatProducer $newPod $container $newRepo $Policy $prodSpec;if($replay.ExitCode -ne 0){return $replay}
+    $secondWait=Invoke-RuntimePythonCommand $newPod $container $newRepo $Policy $waitCode @($deliveryKey,$idemJson);if($secondWait.ExitCode -ne 0){return $secondWait}
     $secondJson=(@($secondWait.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $secondJson){throw 'UAT_ENV_BLOCKED: pending recovery replay completion evidence missing'};$secondSem=([string]$secondJson)|ConvertFrom-Json
     if([string]$secondSem.status -ne 'DISPATCHED' -or -not [bool]$secondSem.three_chain){throw 'UAT_ENV_BLOCKED: PENDING state did not recover to DISPATCHED after restart/replay'}
-    $snapshotAfterReplay=Invoke-UserStatsSnapshot $newPod $container $newRepo $userId @($period);$postReplay=Get-UserStatsPeriodSnapshot $snapshotAfterReplay $period
+    $snapshotAfterReplay=Invoke-UserStatsSnapshot $newPod $container $newRepo $Policy $userId @($period);$postReplay=Get-UserStatsPeriodSnapshot $snapshotAfterReplay $period
     $businessUnchanged=Test-UserStatsPeriodStateEqual $preReplay $postReplay
     if(-not $businessUnchanged){throw 'UAT_ENV_BLOCKED: PENDING replay duplicated or lost business PV'}
     $orderIndexKey=$ledgerPrefix+'order_ledger:__period_index__';$cleanup=@($deliveryKey,$orderKey,$orderIndexKey)+@($idemKeys)
-    return [pscustomobject]@{ExitCode=0;Output=@('proof=pending-dispatched-recovery','crash_window_injected=True','idempotency_present_before_restart=True','restart_completed=True','dispatched_after_restart=True','business_unchanged_after_replay=True');Semantic=[pscustomobject]@{kind='UatProofResult';proof_id='pending-dispatched-recovery';passed=$true;period=$period;identity=$identity;payload_hash=[string]$delivery.payload_sha256;pending_before_restart=$true;crash_window_injected=$true;idempotency_present_before_restart=$true;restart_completed=$true;dispatched_after_restart=$true;three_chain_after_restart=$true;business_unchanged_after_replay=$true;business_snapshot_before_replay=$snapshotBeforeReplay;business_snapshot_after_replay=$snapshotAfterReplay;delivered_keys=@($identity);delivered_records=@([pscustomobject]@{identity=$identity;topic='pvam-pv-orders';period=$period;original_order_id=''});cleanup_keys=$cleanup;proof_nonce=$nonce;candidate_sha=$candidate}}
+    return [pscustomobject]@{ExitCode=0;Output=@('proof=pending-dispatched-recovery','runtime_mode=scheduler-pod-temporary-process','crash_window_injected=True','idempotency_present_before_restart=True','restart_completed=True','dispatched_after_restart=True','business_unchanged_after_replay=True');Semantic=[pscustomobject]@{kind='UatProofResult';proof_id='pending-dispatched-recovery';runtime_mode='scheduler-pod-temporary-process';passed=$true;period=$period;identity=$identity;payload_hash=[string]$delivery.payload_sha256;pending_before_restart=$true;crash_window_injected=$true;idempotency_present_before_restart=$true;restart_completed=$true;dispatched_after_restart=$true;three_chain_after_restart=$true;business_unchanged_after_replay=$true;business_snapshot_before_replay=$snapshotBeforeReplay;business_snapshot_after_replay=$snapshotAfterReplay;delivered_keys=@($identity);delivered_records=@([pscustomobject]@{identity=$identity;topic='pvam-pv-orders';period=$period;original_order_id=''});cleanup_keys=$cleanup;proof_nonce=$nonce;candidate_sha=$candidate}}
 }
 
 function Invoke-DispatchP99Proof($Request,$Policy) {
@@ -1581,10 +1518,11 @@ function Invoke-DispatchP99Proof($Request,$Policy) {
     $op=([string]$latestLife.operation).ToLowerInvariant();if($op -notin @('bind-primary','bind-secondary')){throw 'UAT_ENV_BLOCKED: dispatch p99 proof requires bound Consumer'}
     $ctx=Get-StageUatPeriodContext;$period=if($op -eq 'bind-secondary'){[int]$ctx.Secondary}else{[int]$ctx.Primary}
     $deployment=[string]$latestLife.deployment;$container=[string]$latestLife.container;$target=Get-ConsumerLifecycleTarget $Policy $deployment $container
-    $pods=@(Get-ConsumerLifecycleSelectedPods $deployment ([string]$target.pod_name_prefix));if($pods.Count -lt 1){throw 'UAT_ENV_BLOCKED: dispatch p99 proof has no current Consumer pod'}
+    $pods=@(Get-ConsumerLifecycleSelectedPods $deployment $container ([string]$target.pod_name_prefix));if($pods.Count -lt 1){throw 'UAT_ENV_BLOCKED: dispatch p99 proof has no current Consumer pod'}
     $pod=[string]$pods[0];Assert-ResourceAllowed 'pod' $pod
     $candidate=Get-CurrentCandidateSha
-    [void](Verify-PodGitView $pod $container ([string]$Policy.repo_remote_url) $candidate)
+    $repo=Verify-PodGitView $pod $container ([string]$Policy.repo_remote_url) $candidate
+    if($repo -ne ([string]$target.repo_path).Trim()){throw 'UAT_ACTION_POLICY_DENIED: dispatch p99 runtime repository path mismatch'}
     $userId=if($Request.PSObject.Properties.Name -contains 'user_id'){([string]$Request.user_id).Trim()}else{'U-UAT-001'};Assert-SafeProducerValue $userId 'user_id'
     $count=[int]$Policy.dispatch_p99_sample_count;$limit=[int]$Policy.dispatch_p99_max_ms;if($count -lt 5 -or $count -gt 100 -or $limit -lt 1){throw 'UAT_ACTION_POLICY_DENIED: dispatch p99 policy invalid'}
     $base="pvam:uat:work02:${ExecutionId}:";$nonce=[Guid]::NewGuid().ToString('N').Substring(0,12);$code=@'
@@ -1608,8 +1546,8 @@ for n in range(count):
 ordered=sorted(lat); rank=max(0,min(len(ordered)-1,int((len(ordered)*99+99)//100)-1))
 print(json.dumps({'latencies_ms':ordered,'p99_ms':ordered[rank],'samples':samples,'p99_nonce':nonce},sort_keys=True))
 '@
-    $codeB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($code));$launcher="import base64,sys;exec(compile(base64.b64decode(sys.argv[1]),'<dispatch-p99>','exec'))";$prefix="uat-$ExecutionId-"
-    $r=Invoke-PodCommand $pod $container @('python3','-c',$launcher,$codeB64,[string]$period,[string]$count,$base,$prefix,$nonce,$userId);if($r.ExitCode -ne 0){return $r}
+    $prefix="uat-$ExecutionId-"
+    $r=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @([string]$period,[string]$count,$base,$prefix,$nonce,$userId);if($r.ExitCode -ne 0){return $r}
     $json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $json){throw 'UAT_ENV_BLOCKED: dispatch p99 structured result missing'};$x=([string]$json)|ConvertFrom-Json
     if([string]$x.p99_nonce -ne $nonce){throw 'UAT_ENV_BLOCKED: dispatch p99 nonce mismatch'}
     if([double]$x.p99_ms -gt [double]$limit){throw "UAT_ENV_BLOCKED: dispatch p99 exceeds policy limit p99_ms=$($x.p99_ms) limit_ms=$limit"}
@@ -1775,15 +1713,10 @@ try {
         }
         "ConsumerLifecycle" {
             $op=([string]$request.operation).Trim().ToLowerInvariant()
-            if($op -in @('bind-primary','bind-secondary','restore')){
-                $required=@('deploy','restart','scale')
-            }
-            elseif($op -eq 'status'){
-                $required=@('exec')
-            }
-            else{
+            if($op -notin @('bind-primary','bind-secondary','status','restore')){
                 throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle operation must be bind-primary, bind-secondary, status, or restore"
             }
+            $required=@('exec')
             $result = Invoke-ConsumerLifecycle $request $policy
         }
         "ConsumerObserve" { $required=@('exec'); $result = Invoke-ConsumerObserve $request $policy }
@@ -1801,7 +1734,7 @@ try {
             $required=@("exec")
             $result = Invoke-PolicyExecProfile $request $policy "dask-list-datasets"
         }
-        "RedisDbSize" { $required=@("exec"); $result = Invoke-RedisDbSize $request }
+        "RedisDbSize" { $required=@("exec"); $result = Invoke-RedisDbSize $request $policy }
         "KafkaScenarioProduce" { $required=@("exec","test-data-write"); $result = Invoke-KafkaScenarioProduce $request $policy }
         "DebugProfile" {
             $profile = Get-PolicyProfile $policy.debug_profiles ([string]$request.profile) "debug"

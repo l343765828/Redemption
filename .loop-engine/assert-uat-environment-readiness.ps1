@@ -39,9 +39,22 @@ if ([string]$readiness.period_pool.real_pvam_db_occupancy -ne "CONFIRMED") {
 
 $requiredActions = @($policy.required_success_actions_by_stage.$Stage)
 $requiresConsumerLifecycle = $requiredActions -contains "ConsumerLifecycle"
-$targets = @($policy.consumer_lifecycle_targets)
-if ($requiresConsumerLifecycle -and (([string]$readiness.consumer_lifecycle.status -ne "AVAILABLE") -or $targets.Count -eq 0)) {
-    $blockers.Add("CONSUMER_LIFECYCLE_UNAVAILABLE")
+$runtime = $readiness.consumer_runtime
+$target = $policy.consumer_runtime_target
+$runtimeReady = (
+    ([string]$runtime.status -eq "AVAILABLE") -and
+    ([bool]$runtime.targets_configured) -and
+    ([string]$runtime.mode -eq "scheduler-pod-temporary-process") -and
+    ([string]$target.mode -eq "scheduler-pod-temporary-process") -and
+    ([string]$runtime.namespace -eq [string]$target.namespace) -and
+    ([string]$runtime.host_deployment -eq [string]$target.host_deployment) -and
+    ([string]$runtime.container -eq [string]$target.container) -and
+    -not [string]::IsNullOrWhiteSpace([string]$target.pod_name_prefix) -and
+    -not [string]::IsNullOrWhiteSpace([string]$target.repo_path) -and
+    -not [string]::IsNullOrWhiteSpace([string]$target.module)
+)
+if ($requiresConsumerLifecycle -and -not $runtimeReady) {
+    $blockers.Add("CONSUMER_RUNTIME_UNAVAILABLE")
 }
 
 if ($blockers.Count -gt 0) {

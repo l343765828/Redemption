@@ -224,8 +224,10 @@ class V20ReviewContractTests(unittest.TestCase):
         proxy = read(".loop-engine/uat-action-proxy.ps1")
         pending = proxy[proxy.index("function Invoke-PendingRecoveryProof"):proxy.index("function Invoke-DispatchP99Proof")]
         p99 = proxy[proxy.index("function Invoke-DispatchP99Proof"):proxy.index("function Invoke-UatProof")]
-        self.assertIn("Verify-PodGitView $newPod", pending)
+        self.assertIn("Verify-PodGitView $pod", pending)
         self.assertIn("Get-CurrentCandidateSha", pending)
+        self.assertIn("Invoke-ConsumerRuntimeController $pod $container 'replace'", pending)
+        self.assertNotIn("'rollout','restart'", pending)
         self.assertIn("Verify-PodGitView $pod", p99)
         self.assertIn("Get-CurrentCandidateSha", p99)
         self.assertIn("Get-ConsumerLifecycleSelectedPods", p99)

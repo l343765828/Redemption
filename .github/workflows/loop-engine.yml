@@ -26,17 +26,17 @@ on:
         default: ""
         type: string
       uat_authorized_actions:
-        description: "Comma-separated allowed mutable actions: test-data-write,exec,debug,git-update,deploy,restart,scale,delete. Use none when not authorizing writes."
+        description: "Comma-separated tokens. This scheduler-Pod UAT uses test-data-write,exec,debug,git-update,restart; deploy/scale/delete are not required. Use none when not authorizing writes."
         required: false
         default: none
         type: string
       uat_target_namespace:
-        description: Exact Kubernetes namespace allowed for this Cycle UAT scope.
+        description: "Exact Kubernetes namespace for this Cycle. The version-controlled R9 runtime target is dask-operator."
         required: false
         default: ""
         type: string
       uat_resource_scope:
-        description: "Comma/semicolon-separated allowed resources as kind/name or kind/prefix* (for example deployment/pvam-consumer,node/node3,pod/pvam-uat-*)."
+        description: "Comma/semicolon-separated kind/name or kind/prefix*. Minimal R9 scope: node/node3,deployment/dask-cluster-scheduler,pod/dask-cluster-scheduler-*"
         required: false
         default: ""
         type: string

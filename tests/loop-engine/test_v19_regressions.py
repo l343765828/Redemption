@@ -55,6 +55,7 @@ class LoopEngineV19SecurityRegression(unittest.TestCase):
         cls.workflow = read(".github/workflows/loop-round.yml")
         cls.verify = read(".loop-engine/verify-proxy-period-evidence.ps1")
         cls.proxy = read(".loop-engine/uat-action-proxy.ps1")
+        cls.runtime_controller = read(".loop-engine/consumer-runtime-controller.py")
         cls.policy = json.loads(read(".loop-engine/uat-action-policy.json"))
 
     def test_gate_01_missing_candidate_sha_is_rejected(self):
@@ -84,54 +85,60 @@ class LoopEngineV19SecurityRegression(unittest.TestCase):
             self.assertIn("duplicate field", parser)
             self.assertIn("malformed line", parser)
 
-    def test_gate_06_empty_consumer_target_allowlist_is_fail_closed(self):
-        self.assertIsInstance(self.policy.get("consumer_lifecycle_targets"), list)
+    def test_gate_06_consumer_runtime_target_is_exact_and_missing_target_is_fail_closed(self):
+        target_policy = self.policy.get("consumer_runtime_target")
+        self.assertIsInstance(target_policy, dict)
+        self.assertEqual(target_policy.get("mode"), "scheduler-pod-temporary-process")
         target = fn(self.proxy, "Get-ConsumerLifecycleTarget")
-        self.assertIn("is empty; lifecycle mutation is fail-closed", target)
+        self.assertIn("consumer_runtime_target is missing; lifecycle mutation is fail-closed", target)
+        self.assertIn("runtime namespace mismatch", target)
 
     def test_gate_07_nonallowlisted_target_denied_before_mutation(self):
         lifecycle = fn(self.proxy, "Invoke-ConsumerLifecycle")
-        mutation = lifecycle.index("set','env")
+        mutation = lifecycle.index("Invoke-ConsumerRuntimeController $pod $container 'replace'")
         self.assertLess(lifecycle.index("Get-ConsumerLifecycleTarget"), mutation)
         self.assertLess(lifecycle.index('Assert-ResourceAllowed "deployment"'), mutation)
 
     def test_gate_08_missing_container_never_falls_back_to_first_container(self):
-        governed = fn(self.proxy, "Get-DeploymentGovernedEnv")
-        self.assertIn("exact deployment container not found/ambiguous", governed)
-        self.assertNotIn("Select-Object -First 1", governed)
+        selected = fn(self.proxy, "Get-ConsumerLifecycleSelectedPods")
+        self.assertIn("Consumer runtime host container not found/ambiguous", selected)
+        self.assertIn("matchingContainers.Count -ne 1", selected)
+        self.assertNotIn("containerStatuses[0]", selected)
 
-    def test_gate_09_set_env_is_scoped_to_exact_container(self):
+    def test_gate_09_consumer_binding_does_not_mutate_scheduler_deployment(self):
         lifecycle = fn(self.proxy, "Invoke-ConsumerLifecycle")
-        restore = fn(self.proxy, "Restore-ConsumerLifecycleSnapshot")
-        self.assertIn("--containers={0}", lifecycle)
-        self.assertIn("--containers={0}", restore)
+        self.assertNotIn("set','env", lifecycle)
+        self.assertNotIn("'scale'", lifecycle)
+        self.assertNotIn("'rollout','restart'", lifecycle)
+        self.assertIn("Invoke-ConsumerRuntimeController", lifecycle)
 
     def test_gate_10_pod_prefix_and_cycle_scope_checked_before_mutation(self):
         lifecycle = fn(self.proxy, "Invoke-ConsumerLifecycle")
-        mutation = lifecycle.index("set','env")
+        mutation = lifecycle.index("Invoke-ConsumerRuntimeController $pod $container 'replace'")
         self.assertLess(lifecycle.index("Assert-ConsumerLifecyclePodPrefixCoveredByScope"), mutation)
         self.assertLess(lifecycle.index("Get-ConsumerLifecycleSelectedPods"), mutation)
 
-    def test_gate_11_bind_failure_restores_env_presence_values_and_replicas(self):
-        snapshot = fn(self.proxy, "New-ConsumerLifecycleSnapshot")
-        lifecycle = fn(self.proxy, "Invoke-ConsumerLifecycle")
-        restore = fn(self.proxy, "Restore-ConsumerLifecycleSnapshot")
-        self.assertIn("env_entries", snapshot)
-        self.assertIn("exists=[bool]$exists", snapshot)
-        self.assertIn("replicas=$replicas", snapshot)
-        self.assertIn("Restore-ConsumerLifecycleSnapshot $rollbackSnapshot $false", lifecycle)
-        self.assertIn('("{0}-" -f $name)', restore)
+    def test_gate_11_runtime_state_is_execution_scoped_and_secret_free(self):
+        self.assertIn('DEFAULT_RUNTIME_ROOT = "/tmp/pvam-uat-consumer"', self.runtime_controller)
+        self.assertIn('"execution_id"', self.runtime_controller)
+        state_block = self.runtime_controller[
+            self.runtime_controller.index("state = {"):
+            self.runtime_controller.index("_atomic_write_json(state_path, state)")
+        ]
+        self.assertNotIn("REDIS_PASSWORD", state_block)
+        self.assertNotIn("kafka_bootstrap", state_block)
 
-    def test_gate_12_rollback_failure_is_explicit_fail_closed(self):
+    def test_gate_12_runtime_controller_failure_is_explicit_fail_closed(self):
         lifecycle = fn(self.proxy, "Invoke-ConsumerLifecycle")
-        self.assertIn("ConsumerLifecycle rollback failed after bind error", lifecycle)
-        self.assertIn("original=$original", lifecycle)
-        self.assertIn("rollback=$($_.Exception.Message)", lifecycle)
+        self.assertIn("ConsumerLifecycle runtime replace failed", lifecycle)
+        self.assertIn("ConsumerLifecycle runtime binding verification failed", lifecycle)
+        self.assertIn('"ok": False', self.runtime_controller)
+        self.assertIn("raise SystemExit(1)", self.runtime_controller)
 
-    def test_gate_13_controller_baseline_supports_explicit_restore(self):
+    def test_gate_13_controller_supports_explicit_process_restore(self):
         lifecycle = fn(self.proxy, "Invoke-ConsumerLifecycle")
-        self.assertIn("Ensure-ConsumerLifecycleBaseline", lifecycle)
-        self.assertIn("Read-ConsumerLifecycleBaseline", lifecycle)
+        self.assertIn("Invoke-ConsumerRuntimeController $pod $container 'stop'", lifecycle)
+        self.assertIn("matching_process_count=0", lifecycle)
         self.assertIn("operation='restore'", lifecycle)
         required = self.policy["required_consumer_lifecycle_ops_by_stage"]
         self.assertEqual(required["OPUS"][-1], "restore")
@@ -139,10 +146,11 @@ class LoopEngineV19SecurityRegression(unittest.TestCase):
 
     def test_gate_14_sidecar_env_cannot_be_changed_by_consumer_bind(self):
         lifecycle = fn(self.proxy, "Invoke-ConsumerLifecycle")
-        governed = fn(self.proxy, "Get-DeploymentGovernedEnv")
-        self.assertIn("--containers={0}", lifecycle)
+        selected = fn(self.proxy, "Get-ConsumerLifecycleSelectedPods")
+        self.assertIn("$container", lifecycle.lower())
+        self.assertIn("matchingContainers", selected)
         self.assertNotIn("-c '*'", lifecycle)
-        self.assertNotIn("Select-Object -First 1", governed)
+        self.assertNotIn("set','env", lifecycle)
 
     def test_gate_15_forged_stdout_cannot_satisfy_full_pass(self):
         self.assertEqual(self.policy.get("controller_evidence_schema"), 10)
@@ -163,9 +171,9 @@ class LoopEngineV19SecurityRegression(unittest.TestCase):
         start = self.proxy.index('        "ConsumerLifecycle" {')
         end = self.proxy.index('        "ConsumerObserve" {', start)
         dispatch = self.proxy[start:end]
-        self.assertIn("@('bind-primary','bind-secondary','restore')", dispatch)
-        self.assertIn("@('deploy','restart','scale')", dispatch)
-        self.assertIn("$op -eq 'status'", dispatch)
+        self.assertIn("@('bind-primary','bind-secondary','status','restore')", dispatch)
+        self.assertIn("$required=@('exec')", dispatch)
+        self.assertNotIn("@('deploy','restart','scale')", dispatch)
         self.assertNotIn("$op -eq 'stop'", dispatch)
 
     def test_gate_18_v19_lifecycle_invariants_survive_v20_schema10_contract(self):
@@ -176,7 +184,7 @@ class LoopEngineV19SecurityRegression(unittest.TestCase):
             self.assertIn("schema-10", src)
             self.assertIn("ConsumerLifecycle", src)
             self.assertIn("restore", src)
-            self.assertIn("consumer_lifecycle_targets", src)
+            self.assertIn("consumer_runtime_target", src)
 
     def test_gate_19_active_schema_comments_match_current_wire_format(self):
         prepare = read(".loop-engine/prepare-verifier-state.ps1")
@@ -194,7 +202,7 @@ class LoopEngineV19SecurityRegression(unittest.TestCase):
         self.assertIn("tests/loop-engine/test_v20_review_regressions.py", readme)
         self.assertIn("[V20-CONTROLLER-CONTRACT-SMOKE] PASS", readme)
         self.assertIn("controller-evidence/schema-10", readme)
-        self.assertIn("consumer_lifecycle_targets", readme)
+        self.assertIn("consumer_runtime_target", readme)
         self.assertIn("ConsumerLifecycle restore", readme)
 
 

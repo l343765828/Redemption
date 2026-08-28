@@ -61,16 +61,18 @@ Write-Host "[CONTROL-REGEX-SMOKE] PASS"
 # before verifier work and exists to catch packaging/version drift on PS5.1.
 $proxyContractPath = Join-Path $env:MAINREPO ".loop-engine\uat-action-proxy.ps1"
 $policyContractPath = Join-Path $env:MAINREPO ".loop-engine\uat-action-policy.json"
+$consumerRuntimeControllerPath = Join-Path $env:MAINREPO ".loop-engine\consumer-runtime-controller.py"
 $protectedHashContractPath = Join-Path $env:MAINREPO ".loop-engine\protected-evidence-hash.ps1"
 if (-not (Test-Path -LiteralPath $proxyContractPath -PathType Leaf)) { throw "v20 proxy contract missing" }
 if (-not (Test-Path -LiteralPath $policyContractPath -PathType Leaf)) { throw "v20 policy contract missing" }
+if (-not (Test-Path -LiteralPath $consumerRuntimeControllerPath -PathType Leaf)) { throw "v20 consumer-runtime-controller.py missing" }
 if (-not (Test-Path -LiteralPath $protectedHashContractPath -PathType Leaf)) { throw "v20 protected evidence hash contract missing" }
 $proxyContractText = [IO.File]::ReadAllText($proxyContractPath, [System.Text.Encoding]::UTF8)
 foreach ($needle in @(
     'controller-evidence\schema-{0}\cycle-{1}\round-{2}\{3}',
     'ConsumerLifecycle calc_month is controller governed',
-    'function Get-DeploymentGovernedEnv',
-    '$before=Get-DeploymentGovernedEnv'
+    "runtime_mode='scheduler-pod-temporary-process'",
+    'function Invoke-ConsumerRuntimeController'
 )) {
     if (-not $proxyContractText.Contains($needle)) { throw "v20 proxy contract missing: $needle" }
 }
@@ -79,6 +81,7 @@ if (-not $protectedHashContractText.Contains('controller-evidence\schema-10\cycl
 if ($protectedHashContractText.Contains('controller-evidence\schema-9\cycle-{0}\round-{1}\opus')) { throw "v20 protected digest still binds schema-9 controller evidence" }
 $policyContract = [IO.File]::ReadAllText($policyContractPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
 if ([int]$policyContract.schema_version -ne 8 -or [int]$policyContract.controller_evidence_schema -ne 10) { throw "v20 policy/controller evidence schema mismatch" }
+if ([string]$policyContract.consumer_runtime_target.mode -ne 'scheduler-pod-temporary-process') { throw "v20 scheduler Pod Consumer runtime target missing" }
 $namespaces = @($policyContract.required_idempotency_namespaces | ForEach-Object { [string]$_ })
 foreach ($requiredNs in @('userstats','placement','elite')) {
     if ($namespaces -notcontains $requiredNs) { throw "v20 required idempotency namespace missing: $requiredNs" }
@@ -675,18 +678,20 @@ Write-Host "=== WINDOWS POWERSHELL SMOKE PASS ==="
 $stateContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\loop-state.ps1"), [Text.Encoding]::UTF8)
 $roundContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".github\workflows\loop-round.yml"), [Text.Encoding]::UTF8)
 $proxyContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\uat-action-proxy.ps1"), [Text.Encoding]::UTF8)
+$consumerRuntimeContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\consumer-runtime-controller.py"), [Text.Encoding]::UTF8)
 $verifyContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\verify-proxy-period-evidence.ps1"), [Text.Encoding]::UTF8)
 $policyV20 = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\uat-action-policy.json"), [Text.Encoding]::UTF8) | ConvertFrom-Json
 if ($stateContract -notmatch 'LOOP_CANDIDATE_SHA') { throw "v20 candidate SHA export missing" }
 if ($roundContract -notmatch 'controller-evidence\\schema-10') { throw "v20 schema-10 workflow root missing" }
 if ($proxyContract -notmatch 'output_json_b64') { throw "v20 base64 output evidence missing" }
 if ($proxyContract -match '\$lines\.Add\("output_(begin|end)"\)') { throw "v20 legacy raw output sentinel remains" }
-if ($proxyContract -notmatch '--containers=\{0\}') { throw "v20 exact container set-env contract missing" }
+if ($proxyContract -notmatch 'scheduler-pod-temporary-process') { throw "v20 scheduler Pod Consumer runtime mode missing" }
+if ($consumerRuntimeContract -notmatch 'DEFAULT_RUNTIME_ROOT = "/tmp/pvam-uat-consumer"') { throw "v20 execution-scoped Consumer runtime state missing" }
 if ($proxyContract -notmatch 'ConsumerLifecycle.*restore' -and $proxyContract -notmatch "operation='restore'") { throw "v20 ConsumerLifecycle restore missing" }
 if ($verifyContract -notmatch 'function Read-ProxyEvidenceFields') { throw "v20 strict evidence parser missing" }
 if ($verifyContract -match 'if\s*\(\s*\$ExpectedCandidateSha\s+(-and|\))') { throw "v20 optional candidate guard remains" }
 if ([int]$policyV20.schema_version -ne 8 -or [int]$policyV20.controller_evidence_schema -ne 10) { throw "v20 policy/schema mismatch" }
-if ($null -eq $policyV20.consumer_lifecycle_targets) { throw "v20 consumer_lifecycle_targets missing" }
+if ($null -eq $policyV20.consumer_runtime_target -or [string]$policyV20.consumer_runtime_target.mode -ne 'scheduler-pod-temporary-process') { throw "v20 consumer_runtime_target missing" }
 if (-not $policyV20.git_hunk_allowlist.'User/UserStatsService.py') { throw "v20 UserStats line-level Git hunk guard missing" }
 if (-not $policyV20.git_hunk_allowlist.'User/EliteBonusService.py') { throw "v20 EliteBonus line-level Git hunk guard missing" }
 if (@($policyV20.pytest_selected_required_targets) -notcontains 'User/Test/test_amount_dtype_migration.py') { throw "v20 amount dtype migration required pytest target missing" }
