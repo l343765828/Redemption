@@ -1,0 +1,34 @@
+name: Codex Auth Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  codex-test:
+    runs-on:
+      - self-hosted
+      - windows
+      - x64
+      - codex-producer
+
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check environment
+        shell: powershell
+        run: |
+          whoami
+          $PSVersionTable.PSVersion
+          Get-Command codex
+          codex --version
+
+      - name: Test Codex account
+        shell: powershell
+        run: |
+          codex exec "Output exactly CODEX_OK. Do not modify any files."

@@ -1,0 +1,368 @@
+# Reusable single Loop Engine round.
+# Do not run manually. loop-engine.yml is the only operator entry point.
+
+name: loop-round
+
+on:
+  workflow_call:
+    inputs:
+      cycle:
+        required: true
+        type: string
+      round:
+        required: true
+        type: string
+      action:
+        required: true
+        type: string
+      previous_report:
+        required: false
+        type: string
+        default: ""
+    outputs:
+      verdict:
+        description: PASS, REJECTED, or BLOCKED when verifier completed normally
+        value: ${{ jobs.round.outputs.verdict }}
+      report_path:
+        description: Archived UAT report for this round
+        value: ${{ jobs.round.outputs.report_path }}
+      candidate_sha:
+        description: Candidate SHA verified in this round
+        value: ${{ jobs.round.outputs.candidate_sha }}
+
+env:
+  WORKTREE: D:\Redemption\Worktrees\pvam-work02-m2-float64-test
+  MAINREPO: D:\Redemption\Redemption
+  OUTDIR: D:\Redemption\Redemption\.loop-output
+  BRANCH: codex/pvam-work02-uat-candidate-20260813
+  BASELINE: 6281356d77306016cfb96567e84c14a66eefdbbb
+  SSH_URL: git@github.com:l343765828/Redemption.git
+
+  PRODUCER_PROMPT: D:\Redemption\Redemption\WORK-PVAM-02_施工会话_启动提示词.md
+  VERIFIER_PROMPT: D:\Redemption\Redemption\WORK-PVAM-02_复核与UAT会话_启动提示词.md
+  PRODUCER_OVERRIDE: D:\Redemption\Redemption\.loop-engine\producer-override.md
+  PRODUCER_REWORK_OVERRIDE: D:\Redemption\Redemption\.loop-engine\producer-rework-override.md
+  VERIFIER_OVERRIDE: D:\Redemption\Redemption\.loop-engine\automated-override.md
+  VERIFIER_SETTINGS: D:\Redemption\Redemption\.loop-engine\verifier-settings.json
+  VERIFIER_PROTOCOL: D:\Redemption\Redemption\.loop-engine\verifier-checkpoint-protocol.md
+  VERIFIER_PREPARE_SCRIPT: D:\Redemption\Redemption\.loop-engine\prepare-verifier-state.ps1
+  VERIFIER_RUNNER_SCRIPT: D:\Redemption\Redemption\.loop-engine\claude-verifier-runner.ps1
+  LOOP_STATE_SCRIPT: D:\Redemption\Redemption\.loop-engine\loop-state.ps1
+  LOOP_STATE_FILE: D:\Redemption\Redemption\.loop-output\loop-state.json
+  LOOP_CYCLES_DIR: D:\Redemption\Redemption\.loop-output\cycles
+  UAT_PERIOD_POOL_FILE: D:\Redemption\Redemption\.loop-engine\uat-period-pool.json
+
+  VERIFIER_STATE_DIR: D:\Redemption\Redemption\.loop-output\verifier-state
+  VERIFIER_RUNTIME_DIR: D:\Redemption\Redemption\.loop-output\verifier-runtime
+  VERIFIER_HISTORY_DIR: D:\Redemption\Redemption\.loop-output\verifier-history
+  VERIFIER_PROGRESS: D:\Redemption\Redemption\.loop-output\verifier-state\verifier-progress.json
+  VERIFIER_RESUME_CONTEXT: D:\Redemption\Redemption\.loop-output\verifier-state\resume-context.md
+
+  CODEX_MODEL: gpt-5.6-sol
+  CODEX_REASONING_EFFORT: xhigh
+  CLAUDE_MODEL: fable
+  CLAUDE_EFFORT: ultracode
+  CLAUDE_REUSE_SESSION: "true"
+
+jobs:
+  round:
+    runs-on: self-hosted
+    timeout-minutes: 720
+    outputs:
+      verdict: ${{ steps.finalize.outputs.verdict }}
+      report_path: ${{ steps.finalize.outputs.report_path }}
+      candidate_sha: ${{ steps.finalize.outputs.candidate_sha }}
+    env:
+      LOOP_CYCLE: ${{ inputs.cycle }}
+      LOOP_ROUND: ${{ inputs.round }}
+      LOOP_ROUND_ACTION: ${{ inputs.action }}
+      PREVIOUS_UAT_REPORT: ${{ inputs.previous_report }}
+    steps:
+      - name: Windows PowerShell contract smoke
+        shell: powershell
+        run: |
+          $smoke = "$env:MAINREPO\tests\loop-engine\windows-smoke.ps1"
+          if (-not (Test-Path $smoke)) { Write-Error "Windows smoke script missing: $smoke"; exit 1 }
+          & $smoke
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Begin round
+        shell: powershell
+        run: |
+          if ($env:LOOP_ROUND_ACTION -notin @("construct", "rework", "resume-verifier")) { Write-Error "invalid round action: $env:LOOP_ROUND_ACTION"; exit 1 }
+          if (-not (Test-Path $env:LOOP_STATE_SCRIPT)) { Write-Error "loop state script missing: $env:LOOP_STATE_SCRIPT"; exit 1 }
+          & $env:LOOP_STATE_SCRIPT `
+            -Operation BeginRound `
+            -Cycle ([int]$env:LOOP_CYCLE) `
+            -Round ([int]$env:LOOP_ROUND) `
+            -RoundAction $env:LOOP_ROUND_ACTION `
+            -PreviousReport $env:PREVIOUS_UAT_REPORT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Validate round UAT period allocation
+        shell: powershell
+        run: |
+          foreach ($name in @("LOOP_UAT_PERIOD_SLOT", "LOOP_UAT_PERIOD_PRIMARY", "LOOP_UAT_PERIOD_SECONDARY", "LOOP_UAT_PERIOD_POOL_SHA256")) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if (-not $value) { Write-Error "missing durable UAT period environment: $name"; exit 1 }
+          }
+          $state = [IO.File]::ReadAllText($env:LOOP_STATE_FILE, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+          $cycleObject = @($state.cycles | Where-Object { [int]$_.cycle -eq [int]$env:LOOP_CYCLE } | Select-Object -First 1)[0]
+          $roundObject = @($cycleObject.rounds | Where-Object { [int]$_.round -eq [int]$env:LOOP_ROUND } | Select-Object -First 1)[0]
+          if (-not $roundObject) { Write-Error "round missing while validating UAT period allocation"; exit 1 }
+          if ([int]$roundObject.uat_period_slot -ne [int]$env:LOOP_UAT_PERIOD_SLOT) { Write-Error "UAT period slot differs from loop ledger"; exit 1 }
+          if ([int]$roundObject.uat_period_primary -ne [int]$env:LOOP_UAT_PERIOD_PRIMARY) { Write-Error "primary UAT period differs from loop ledger"; exit 1 }
+          if ([int]$roundObject.uat_period_secondary -ne [int]$env:LOOP_UAT_PERIOD_SECONDARY) { Write-Error "secondary UAT period differs from loop ledger"; exit 1 }
+          if ([string]$roundObject.uat_period_pool_sha256 -ne [string]$env:LOOP_UAT_PERIOD_POOL_SHA256) { Write-Error "UAT period pool hash differs from loop ledger"; exit 1 }
+          Write-Output "UAT period allocation PASS: slot=$env:LOOP_UAT_PERIOD_SLOT periods=$env:LOOP_UAT_PERIOD_PRIMARY/$env:LOOP_UAT_PERIOD_SECONDARY"
+
+      - name: Preflight producer worktree
+        if: ${{ inputs.action != 'resume-verifier' }}
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force $env:OUTDIR | Out-Null
+          $head = (git -C $env:WORKTREE rev-parse HEAD).Trim()
+          Write-Output "worktree HEAD = $head"
+          $status = git -C $env:WORKTREE status --porcelain
+          if ($status) {
+            Write-Output "--- worktree carries uncommitted changes ---"
+            $status | ForEach-Object { Write-Output $_ }
+          } else {
+            Write-Output "worktree clean"
+          }
+          $mb = (git -C $env:WORKTREE merge-base $head $env:BASELINE).Trim()
+          if ($mb -ne $env:BASELINE) { Write-Error "HEAD is not a descendant of baseline $env:BASELINE"; exit 1 }
+
+      - name: Codex construct or rework
+        if: ${{ inputs.action != 'resume-verifier' }}
+        shell: powershell
+        run: |
+          $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+          if (-not (Test-Path $env:PRODUCER_OVERRIDE)) { Write-Error "producer override missing: $env:PRODUCER_OVERRIDE"; exit 1 }
+          if (-not (Test-Path $env:PRODUCER_PROMPT)) { Write-Error "producer prompt missing: $env:PRODUCER_PROMPT"; exit 1 }
+          $override = [IO.File]::ReadAllText($env:PRODUCER_OVERRIDE, [System.Text.Encoding]::UTF8)
+          $basePrompt = [IO.File]::ReadAllText($env:PRODUCER_PROMPT, [System.Text.Encoding]::UTF8)
+
+          if ($env:LOOP_ROUND_ACTION -eq "rework") {
+            if (-not (Test-Path $env:PRODUCER_REWORK_OVERRIDE)) { Write-Error "rework override missing: $env:PRODUCER_REWORK_OVERRIDE"; exit 1 }
+            if (-not $env:PREVIOUS_UAT_REPORT) { Write-Error "rework requires PREVIOUS_UAT_REPORT"; exit 1 }
+            if (-not (Test-Path $env:PREVIOUS_UAT_REPORT)) { Write-Error "previous UAT report missing: $env:PREVIOUS_UAT_REPORT"; exit 1 }
+            $reworkOverride = [IO.File]::ReadAllText($env:PRODUCER_REWORK_OVERRIDE, [System.Text.Encoding]::UTF8)
+            $previousReport = [IO.File]::ReadAllText($env:PREVIOUS_UAT_REPORT, [System.Text.Encoding]::UTF8)
+            $prompt = @(
+              $override,
+              "",
+              $reworkOverride,
+              "",
+              "# LOOP CONTEXT",
+              "Cycle: $env:LOOP_CYCLE",
+              "Round: $env:LOOP_ROUND",
+              "Previous UAT report path: $env:PREVIOUS_UAT_REPORT",
+              "",
+              "# PREVIOUS UAT_REPORT.md",
+              $previousReport,
+              "",
+              "# ORIGINAL CONSTRUCTION CONTRACT",
+              $basePrompt
+            ) -join "`n"
+          } else {
+            $prompt = @(
+              $override,
+              "",
+              "# LOOP CONTEXT",
+              "Cycle: $env:LOOP_CYCLE",
+              "Round: $env:LOOP_ROUND",
+              "Action: construct",
+              "",
+              $basePrompt
+            ) -join "`n"
+          }
+
+          $prompt | & codex exec `
+            --model $env:CODEX_MODEL `
+            -c "model_reasoning_effort=`"$env:CODEX_REASONING_EFFORT`"" `
+            --sandbox workspace-write `
+            -C $env:WORKTREE `
+            --add-dir $env:OUTDIR `
+            --output-last-message "$env:OUTDIR\codex-final.txt" `
+            -
+          if ($LASTEXITCODE -ne 0) { Write-Error "codex exec exited $LASTEXITCODE"; exit 1 }
+
+      - name: Gate producer verdict
+        if: ${{ inputs.action != 'resume-verifier' }}
+        shell: powershell
+        run: |
+          $finalPath = "$env:OUTDIR\codex-final.txt"
+          if (-not (Test-Path $finalPath)) { Write-Error "codex-final.txt missing"; exit 1 }
+          $final = [IO.File]::ReadAllText($finalPath, [System.Text.Encoding]::UTF8)
+          # Force an array even when codex-final.txt contains exactly one non-empty line.
+          # Windows PowerShell 5.1 otherwise collapses a single pipeline item to a scalar string,
+          # and $lines[-1] indexes the last character instead of the last line.
+          $lines = @(
+            $final -split "`r?`n" | Where-Object { $_.Trim() -ne "" }
+          )
+          if ($lines.Count -eq 0) { Write-Error "codex-final.txt is empty"; exit 1 }
+          $producerVerdict = ([string]$lines[-1]).Trim()
+          Write-Output "producer verdict line: '$producerVerdict'"
+          if ($producerVerdict -eq "PRODUCER_BLOCKED") { Write-Error "Producer blocked. See codex-final.txt"; exit 1 }
+          if ($producerVerdict -ne "READY_FOR_UAT") { Write-Error "final line is not a bare status word: '$producerVerdict'"; exit 1 }
+          if (-not (Test-Path "$env:OUTDIR\IMPLEMENTATION_HANDOFF.md")) { Write-Error "IMPLEMENTATION_HANDOFF.md missing in OUTDIR"; exit 1 }
+          $status = git -C $env:WORKTREE status --porcelain
+          if (-not $status) {
+            $headNow = (git -C $env:WORKTREE rev-parse HEAD).Trim().ToLowerInvariant()
+            if ($LASTEXITCODE -ne 0) { Write-Error "git rev-parse failed while checking producer output"; exit 1 }
+            $state = [IO.File]::ReadAllText($env:LOOP_STATE_FILE, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            $cycleObject = @($state.cycles | Where-Object { [int]$_.cycle -eq [int]$env:LOOP_CYCLE } | Select-Object -First 1)[0]
+            $roundObject = @($cycleObject.rounds | Where-Object { [int]$_.round -eq [int]$env:LOOP_ROUND } | Select-Object -First 1)[0]
+            $producerBase = [string]$roundObject.producer_base_sha
+            if ($producerBase -and $headNow -ne $producerBase.ToLowerInvariant()) {
+              Write-Error "producer returned READY_FOR_UAT with a clean worktree, but HEAD advanced beyond producer_base_sha ($producerBase -> $headNow). A prior attempt likely committed before failing to publish/reconcile the candidate. Do not run Codex again. Dispatch loop-engine.yml with run_mode=auto; reconciliation will recover a published candidate or stop with manual push instructions."
+              exit 1
+            }
+            Write-Error "producer returned READY_FOR_UAT but produced no worktree changes. If a candidate already exists and verification was interrupted, dispatch loop-engine.yml with run_mode=auto; do not create another rework round."
+            exit 1
+          }
+          Write-Output "--- producer change set ---"
+          $status | ForEach-Object { Write-Output $_ }
+
+      - name: Commit and push candidate
+        if: ${{ inputs.action != 'resume-verifier' }}
+        shell: powershell
+        run: |
+          git -C $env:WORKTREE add -A
+          if ($LASTEXITCODE -ne 0) { Write-Error "git add failed"; exit 1 }
+          $msg = "WORK-PVAM-02 loop cycle $env:LOOP_CYCLE round $env:LOOP_ROUND automated construction/rework (run $env:GITHUB_RUN_ID)"
+          git -C $env:WORKTREE -c user.name="loop-engine" -c user.email="loop-engine@local" commit -m $msg
+          if ($LASTEXITCODE -ne 0) { Write-Error "git commit failed"; exit 1 }
+          git -C $env:WORKTREE push $env:SSH_URL "HEAD:refs/heads/$env:BRANCH"
+          if ($LASTEXITCODE -ne 0) { Write-Error "git push failed (check runner account SSH key access)"; exit 1 }
+          $local = (git -C $env:WORKTREE rev-parse HEAD).Trim().ToLowerInvariant()
+          $remote = (git -C $env:WORKTREE ls-remote $env:SSH_URL "refs/heads/$env:BRANCH") -split "\s" | Select-Object -First 1
+          $remote = $remote.Trim().ToLowerInvariant()
+          Write-Output "local=$local remote=$remote"
+          if ($remote -ne $local) { Write-Error "push verification failed: remote != local HEAD"; exit 1 }
+          [IO.File]::WriteAllText("$env:OUTDIR\pushed-sha.txt", $local + "`n", (New-Object System.Text.UTF8Encoding($false)))
+          & $env:LOOP_STATE_SCRIPT -Operation SetCandidate -Cycle ([int]$env:LOOP_CYCLE) -Round ([int]$env:LOOP_ROUND) -CandidateSha $local
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $env:WORKTREE log --oneline "$($env:BASELINE.Substring(0,8))..HEAD"
+
+      - name: Validate candidate against loop ledger
+        shell: powershell
+        run: |
+          $pushed = "$env:OUTDIR\pushed-sha.txt"
+          if (-not (Test-Path $pushed)) { Write-Error "pushed-sha.txt missing before verifier"; exit 1 }
+          $candidate = ([IO.File]::ReadAllText($pushed, [System.Text.Encoding]::UTF8)).Trim().ToLowerInvariant()
+          if ($candidate -notmatch '^[0-9a-f]{40}$') { Write-Error "invalid candidate SHA in pushed-sha.txt: '$candidate'"; exit 1 }
+
+          $local = (git -C $env:WORKTREE rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0) { Write-Error "git rev-parse failed while validating candidate"; exit 1 }
+          if ($candidate -ne $local) { Write-Error "candidate $candidate does not match local HEAD $local"; exit 1 }
+
+          if (-not (Test-Path $env:LOOP_STATE_FILE)) { Write-Error "loop-state.json missing before verifier"; exit 1 }
+          $state = [IO.File]::ReadAllText($env:LOOP_STATE_FILE, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+          $cycleObject = @($state.cycles | Where-Object { [int]$_.cycle -eq [int]$env:LOOP_CYCLE } | Select-Object -First 1)[0]
+          if (-not $cycleObject) { Write-Error "cycle $env:LOOP_CYCLE missing from loop-state.json"; exit 1 }
+          $roundObject = @($cycleObject.rounds | Where-Object { [int]$_.round -eq [int]$env:LOOP_ROUND } | Select-Object -First 1)[0]
+          if (-not $roundObject) { Write-Error "round $env:LOOP_CYCLE/$env:LOOP_ROUND missing from loop-state.json"; exit 1 }
+          $stateCandidate = ([string]$roundObject.candidate_sha).Trim().ToLowerInvariant()
+          if (-not $stateCandidate) { Write-Error "loop-state candidate is empty before verifier"; exit 1 }
+          if ($candidate -ne $stateCandidate) { Write-Error "pushed candidate $candidate does not match loop-state candidate $stateCandidate"; exit 1 }
+
+          $remoteLine = git -C $env:WORKTREE ls-remote $env:SSH_URL "refs/heads/$env:BRANCH"
+          if ($LASTEXITCODE -ne 0) { Write-Error "git ls-remote failed while validating candidate"; exit 1 }
+          $remoteParts = @($remoteLine -split '\s+' | Where-Object { $_ })
+          if ($remoteParts.Count -lt 1) { Write-Error "candidate branch missing on remote: $env:BRANCH"; exit 1 }
+          $remote = $remoteParts[0].Trim().ToLowerInvariant()
+          if ($candidate -ne $remote) { Write-Error "remote branch SHA $remote does not match candidate $candidate"; exit 1 }
+
+          Write-Output "candidate validation PASS: pushed/local/state/remote all equal $candidate"
+
+      - name: Prepare verifier checkpoint
+        shell: powershell
+        run: |
+          if (-not (Test-Path $env:VERIFIER_PREPARE_SCRIPT)) { Write-Error "prepare script missing: $env:VERIFIER_PREPARE_SCRIPT"; exit 1 }
+          & $env:VERIFIER_PREPARE_SCRIPT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verifier permission smoke gate
+        shell: powershell
+        run: |
+          if (-not (Test-Path $env:VERIFIER_EFFECTIVE_SETTINGS)) { Write-Error "effective verifier settings missing: $env:VERIFIER_EFFECTIVE_SETTINGS"; exit 1 }
+          $cfg = [IO.File]::ReadAllText($env:VERIFIER_EFFECTIVE_SETTINGS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+          $allow = @($cfg.permissions.allow)
+          $deny = @($cfg.permissions.deny)
+          if ($allow -notcontains "Edit(.loop-output/**)") { Write-Error "effective verifier settings do not allow Edit(.loop-output/**)"; exit 1 }
+          $bad = @($deny | Where-Object { $_ -eq "Edit" -or $_ -eq "Write" })
+          if ($bad.Count -gt 0) { Write-Error "effective verifier settings contain a bare deny that overrides output writes: $($bad -join ', ')"; exit 1 }
+          Write-Output "permission smoke PASS: output edits allowed; no bare Edit/Write deny"
+
+      - name: UAT environment preflight
+        shell: powershell
+        run: |
+          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "verifier already complete for this fingerprint; skipping environment preflight"; exit 0 }
+          $kc = "C:\Users\Administrator\AppData\Local\Temp\codex-pvam-kubectl\kubectl.exe"
+          if (-not (Test-Path $kc)) { Write-Error "kubectl missing at $kc; move it to a stable path and update this workflow"; exit 1 }
+          foreach ($p in 8443, 36378) {
+            $ok = Test-NetConnection -ComputerName 192.168.18.149 -Port $p -WarningAction SilentlyContinue -InformationLevel Quiet
+            Write-Output "192.168.18.149:$p => $ok"
+            if (-not $ok) { Write-Error "UAT_ENV_BLOCKED: cluster port $p unreachable"; exit 1 }
+          }
+
+      - name: Claude review + UAT live view
+        shell: powershell
+        run: |
+          if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "verifier already complete for this fingerprint; skipping Claude execution"; exit 0 }
+          if (-not (Test-Path $env:VERIFIER_RUNNER_SCRIPT)) { Write-Error "runner script missing: $env:VERIFIER_RUNNER_SCRIPT"; exit 1 }
+          & $env:VERIFIER_RUNNER_SCRIPT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Snapshot verifier progress
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          Write-Output "=== VERIFIER PROGRESS SNAPSHOT ==="
+          if (-not (Test-Path $env:VERIFIER_PROGRESS)) { Write-Output "progress ledger missing"; exit 0 }
+          try {
+            $s = [IO.File]::ReadAllText($env:VERIFIER_PROGRESS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            Write-Output "candidate=$($s.candidate_sha)"
+            Write-Output "fingerprint=$($s.input_fingerprint)"
+            Write-Output "status=$($s.status)"
+            Write-Output "current_task=$($s.current_task_id)"
+            Write-Output "resume_count=$($s.resume_count)"
+            foreach ($t in @($s.tasks)) {
+              Write-Output ("[{0}] {1} | attempts={2} | {3}" -f $t.status, $t.id, $t.attempts, $t.title)
+            }
+          } catch {
+            Write-Output "progress ledger could not be parsed: $($_.Exception.Message)"
+          }
+
+      - name: Complete round and expose outputs
+        id: finalize
+        if: success()
+        shell: powershell
+        run: |
+          $f = "$env:OUTDIR\uat-result.txt"
+          if (-not (Test-Path $f)) { Write-Error "uat-result.txt missing - verifier did not complete its contract"; exit 1 }
+          $r = ([IO.File]::ReadAllText($f, [System.Text.Encoding]::UTF8)).Trim()
+          if ($r -notin @("PASS", "REJECTED", "BLOCKED")) { Write-Error "invalid result: $r"; exit 1 }
+          Write-Output "=== ROUND RESULT: $r ==="
+          & $env:LOOP_STATE_SCRIPT -Operation CompleteRound -Cycle ([int]$env:LOOP_CYCLE) -Round ([int]$env:LOOP_ROUND) -Verdict $r
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload round output
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: loop-cycle-${{ inputs.cycle }}-round-${{ inputs.round }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            D:\Redemption\Redemption\.loop-output\loop-state.json
+            D:\Redemption\Redemption\.loop-output\cycles\cycle-${{ inputs.cycle }}\round-${{ inputs.round }}\
+            D:\Redemption\Redemption\.loop-output\verifier-state\
+            D:\Redemption\Redemption\.loop-output\UAT_REPORT.md
+            D:\Redemption\Redemption\.loop-output\uat-result.txt
+            D:\Redemption\Redemption\.loop-output\IMPLEMENTATION_HANDOFF.md
+            D:\Redemption\Redemption\.loop-output\codex-final.txt
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

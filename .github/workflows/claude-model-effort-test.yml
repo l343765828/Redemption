@@ -1,0 +1,72 @@
+name: Claude Model Effort Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLAUDE_MODEL: opus
+  CLAUDE_EFFORT: low
+
+jobs:
+  claude-model-test:
+    runs-on:
+      - self-hosted
+      - windows
+      - x64
+      - claude-verifier
+
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check Claude environment
+        shell: powershell
+        run: |
+          whoami
+          $PSVersionTable.PSVersion
+          Get-Command claude
+          claude --version
+
+          Write-Host "Requested Claude model: $env:CLAUDE_MODEL"
+          Write-Host "Requested effort: $env:CLAUDE_EFFORT"
+
+      - name: Test Claude model and effort
+        shell: powershell
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          $result = claude -p `
+            --model $env:CLAUDE_MODEL `
+            --effort $env:CLAUDE_EFFORT `
+            --permission-mode plan `
+            "Output exactly CLAUDE_MODEL_OK. Do not modify any files."
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Claude exited with code $LASTEXITCODE."
+          }
+
+          $resultText = ($result | Out-String).Trim()
+
+          Write-Host "Claude final output: [$resultText]"
+
+          if ($resultText -ne "CLAUDE_MODEL_OK") {
+            throw "Claude model/effort test failed. Expected CLAUDE_MODEL_OK."
+          }
+
+          Write-Host "CLAUDE_MODEL_EFFORT_TEST=PASS"
+
+      - name: Ensure repository was not modified
+        shell: powershell
+        run: |
+          $changes = git status --porcelain
+          if ($changes) {
+            Write-Host $changes
+            throw "Repository was modified during the Claude smoke test."
+          }
+
+          Write-Host "Repository unchanged."

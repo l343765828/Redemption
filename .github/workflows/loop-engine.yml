@@ -1,0 +1,123 @@
+# Operator entry point for Loop Engine.
+# auto: initialize or recover the current cycle and continue from durable state.
+# new-cycle: only after LOOP_EXHAUSTED; opens a new cycle with a fresh three-round budget.
+
+name: loop-engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_mode:
+        description: auto = start/recover current cycle; new-cycle = continue after LOOP_EXHAUSTED with another 3-round budget
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - new-cycle
+
+concurrency:
+  group: loop-engine
+  cancel-in-progress: false
+
+env:
+  WORKTREE: D:\Redemption\Worktrees\pvam-work02-m2-float64-test
+  MAINREPO: D:\Redemption\Redemption
+  OUTDIR: D:\Redemption\Redemption\.loop-output
+  BRANCH: codex/pvam-work02-uat-candidate-20260813
+  SSH_URL: git@github.com:l343765828/Redemption.git
+  LOOP_STATE_SCRIPT: D:\Redemption\Redemption\.loop-engine\loop-state.ps1
+  LOOP_STATE_FILE: D:\Redemption\Redemption\.loop-output\loop-state.json
+  LOOP_CYCLES_DIR: D:\Redemption\Redemption\.loop-output\cycles
+  UAT_PERIOD_POOL_FILE: D:\Redemption\Redemption\.loop-engine\uat-period-pool.json
+
+jobs:
+  prepare:
+    runs-on: self-hosted
+    outputs:
+      cycle: ${{ steps.state.outputs.cycle }}
+      start_round: ${{ steps.state.outputs.start_round }}
+      start_action: ${{ steps.state.outputs.start_action }}
+      previous_report: ${{ steps.state.outputs.previous_report }}
+      state_status: ${{ steps.state.outputs.state_status }}
+    steps:
+      - name: Reconcile durable loop state
+        id: state
+        shell: powershell
+        run: |
+          if (-not (Test-Path $env:LOOP_STATE_SCRIPT)) { Write-Error "loop state script missing: $env:LOOP_STATE_SCRIPT"; exit 1 }
+          & $env:LOOP_STATE_SCRIPT -Operation Prepare -RunMode "${{ inputs.run_mode }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  round1:
+    name: round-1
+    needs: prepare
+    if: ${{ needs.prepare.outputs.start_round == '1' && needs.prepare.outputs.start_action != 'none' }}
+    uses: ./.github/workflows/loop-round.yml
+    with:
+      cycle: ${{ needs.prepare.outputs.cycle }}
+      round: "1"
+      action: ${{ needs.prepare.outputs.start_action }}
+      previous_report: ${{ needs.prepare.outputs.previous_report }}
+
+  round2:
+    name: round-2
+    needs: [prepare, round1]
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.prepare.result == 'success' &&
+        (
+          (needs.prepare.outputs.start_round == '2' && needs.prepare.outputs.start_action != 'none') ||
+          (needs.prepare.outputs.start_round == '1' && needs.round1.result == 'success' && needs.round1.outputs.verdict == 'REJECTED')
+        )
+      }}
+    uses: ./.github/workflows/loop-round.yml
+    with:
+      cycle: ${{ needs.prepare.outputs.cycle }}
+      round: "2"
+      action: ${{ needs.prepare.outputs.start_round == '2' && needs.prepare.outputs.start_action || 'rework' }}
+      previous_report: ${{ needs.prepare.outputs.start_round == '2' && needs.prepare.outputs.previous_report || needs.round1.outputs.report_path }}
+
+  round3:
+    name: round-3
+    needs: [prepare, round1, round2]
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.prepare.result == 'success' &&
+        (
+          (needs.prepare.outputs.start_round == '3' && needs.prepare.outputs.start_action != 'none') ||
+          (needs.round2.result == 'success' && needs.round2.outputs.verdict == 'REJECTED')
+        )
+      }}
+    uses: ./.github/workflows/loop-round.yml
+    with:
+      cycle: ${{ needs.prepare.outputs.cycle }}
+      round: "3"
+      action: ${{ needs.prepare.outputs.start_round == '3' && needs.prepare.outputs.start_action || 'rework' }}
+      previous_report: ${{ needs.prepare.outputs.start_round == '3' && needs.prepare.outputs.previous_report || needs.round2.outputs.report_path }}
+
+  finalize:
+    needs: [prepare, round1, round2, round3]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
+    runs-on: self-hosted
+    steps:
+      - name: Final loop status
+        shell: powershell
+        run: |
+          & $env:LOOP_STATE_SCRIPT -Operation Summarize
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload loop state
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: loop-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            D:\Redemption\Redemption\.loop-output\loop-state.json
+            D:\Redemption\Redemption\.loop-output\cycles\cycle-${{ needs.prepare.outputs.cycle }}\cycle-summary.md
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

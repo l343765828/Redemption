@@ -1,0 +1,82 @@
+name: Codex Model Effort Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CODEX_MODEL: gpt-5.6-sol
+  CODEX_REASONING_EFFORT: low
+
+jobs:
+  codex-model-test:
+    runs-on:
+      - self-hosted
+      - windows
+      - x64
+      - codex-producer
+
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check Codex environment
+        shell: powershell
+        run: |
+          whoami
+          $PSVersionTable.PSVersion
+          Get-Command codex
+          codex --version
+
+          Write-Host "Requested Codex model: $env:CODEX_MODEL"
+          Write-Host "Requested reasoning effort: $env:CODEX_REASONING_EFFORT"
+
+      - name: Test Codex model and reasoning effort
+        shell: powershell
+        run: |
+          $reasoningConfig = 'model_reasoning_effort="' + $env:CODEX_REASONING_EFFORT + '"'
+          $outputFile = Join-Path $env:RUNNER_TEMP "codex-model-test-output.txt"
+
+          if (Test-Path $outputFile) {
+            Remove-Item $outputFile -Force
+          }
+
+          codex exec `
+            --model $env:CODEX_MODEL `
+            --config $reasoningConfig `
+            --sandbox read-only `
+            --output-last-message $outputFile `
+            "Output exactly CODEX_MODEL_OK. Do not modify any files."
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Codex exited with code $LASTEXITCODE."
+          }
+
+          if (-not (Test-Path $outputFile)) {
+            throw "Codex did not create the expected output file."
+          }
+
+          $result = (Get-Content $outputFile -Raw).Trim()
+
+          Write-Host "Codex final output: [$result]"
+
+          if ($result -ne "CODEX_MODEL_OK") {
+            throw "Codex model/effort test failed. Expected CODEX_MODEL_OK."
+          }
+
+          Write-Host "CODEX_MODEL_EFFORT_TEST=PASS"
+
+      - name: Ensure repository was not modified
+        shell: powershell
+        run: |
+          $changes = git status --porcelain
+          if ($changes) {
+            Write-Host $changes
+            throw "Repository was modified during the Codex smoke test."
+          }
+
+          Write-Host "Repository unchanged."
