@@ -17,6 +17,7 @@ from MessageConsumer.PvEventConsumer import (
     PvEventConsumer,
     TOPIC_ORDERS,
     TOPIC_REFUNDS,
+    _STAGE_ORDER,
     load_settings,
 )
 
@@ -738,6 +739,91 @@ def test_exception_delivery_retry_resumes_partition_after_confirmed_commit(setti
     assert consumer.commits == [(message, False)]
     assert consumer.pauses == [PartitionRef(TOPIC_ORDERS, 0)]
     assert consumer.resumes == [PartitionRef(TOPIC_ORDERS, 0)]
+
+
+@pytest.mark.parametrize(
+    ("commit_error", "recovers", "expected_running"),
+    [
+        (FakeKafkaException(FakeRetriableKafkaError()), True, True),
+        (FakeKafkaException(FakeNonRetriableKafkaError()), False, False),
+    ],
+    ids=("retryable", "non-retryable"),
+)
+def test_dispatch_success_commit_failure_reports_completed_business_stages(
+    settings,
+    commit_error,
+    recovers,
+    expected_running,
+):
+    class PostDispatchCommitFailureConsumer(FakeConsumer):
+        def __init__(self):
+            super().__init__()
+            self.commit_attempts = 0
+
+        def commit(self, *, message, asynchronous):
+            self.commit_attempts += 1
+            if self.commit_attempts == 1 or not recovers:
+                raise commit_error
+            super().commit(message=message, asynchronous=asynchronous)
+
+    consumer = PostDispatchCommitFailureConsumer()
+    producer = FakeProducer()
+    coordinator = SequenceCoordinator()
+    subject = build_subject(
+        settings,
+        coordinator=coordinator,
+        consumer=consumer,
+        producer=producer,
+        kafka_exception_types=(FakeKafkaException,),
+    )
+    message = FakeMessage(valid_order())
+
+    subject.process_message(message)
+
+    assert len(coordinator.calls) == 1
+    assert len(producer.records) == 1
+    record = producer.records[0]["payload"]
+    assert record["failed_stage"] == "UNKNOWN"
+    assert record["completed_stages"] == list(_STAGE_ORDER)
+    assert record["pending_stages"] == []
+    assert record["has_redis_residue"] is True
+    assert record["reason"] == "OFFSET_COMMIT_FAILURE"
+    assert consumer.commit_attempts == 2
+    assert consumer.commits == ([(message, False)] if recovers else [])
+    assert subject.running is expected_running
+
+
+def test_retry_dispatch_commit_failure_does_not_repeat_completed_dispatch(settings):
+    class RetryCommitFailureConsumer(FakeConsumer):
+        def __init__(self):
+            super().__init__()
+            self.commit_attempts = 0
+
+        def commit(self, *, message, asynchronous):
+            self.commit_attempts += 1
+            if self.commit_attempts == 1:
+                raise FakeKafkaException(FakeRetriableKafkaError())
+            super().commit(message=message, asynchronous=asynchronous)
+
+    consumer = RetryCommitFailureConsumer()
+    producer = FakeProducer()
+    coordinator = SequenceCoordinator(
+        [TransientFailure("redis unavailable"), SimpleNamespace(disposition="APPLY")]
+    )
+    subject = build_subject(
+        settings,
+        coordinator=coordinator,
+        consumer=consumer,
+        producer=producer,
+        kafka_exception_types=(FakeKafkaException,),
+    )
+    message = FakeMessage(valid_order())
+
+    subject.process_message(message)
+
+    assert len(coordinator.calls) == 2
+    assert consumer.commits == [(message, False)]
+    assert producer.records[0]["payload"]["completed_stages"] == list(_STAGE_ORDER)
 
 
 def test_retryable_exception_offset_commit_is_retried_without_losing_message(settings):

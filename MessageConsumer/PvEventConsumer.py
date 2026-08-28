@@ -391,12 +391,18 @@ class PvEventConsumer:
         # ---------------------------------------------------------
         # Step 4: 按 topic 路由分发
         # ---------------------------------------------------------
+        dispatch_completed = False
         try:
             self._dispatch(topic, payload)
+            dispatch_completed = True
             # commit 必须和 dispatch 位于同一个 try，且显式同步提交当前消息。
             self.consumer.commit(message=msg, asynchronous=False)
         except Exception as exc:
-            self._handle_dispatch_failure(msg, payload, exc)
+            if dispatch_completed:
+                # 三条业务链与投递 ACK 均已完成；这里只允许重试 offset commit，禁止重复 dispatch。
+                self._handle_post_dispatch_commit_failure(msg, payload, exc)
+            else:
+                self._handle_dispatch_failure(msg, payload, exc)
             return
 
         # ---------------------------------------------------------
@@ -410,6 +416,41 @@ class PvEventConsumer:
         return self.coordinator.dispatch_refund(payload)
 
     # region 异常分类与四类处置
+    def _handle_post_dispatch_commit_failure(
+        self,
+        msg: Any,
+        payload: Mapping[str, Any],
+        exc: Exception,
+    ) -> None:
+        # region 记录业务完成后的 offset 提交故障
+        decision = FailureDecision(
+            3,
+            "UNKNOWN",
+            True,
+            "OFFSET_COMMIT_FAILURE",
+        )
+        record = self._build_exception_record(
+            msg,
+            payload,
+            exc,
+            decision,
+            extra={
+                "completed_stages": list(_STAGE_ORDER),
+                "pending_stages": [],
+            },
+        )
+        # offset 故障不是脏业务消息，不计入永久失败熔断；异常消息仅发送一次，
+        # 后续失败只重试同一 offset commit，避免异常 topic 重复放大。
+        if not self._send_exception_with_retry(msg, record):
+            return
+        if not self._commit_exception_offset_with_retry(msg):
+            return
+        self._reset_failure_counters()
+        partition_key = self._partition_key(msg)
+        if partition_key in self._retry_pauses:
+            self._resume_retry(partition_key)
+        # endregion
+
     def _handle_dispatch_failure(
         self,
         msg: Any,
@@ -514,10 +555,15 @@ class PvEventConsumer:
                     msg.partition(),
                     attempt,
                 )
+            dispatch_completed = False
             try:
                 self._dispatch(msg.topic(), payload)
+                dispatch_completed = True
                 self.consumer.commit(message=msg, asynchronous=False)
             except Exception as exc:
+                if dispatch_completed:
+                    self._handle_post_dispatch_commit_failure(msg, payload, exc)
+                    return
                 latest_exc = exc
                 latest_decision = self._classify_exception(exc)
                 if latest_decision.category in {1, 3}:
@@ -662,7 +708,6 @@ class PvEventConsumer:
         msg: Any,
         record: Mapping[str, Any],
     ) -> bool:
-        key = self._partition_key(msg)
         attempt = 1
         while self.running:
             try:
