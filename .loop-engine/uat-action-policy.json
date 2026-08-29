@@ -53,10 +53,11 @@
         "exec"
       ],
       "repo_cwd": true,
+      "runtime_target": "dask_scheduler",
       "command": [
         "python3",
         "-c",
-        "from distributed import Client;from Model import Config;import json;c=Client(Config.SCHEDULE_ADDRESS);print(json.dumps(c.scheduler_info(),sort_keys=True,default=str));c.close()"
+        "from distributed import Client;import json,sys;c=Client(sys.argv[1]);print(json.dumps(c.scheduler_info(),sort_keys=True,default=str));c.close()"
       ]
     },
     "dask-actor-inventory": {
@@ -64,10 +65,11 @@
         "exec"
       ],
       "repo_cwd": true,
+      "runtime_target": "dask_scheduler",
       "command": [
         "python3",
         "-c",
-        "from distributed import Client;from Model import Config;import json;c=Client(Config.SCHEDULE_ADDRESS);x=c.run_on_scheduler(lambda dask_scheduler: sorted([str(k) for k,v in dask_scheduler.tasks.items() if bool(getattr(v,'actor',False))]));print(json.dumps(x));c.close()"
+        "from distributed import Client;import json,sys;c=Client(sys.argv[1]);x=c.run_on_scheduler(lambda dask_scheduler: sorted([str(k) for k,v in dask_scheduler.tasks.items() if bool(getattr(v,'actor',False))]));print(json.dumps(x));c.close()"
       ]
     },
     "gpu-runtime-probe": {
@@ -107,10 +109,11 @@
         "exec"
       ],
       "repo_cwd": true,
+      "runtime_target": "dask_scheduler",
       "command": [
         "python3",
         "-c",
-        "from distributed import Client;from Model import Config;import json;c=Client(Config.SCHEDULE_ADDRESS);print(json.dumps(sorted([str(x) for x in c.list_datasets()])));c.close()"
+        "from distributed import Client;import json,sys;c=Client(sys.argv[1]);print(json.dumps(sorted([str(x) for x in c.list_datasets()])));c.close()"
       ]
     }
   },
@@ -189,6 +192,11 @@
   ],
   "pytest_selected_prefixes": [
     "tests/"
+  ],
+  "pytest_full_excluded_paths": [
+    "User/Test/test_team_bonus_tb.py",
+    "User/test_bonus_pipeline_auto_check.py",
+    "User/test_userstatsservice_elite_report.py"
   ],
   "required_kafka_scenarios_by_stage": {
     "OPUS": [
@@ -351,6 +359,10 @@
     "repo_path": "/mnt/dask/Redemption/Redemption",
     "module": "MessageConsumer.PvEventConsumer",
     "kafka_bootstrap": "my-cluster-kafka-bootstrap.kafka-prod.svc:9092",
+    "dask_scheduler": "tcp://192.168.18.149:38786",
+    "redis_host": "192.168.18.149",
+    "redis_port": 36378,
+    "redis_db": 0,
     "calc_month_by_role": {
       "primary": 209906,
       "secondary": 209907

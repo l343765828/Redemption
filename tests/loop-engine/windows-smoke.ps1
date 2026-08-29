@@ -19,7 +19,7 @@ if (-not (Test-Path $env:UAT_PERIOD_POOL_FILE)) { throw "UAT period pool missing
 $pool = [IO.File]::ReadAllText($env:UAT_PERIOD_POOL_FILE, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
 if ([int]$pool.schema_version -ne 1) { throw "unsupported UAT period pool schema" }
 $pairs = @($pool.pairs)
-if ($pairs.Count -ne 10) { throw "UAT period pool must contain exactly 10 reviewed pairs; found $($pairs.Count)" }
+if ($pairs.Count -lt 10) { throw "UAT period pool must retain the initial 10 reviewed pairs; found $($pairs.Count)" }
 $slots = @{}
 $periods = @{}
 foreach ($pair in $pairs) {
@@ -61,11 +61,11 @@ Write-Host "[CONTROL-REGEX-SMOKE] PASS"
 # before verifier work and exists to catch packaging/version drift on PS5.1.
 $proxyContractPath = Join-Path $env:MAINREPO ".loop-engine\uat-action-proxy.ps1"
 $policyContractPath = Join-Path $env:MAINREPO ".loop-engine\uat-action-policy.json"
-$consumerRuntimeControllerPath = Join-Path $env:MAINREPO ".loop-engine\consumer-runtime-controller.py"
+$consumerRuntimeControllerPath = Join-Path $env:MAINREPO ".loop-engine\consumer-runtime-controller-r9.py"
 $protectedHashContractPath = Join-Path $env:MAINREPO ".loop-engine\protected-evidence-hash.ps1"
 if (-not (Test-Path -LiteralPath $proxyContractPath -PathType Leaf)) { throw "v20 proxy contract missing" }
 if (-not (Test-Path -LiteralPath $policyContractPath -PathType Leaf)) { throw "v20 policy contract missing" }
-if (-not (Test-Path -LiteralPath $consumerRuntimeControllerPath -PathType Leaf)) { throw "v20 consumer-runtime-controller.py missing" }
+if (-not (Test-Path -LiteralPath $consumerRuntimeControllerPath -PathType Leaf)) { throw "R9 consumer-runtime-controller-r9.py missing" }
 if (-not (Test-Path -LiteralPath $protectedHashContractPath -PathType Leaf)) { throw "v20 protected evidence hash contract missing" }
 $proxyContractText = [IO.File]::ReadAllText($proxyContractPath, [System.Text.Encoding]::UTF8)
 foreach ($needle in @(
@@ -684,7 +684,7 @@ Write-Host "=== WINDOWS POWERSHELL SMOKE PASS ==="
 $stateContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\loop-state.ps1"), [Text.Encoding]::UTF8)
 $roundContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".github\workflows\loop-round.yml"), [Text.Encoding]::UTF8)
 $proxyContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\uat-action-proxy.ps1"), [Text.Encoding]::UTF8)
-$consumerRuntimeContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\consumer-runtime-controller.py"), [Text.Encoding]::UTF8)
+$consumerRuntimeContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\consumer-runtime-controller-r9.py"), [Text.Encoding]::UTF8)
 $verifyContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\verify-proxy-period-evidence.ps1"), [Text.Encoding]::UTF8)
 $policyV20 = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\uat-action-policy.json"), [Text.Encoding]::UTF8) | ConvertFrom-Json
 if ($stateContract -notmatch 'LOOP_CANDIDATE_SHA') { throw "v20 candidate SHA export missing" }

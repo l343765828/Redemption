@@ -55,7 +55,7 @@ class LoopEngineV19SecurityRegression(unittest.TestCase):
         cls.workflow = read(".github/workflows/loop-round.yml")
         cls.verify = read(".loop-engine/verify-proxy-period-evidence.ps1")
         cls.proxy = read(".loop-engine/uat-action-proxy.ps1")
-        cls.runtime_controller = read(".loop-engine/consumer-runtime-controller.py")
+        cls.runtime_controller = read(".loop-engine/consumer-runtime-controller-r9.py")
         cls.policy = json.loads(read(".loop-engine/uat-action-policy.json"))
 
     def test_gate_01_missing_candidate_sha_is_rejected(self):

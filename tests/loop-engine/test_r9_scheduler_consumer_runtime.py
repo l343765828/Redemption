@@ -16,7 +16,7 @@ POLICY_PATH = ROOT / ".loop-engine" / "uat-action-policy.json"
 READINESS_PATH = ROOT / ".loop-engine" / "uat-environment-readiness.json"
 READINESS_GATE = ROOT / ".loop-engine" / "assert-uat-environment-readiness.ps1"
 PROXY_PATH = ROOT / ".loop-engine" / "uat-action-proxy.ps1"
-RUNTIME_CONTROLLER = ROOT / ".loop-engine" / "consumer-runtime-controller.py"
+RUNTIME_CONTROLLER = ROOT / ".loop-engine" / "consumer-runtime-controller-r9.py"
 
 
 def _function(source: str, name: str) -> str:
@@ -62,6 +62,11 @@ def test_policy_targets_the_real_scheduler_runtime() -> None:
     assert target["repo_path"] == "/mnt/dask/Redemption/Redemption"
     assert target["module"] == "MessageConsumer.PvEventConsumer"
     assert target["kafka_bootstrap"] == "my-cluster-kafka-bootstrap.kafka-prod.svc:9092"
+    assert target["dask_scheduler"] == "tcp://192.168.18.149:38786"
+    assert target["redis_host"] == "192.168.18.149"
+    assert target["redis_port"] == 36378
+    assert target["redis_db"] == 0
+    assert "redis_password" not in target
     assert target["calc_month_by_role"] == {
         "primary": 209906,
         "secondary": 209907,
@@ -125,7 +130,7 @@ def test_consumer_lifecycle_controls_a_temporary_process_not_a_deployment() -> N
     proxy = PROXY_PATH.read_text(encoding="utf-8")
     lifecycle = _function(proxy, "Invoke-ConsumerLifecycle")
 
-    assert "consumer-runtime-controller.py" in proxy
+    assert "consumer-runtime-controller-r9.py" in proxy
     assert "scheduler-pod-temporary-process" in lifecycle
     assert "runtime_mode='scheduler-pod-temporary-process'" in lifecycle
     assert "set','env" not in lifecycle
@@ -187,16 +192,17 @@ def test_auxiliary_python_loads_runtime_config_without_secret_arguments() -> Non
         assert "Invoke-RuntimePythonCommand" in _function(proxy, name), name
 
 
-def test_scheduler_dask_profiles_import_candidate_config() -> None:
+def test_scheduler_dask_profiles_use_policy_pinned_target() -> None:
     policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
     profiles = policy["exec_profiles"]
 
     for name in ("dask-scheduler-info", "dask-actor-inventory", "dask-list-datasets"):
         profile = profiles[name]
         assert profile["repo_cwd"] is True
+        assert profile["runtime_target"] == "dask_scheduler"
         command = " ".join(profile["command"])
-        assert "from Model import Config" in command
-        assert "PVAM_DASK_SCHEDULER" not in command
+        assert "from Model import Config" not in command
+        assert "sys.argv[1]" in command
 
 
 def test_lifecycle_requires_the_discovered_repo_to_match_policy() -> None:

@@ -18,7 +18,7 @@ Required behavior:
 4. Preserve already-passing behavior and tests. Do not weaken assertions, remove validation, or bypass UAT gates merely to obtain acceptance.
 5. Do not turn `BLOCKED`, environment, credential, infrastructure, or unresolved human-decision findings into speculative code changes.
 6. Re-check the exact files and tests affected by each finding and produce a new Candidate, not a verbal-only response.
-7. Update `.loop-output/IMPLEMENTATION_HANDOFF.md` with the rework and producer-side verification evidence.
+7. Update `$env:PRODUCER_OUTDIR\IMPLEMENTATION_HANDOFF.md` with the rework and producer-side verification evidence. Do not write directly to `MAINREPO\.loop-output`; the Controller publishes validated copies.
 8. If a confirmed finding cannot be safely fixed because an external decision or environment prerequisite is required, finish with the bare final line `PRODUCER_BLOCKED`.
 9. Otherwise, after local verification allowed by the producer environment, finish with the bare final line `READY_FOR_UAT`.
 

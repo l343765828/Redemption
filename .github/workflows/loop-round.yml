@@ -114,6 +114,7 @@ jobs:
       LOOP_CYCLE: ${{ inputs.cycle }}
       LOOP_ROUND: ${{ inputs.round }}
       LOOP_ROUND_ACTION: ${{ inputs.action }}
+      PRODUCER_OUTDIR: ${{ runner.temp }}\loop-engine-producer\run-${{ github.run_id }}-attempt-${{ github.run_attempt }}-cycle-${{ inputs.cycle }}-round-${{ inputs.round }}
       PREVIOUS_UAT_REPORT: ${{ inputs.previous_report }}
       FINDINGS_SOURCE: ${{ inputs.findings_source }}
       FINDINGS_REF: ${{ inputs.findings_ref }}
@@ -200,6 +201,19 @@ jobs:
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force $env:OUTDIR | Out-Null
+          $worktreeFull = [IO.Path]::GetFullPath($env:WORKTREE).TrimEnd('\', '/')
+          $mainRepoFull = [IO.Path]::GetFullPath($env:MAINREPO).TrimEnd('\', '/')
+          $producerFull = [IO.Path]::GetFullPath($env:PRODUCER_OUTDIR).TrimEnd('\', '/')
+          if (($producerFull + '\').StartsWith($worktreeFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            Write-Error "producer staging directory must be outside the candidate worktree"; exit 1
+          }
+          if (($producerFull + '\').StartsWith($mainRepoFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            Write-Error "producer staging directory must be outside the main repository"; exit 1
+          }
+          if (Test-Path -LiteralPath $producerFull) {
+            Write-Error "producer staging directory already exists for this run attempt: $producerFull"; exit 1
+          }
+          New-Item -ItemType Directory -Path $producerFull | Out-Null
           $head = (git -C $env:WORKTREE rev-parse HEAD).Trim()
           Write-Output "worktree HEAD = $head"
           $status = git -C $env:WORKTREE status --porcelain
@@ -235,6 +249,12 @@ jobs:
             "",
             $masterAgents
           ) -join "`n"
+          $producerOutputContext = @(
+            "# CONTROLLER-OWNED PRODUCER OUTPUT CONTRACT",
+            "Producer staging directory: $env:PRODUCER_OUTDIR",
+            "Write IMPLEMENTATION_HANDOFF.md exactly to: $env:PRODUCER_OUTDIR\IMPLEMENTATION_HANDOFF.md",
+            "Do not write any file under MAINREPO .loop-output; the Controller copies validated producer outputs there."
+          ) -join "`n"
 
           if ($env:LOOP_ROUND_ACTION -eq "rework") {
             if (-not (Test-Path $env:PRODUCER_REWORK_OVERRIDE)) { Write-Error "rework override missing: $env:PRODUCER_REWORK_OVERRIDE"; exit 1 }
@@ -246,6 +266,8 @@ jobs:
               $override,
               "",
               $masterAgentsContext,
+              "",
+              $producerOutputContext,
               "",
               $reworkOverride,
               "",
@@ -270,6 +292,8 @@ jobs:
               "",
               $masterAgentsContext,
               "",
+              $producerOutputContext,
+              "",
               "# LOOP CONTEXT",
               "Cycle: $env:LOOP_CYCLE",
               "Round: $env:LOOP_ROUND",
@@ -286,8 +310,8 @@ jobs:
             -c "model_reasoning_effort=`"$env:CODEX_REASONING_EFFORT`"" `
             --sandbox workspace-write `
             -C $env:WORKTREE `
-            --add-dir $env:OUTDIR `
-            --output-last-message "$env:OUTDIR\codex-final.txt" `
+            --add-dir $env:PRODUCER_OUTDIR `
+            --output-last-message "$env:PRODUCER_OUTDIR\codex-final.txt" `
             -
           if ($LASTEXITCODE -ne 0) { Write-Error "codex exec exited $LASTEXITCODE"; exit 1 }
 
@@ -295,7 +319,8 @@ jobs:
         if: ${{ inputs.action != 'resume-verifier' }}
         shell: powershell
         run: |
-          $finalPath = "$env:OUTDIR\codex-final.txt"
+          $finalPath = "$env:PRODUCER_OUTDIR\codex-final.txt"
+          $handoffPath = Join-Path $env:PRODUCER_OUTDIR "IMPLEMENTATION_HANDOFF.md"
           if (-not (Test-Path $finalPath)) { Write-Error "codex-final.txt missing"; exit 1 }
           $final = [IO.File]::ReadAllText($finalPath, [System.Text.Encoding]::UTF8)
           # Force an array even when codex-final.txt contains exactly one non-empty line.
@@ -307,9 +332,11 @@ jobs:
           if ($lines.Count -eq 0) { Write-Error "codex-final.txt is empty"; exit 1 }
           $producerVerdict = ([string]$lines[-1]).Trim()
           Write-Output "producer verdict line: '$producerVerdict'"
+          if ($producerVerdict -notin @("READY_FOR_UAT", "PRODUCER_BLOCKED")) { Write-Error "final line is not a bare status word: '$producerVerdict'"; exit 1 }
+          if (-not (Test-Path $handoffPath)) { Write-Error "IMPLEMENTATION_HANDOFF.md missing in producer staging"; exit 1 }
+          [IO.File]::Copy($finalPath, "$env:OUTDIR\codex-final.txt", $true)
+          [IO.File]::Copy($handoffPath, "$env:OUTDIR\IMPLEMENTATION_HANDOFF.md", $true)
           if ($producerVerdict -eq "PRODUCER_BLOCKED") { Write-Error "Producer blocked. See codex-final.txt"; exit 1 }
-          if ($producerVerdict -ne "READY_FOR_UAT") { Write-Error "final line is not a bare status word: '$producerVerdict'"; exit 1 }
-          if (-not (Test-Path "$env:OUTDIR\IMPLEMENTATION_HANDOFF.md")) { Write-Error "IMPLEMENTATION_HANDOFF.md missing in OUTDIR"; exit 1 }
           $status = git -C $env:WORKTREE status --porcelain
           if (-not $status) {
             $headNow = (git -C $env:WORKTREE rev-parse HEAD).Trim().ToLowerInvariant()

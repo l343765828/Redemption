@@ -101,7 +101,7 @@ foreach ($relative in @(
     ".loop-engine\uat-period-pool.json",
     ".loop-engine\uat-action-proxy.ps1",
     ".loop-engine\uat-action-policy.json",
-    ".loop-engine\consumer-runtime-controller.py",
+    ".loop-engine\consumer-runtime-controller-r9.py",
     ".loop-engine\protected-evidence-hash.ps1",
     ".loop-engine\verify-proxy-period-evidence.ps1",
     "K8S\kubectl.exe",

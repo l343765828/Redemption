@@ -532,31 +532,56 @@ function Invoke-PodCommand([string]$Pod, [string]$Container, [string[]]$Command)
 function Invoke-RuntimePythonCommand([string]$Pod,[string]$Container,[string]$Repo,$Policy,[string]$Code,[string[]]$Arguments) {
     $expectedRepo=([string]$Policy.consumer_runtime_target.repo_path).Trim()
     if(-not $expectedRepo -or $Repo -ne $expectedRepo){throw 'UAT_ACTION_POLICY_DENIED: runtime Python repository path is not the version-controlled target'}
-    $kafka=([string]$Policy.consumer_runtime_target.kafka_bootstrap).Trim()
+    $target=$Policy.consumer_runtime_target
+    $kafka=([string]$target.kafka_bootstrap).Trim()
     if(-not $kafka -or $kafka -match '[\x00\r\n ]'){throw 'UAT_ACTION_POLICY_DENIED: runtime Kafka bootstrap is missing or invalid'}
+    $daskScheduler=([string]$target.dask_scheduler).Trim()
+    $redisHost=([string]$target.redis_host).Trim()
+    $redisPort=0
+    $redisDb=-1
+    if(-not $daskScheduler -or $daskScheduler -match '[\x00\r\n ]'){throw 'UAT_ACTION_POLICY_DENIED: policy-pinned Dask scheduler is missing or invalid'}
+    if(-not $redisHost -or $redisHost -match '[\x00\r\n ]'){throw 'UAT_ACTION_POLICY_DENIED: policy-pinned Redis host is missing or invalid'}
+    if(-not [int]::TryParse(([string]$target.redis_port),[ref]$redisPort) -or $redisPort -lt 1 -or $redisPort -gt 65535){throw 'UAT_ACTION_POLICY_DENIED: policy-pinned Redis port is missing or invalid'}
+    if(-not [int]::TryParse(([string]$target.redis_db),[ref]$redisDb) -or $redisDb -lt 0){throw 'UAT_ACTION_POLICY_DENIED: policy-pinned Redis DB is missing or invalid'}
     if(-not $Code){throw 'UAT_ACTION_POLICY_DENIED: runtime Python code is missing'}
     $codeB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Code))
     $launcher=@'
 import base64, os, sys
-repo, kafka, code_b64 = sys.argv[1:4]
+repo, kafka, dask_scheduler, redis_host, redis_port, redis_db, code_b64 = sys.argv[1:8]
 if repo not in sys.path:
     sys.path.insert(0, repo)
 from Model import Config as runtime_config
+expected = {
+    "dask_scheduler": dask_scheduler,
+    "redis_host": redis_host,
+    "redis_port": int(redis_port),
+    "redis_db": int(redis_db),
+}
+candidate = {
+    "dask_scheduler": str(runtime_config.SCHEDULE_ADDRESS),
+    "redis_host": str(runtime_config.REDIS_HOST),
+    "redis_port": int(runtime_config.REDIS_PORT),
+    "redis_db": int(runtime_config.REDIS_DB),
+}
+if candidate != expected:
+    raise RuntimeError("UAT_ACTION_POLICY_DENIED: runtime Model.Config does not match policy-pinned endpoints")
 values = {
-    "PVAM_DASK_SCHEDULER": runtime_config.SCHEDULE_ADDRESS,
-    "PVAM_REDIS_HOST": runtime_config.REDIS_HOST,
-    "PVAM_REDIS_PORT": runtime_config.REDIS_PORT,
-    "PVAM_REDIS_DB": runtime_config.REDIS_DB,
+    "PVAM_DASK_SCHEDULER": expected["dask_scheduler"],
+    "PVAM_REDIS_HOST": expected["redis_host"],
+    "PVAM_REDIS_PORT": expected["redis_port"],
+    "PVAM_REDIS_DB": expected["redis_db"],
     "PVAM_REDIS_PASSWORD": runtime_config.REDIS_PASSWORD,
 }
 if any(value is None or str(value) == "" for value in values.values()):
     raise RuntimeError("runtime Model.Config is incomplete")
 os.environ.update({name: str(value) for name, value in values.items()})
 os.environ["PVAM_KAFKA_BOOTSTRAP"] = kafka
-sys.argv = ["<uat-runtime>"] + sys.argv[4:]
+sys.argv = ["<uat-runtime>"] + sys.argv[8:]
 exec(compile(base64.b64decode(code_b64), "<uat-runtime>", "exec"), {"__name__": "__main__"})
 '@
-    return Invoke-PodCommand $Pod $Container (@('python3','-c',$launcher,$Repo,$kafka,$codeB64)+@($Arguments))
+    $launcherB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($launcher))
+    $launcherBootstrap="import base64,sys;source=base64.b64decode(sys.argv[1]);sys.argv=sys.argv[1:];exec(compile(source,'<uat-launcher>','exec'))"
+    return Invoke-PodCommand $Pod $Container (@('python3','-c',$launcherBootstrap,$launcherB64,$Repo,$kafka,$daskScheduler,$redisHost,[string]$redisPort,[string]$redisDb,$codeB64)+@($Arguments))
 }
 
 function Get-CurrentCandidateSha() {
@@ -583,6 +608,13 @@ function Invoke-PolicyExecProfile($Request, $Policy, [string]$ProfileName = "") 
     Assert-RequiredTokens @($requiredTokens) "ExecProfile:$name"
     $pod = ([string]$Request.pod).Trim(); $container = ([string]$Request.container).Trim()
     $command = @(Expand-ProfileCommand @($profile.command)); Assert-NoShellWrapper $command
+    if($profile.PSObject.Properties.Name -contains 'runtime_target'){
+        $runtimeTarget=([string]$profile.runtime_target).Trim()
+        if($runtimeTarget -ne 'dask_scheduler'){throw "UAT_ACTION_POLICY_DENIED: unsupported exec profile runtime_target '$runtimeTarget'"}
+        $daskScheduler=([string]$Policy.consumer_runtime_target.dask_scheduler).Trim()
+        if(-not $daskScheduler -or $daskScheduler -match '[\x00\r\n ]'){throw 'UAT_ACTION_POLICY_DENIED: policy-pinned Dask scheduler is missing or invalid'}
+        $command += @($daskScheduler)
+    }
     if ($profile.PSObject.Properties.Name -contains 'repo_cwd' -and [bool]$profile.repo_cwd) {
         $repo = Get-PodRepoRoot $pod $container $Policy
         $wrapper = "import os,subprocess,sys;os.chdir(sys.argv[1]);raise SystemExit(subprocess.call(sys.argv[2:]))"
@@ -666,13 +698,14 @@ function Resolve-ConsumerRuntimeTarget($Request,$Policy,[string]$Action) {
 }
 
 function Invoke-ConsumerRuntimeController([string]$Pod,[string]$Container,[string]$Operation,$Payload) {
-    $controllerPath=Join-Path $PSScriptRoot 'consumer-runtime-controller.py'
-    if(-not (Test-Path -LiteralPath $controllerPath -PathType Leaf)){throw 'UAT_ENV_BLOCKED: consumer-runtime-controller.py is missing'}
+    $controllerPath=Join-Path $PSScriptRoot 'consumer-runtime-controller-r9.py'
+    if(-not (Test-Path -LiteralPath $controllerPath -PathType Leaf)){throw 'UAT_ENV_BLOCKED: consumer-runtime-controller-r9.py is missing'}
     $controllerText=[IO.File]::ReadAllText($controllerPath,[Text.Encoding]::UTF8)
     $controllerB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($controllerText))
     $payloadJson=$Payload|ConvertTo-Json -Depth 12 -Compress
-    $launcher="import base64,sys;code=base64.b64decode(sys.argv[1]);sys.argv=['consumer-runtime-controller.py']+sys.argv[2:];exec(compile(code,'<consumer-runtime-controller>','exec'),{'__name__':'__main__','__file__':'consumer-runtime-controller.py'})"
-    $runtime=Invoke-PodCommand $Pod $Container @('python3','-c',$launcher,$controllerB64,$Operation,$payloadJson)
+    $payloadB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payloadJson))
+    $launcher="import base64,sys;code=base64.b64decode(sys.argv[1]);payload=base64.b64decode(sys.argv[3]).decode('utf-8');sys.argv=['consumer-runtime-controller-r9.py',sys.argv[2],payload];exec(compile(code,'<consumer-runtime-controller-r9>','exec'),{'__name__':'__main__','__file__':'consumer-runtime-controller-r9.py'})"
+    $runtime=Invoke-PodCommand $Pod $Container @('python3','-c',$launcher,$controllerB64,$Operation,$payloadB64)
     if($runtime.ExitCode -ne 0){return $runtime}
     $json=(@($runtime.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1)
     if(-not $json){throw 'UAT_ENV_BLOCKED: Consumer runtime controller returned no JSON'}
@@ -693,6 +726,10 @@ function New-ConsumerRuntimePayload($Target,[string]$Role,[int]$Period,[int]$Cal
         calc_month=$CalcMonth
         ledger_prefix="pvam:uat:work02:${ExecutionId}:"
         kafka_bootstrap=[string]$Target.kafka_bootstrap
+        dask_scheduler=[string]$Target.dask_scheduler
+        redis_host=[string]$Target.redis_host
+        redis_port=[int]$Target.redis_port
+        redis_db=[int]$Target.redis_db
         elite_rate_percent=[string]$Target.elite_rate_percent
     }
 }
@@ -1107,14 +1144,40 @@ function Invoke-PytestProfile($Request, $Policy, [bool]$Full) {
     $pod = ([string]$Request.pod).Trim(); $container = ([string]$Request.container).Trim()
     $repo = Get-PodRepoRoot $pod $container $Policy
     $targets = @()
-    if (-not $Full) {
+    $excludedPaths = @()
+    if ($Full) {
+        foreach ($rawPath in @($Policy.pytest_full_excluded_paths)) {
+            $value = ([string]$rawPath).Trim()
+            if (-not $value -or $value -match '[\x00\r\n]' -or $value -match '^[A-Za-z]:' -or $value.StartsWith('/')) {
+                throw "UAT_ACTION_POLICY_DENIED: unsafe PytestFull exclusion path"
+            }
+            $normalized = $value.Replace('\','/')
+            foreach ($segment in @($normalized.Split('/'))) {
+                if (-not $segment -or $segment -eq '.' -or $segment -eq '..') {
+                    throw "UAT_ACTION_POLICY_DENIED: PytestFull exclusion directory traversal is forbidden"
+                }
+            }
+            if ($normalized -notmatch '^[A-Za-z0-9_./-]+\.py$') { throw "UAT_ACTION_POLICY_DENIED: invalid PytestFull exclusion path" }
+            $excludedPaths += $normalized
+        }
+        if (@($excludedPaths | Select-Object -Unique).Count -ne $excludedPaths.Count) {
+            throw "UAT_ACTION_POLICY_DENIED: duplicate PytestFull exclusion path"
+        }
+    }
+    else {
         $rawTargets=@($Request.targets | ForEach-Object { ([string]$_).Trim() })
         if ($rawTargets.Count -lt 1 -or $rawTargets.Count -gt 30) { throw "UAT_ACTION_POLICY_DENIED: PytestSelected requires 1..30 targets" }
         $targets=@($rawTargets | ForEach-Object { Assert-PytestTargetAllowed $_ $Policy })
     }
-    $code = "import os,sys,pytest;root=os.path.realpath(sys.argv[1]);os.chdir(root);targets=sys.argv[2:];files=[t.split('::',1)[0] for t in targets];assert all(os.path.commonpath([root,os.path.realpath(os.path.join(root,f))])==root for f in files);raise SystemExit(pytest.main(['-q']+targets))"
-    $r=Invoke-PodCommand $pod $container (@("python3","-c",$code,$repo) + $targets)
-    $r | Add-Member -NotePropertyName Semantic -NotePropertyValue ([pscustomobject]@{kind=($(if($Full){'PytestFullResult'}else{'PytestSelectedResult'}));targets=@($targets);exit_code=[int]$r.ExitCode}) -Force
+    if ($Full) {
+        $code = "import os,sys,pytest;root=os.path.realpath(sys.argv[1]);os.chdir(root);excluded=sys.argv[2:];assert all(os.path.commonpath([root,os.path.realpath(os.path.join(root,f))])==root for f in excluded);raise SystemExit(pytest.main(['-q']+['--ignore='+p for p in excluded]))"
+        $r=Invoke-PodCommand $pod $container (@("python3","-c",$code,$repo) + $excludedPaths)
+    }
+    else {
+        $code = "import os,sys,pytest;root=os.path.realpath(sys.argv[1]);os.chdir(root);targets=sys.argv[2:];files=[t.split('::',1)[0] for t in targets];assert all(os.path.commonpath([root,os.path.realpath(os.path.join(root,f))])==root for f in files);raise SystemExit(pytest.main(['-q']+targets))"
+        $r=Invoke-PodCommand $pod $container (@("python3","-c",$code,$repo) + $targets)
+    }
+    $r | Add-Member -NotePropertyName Semantic -NotePropertyValue ([pscustomobject]@{kind=($(if($Full){'PytestFullResult'}else{'PytestSelectedResult'}));targets=@($targets);excluded_paths=@($excludedPaths);exit_code=[int]$r.ExitCode}) -Force
     return $r
 }
 

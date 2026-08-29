@@ -1179,7 +1179,7 @@ def test_v13_protected_evidence_surface_includes_unified_proxy_and_policy():
     s = text(ROOT / '.loop-engine' / 'protected-evidence-hash.ps1')
     assert '.loop-engine\\uat-action-proxy.ps1' in s
     assert '.loop-engine\\uat-action-policy.json' in s
-    assert '.loop-engine\\consumer-runtime-controller.py' in s
+    assert '.loop-engine\\consumer-runtime-controller-r9.py' in s
 
 
 def test_v13_cycle_authorization_target_branch_must_match_controller_branch():

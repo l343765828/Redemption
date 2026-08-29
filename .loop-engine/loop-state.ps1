@@ -609,7 +609,21 @@ function Assert-PeriodPoolStable($State) {
     if (-not $State) { return }
     $stored = [string]$State.uat_period_pool_sha256
     if ($stored -and $stored.ToLowerInvariant() -ne $UatPeriodPoolSha256) {
-        throw "UAT period pool changed while durable loop state exists (state=$stored current=$UatPeriodPoolSha256). Refusing to remap allocated periods. Restore the original pool or perform a controlled fresh-state migration."
+        foreach ($cycleObject in @($State.cycles)) {
+            foreach ($roundObject in @($cycleObject.rounds)) {
+                foreach ($allocation in @(Get-RoundPeriodAllocations $cycleObject $roundObject)) {
+                    $slot = [int]$allocation.slot
+                    $pair = Get-PeriodPairBySlot $slot
+                    if (-not $pair) {
+                        throw "allocated durable UAT period slot $slot is missing from the current pool ($($allocation.label))"
+                    }
+                    if ([int]$pair.primary_period -ne [int]$allocation.primary -or [int]$pair.secondary_period -ne [int]$allocation.secondary) {
+                        throw "allocated durable UAT period slot $slot changed in the current pool ($($allocation.label)); ledger=$($allocation.primary)/$($allocation.secondary) current=$($pair.primary_period)/$($pair.secondary_period)"
+                    }
+                }
+            }
+        }
+        Write-Host "[PERIOD-POOL] digest changed by an append-compatible update; all durable allocated pairs remain immutable"
     }
 }
 
@@ -710,8 +724,8 @@ function Ensure-RoundPeriodAllocation($State, $RoundObject) {
         if ([int]$pair.primary_period -ne [int]$RoundObject.uat_period_primary -or [int]$pair.secondary_period -ne [int]$RoundObject.uat_period_secondary) {
             throw "round UAT period allocation does not match configured pool slot $slot"
         }
-        if ($hashText.ToLowerInvariant() -ne $UatPeriodPoolSha256) {
-            throw "round UAT period pool hash does not match configured pool"
+        if ($hashText -notmatch '^[0-9a-fA-F]{64}$') {
+            throw "round UAT period pool hash is invalid"
         }
         return $RoundObject
     }
@@ -751,8 +765,8 @@ function Ensure-FinalAuditPeriodAllocation($State, $RoundObject) {
         if ([int]$pair.primary_period -ne [int]$RoundObject.final_audit_uat_period_primary -or [int]$pair.secondary_period -ne [int]$RoundObject.final_audit_uat_period_secondary) {
             throw "round Fable final-audit UAT period allocation does not match configured pool slot $slot"
         }
-        if ($hashText.ToLowerInvariant() -ne $UatPeriodPoolSha256) {
-            throw "round Fable final-audit UAT period pool hash does not match configured pool"
+        if ($hashText -notmatch '^[0-9a-fA-F]{64}$') {
+            throw "round Fable final-audit UAT period pool hash is invalid"
         }
         return $RoundObject
     }

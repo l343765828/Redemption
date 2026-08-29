@@ -9,7 +9,7 @@ VERIFY = (ROOT / '.loop-engine' / 'verify-proxy-period-evidence.ps1').read_text(
 PREP = (ROOT / '.loop-engine' / 'prepare-verifier-state.ps1').read_text(encoding='utf-8')
 WF = (ROOT / '.github' / 'workflows' / 'loop-round.yml').read_text(encoding='utf-8')
 RUNNER = (ROOT / '.loop-engine' / 'claude-verifier-runner.ps1').read_text(encoding='utf-8')
-CONTROLLER = (ROOT / '.loop-engine' / 'consumer-runtime-controller.py').read_text(encoding='utf-8')
+CONTROLLER = (ROOT / '.loop-engine' / 'consumer-runtime-controller-r9.py').read_text(encoding='utf-8')
 
 
 def test_policy_schema_and_controller_evidence_are_versioned():
@@ -170,7 +170,7 @@ def test_windows_smoke_covers_current_schema_and_lifecycle_contract_without_k8s_
     assert '[V20-CONTROLLER-CONTRACT-SMOKE] PASS' in smoke
     assert 'controller-evidence\\schema-{0}\\cycle-{1}\\round-{2}\\{3}' in smoke
     assert 'ConsumerLifecycle calc_month is controller governed' in smoke
-    assert 'consumer-runtime-controller.py' in smoke
+    assert 'consumer-runtime-controller-r9.py' in smoke
     assert 'controller-evidence\\schema-10\\cycle-{0}\\round-{1}\\opus' in smoke
 
 

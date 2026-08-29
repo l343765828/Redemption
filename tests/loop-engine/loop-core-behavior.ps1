@@ -30,7 +30,8 @@ param(
         "r8-reconcile-opus-blocked-ignores-retained-fable-marker",
         "r8-reconcile-fable-pass-stays-final-pass",
         "r8-reconcile-fable-reject-stays-final-reject",
-        "r8-reconcile-fable-blocked-stays-blocked"
+        "r8-reconcile-fable-blocked-stays-blocked",
+        "f04-period-pool-append-only"
     )]
     [string]$Scenario = "all"
 )
@@ -1096,6 +1097,48 @@ function Invoke-R8ReconcileFableBlockedStaysBlocked {
     finally { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $c.root }
 }
 
+function Invoke-F04PeriodPoolAppendOnly {
+    $c = New-TestContext "f04-period-pool-append-only"
+    try {
+        Use-TestContext $c
+        $r1 = New-RoundObject $c 1 "VERIFYING" "construct" "" "" "" "" "" "" ""
+        Add-LegacyPeriodFields $r1 1
+        $state = New-StateObject $c 4 "RUNNING" "OPUS_REVIEW" 1 @($r1)
+        Write-Json $c.state $state
+
+        $extendedPoolPath = Join-Path $c.root "uat-period-pool-extended.json"
+        $extendedPool = [IO.File]::ReadAllText($PoolFile, [Text.Encoding]::UTF8) | ConvertFrom-Json
+        $maxSlot = [int](@($extendedPool.pairs | Measure-Object -Property slot -Maximum)[0].Maximum)
+        $maxPeriod = [int](@($extendedPool.pairs | ForEach-Object { @([int]$_.primary_period, [int]$_.secondary_period) } | Measure-Object -Maximum)[0].Maximum)
+        $extendedPool.pairs = @($extendedPool.pairs) + @([pscustomobject][ordered]@{
+            slot = $maxSlot + 1
+            primary_period = $maxPeriod + 1
+            secondary_period = $maxPeriod + 2
+        })
+        Write-Json $extendedPoolPath $extendedPool
+        $env:UAT_PERIOD_POOL_FILE = $extendedPoolPath
+
+        Invoke-Prepare $c "auto"
+        $afterAppend = Read-State $c
+        $afterRound = @($afterAppend.cycles[0].rounds)[0]
+        Assert-Equal ([int]$afterRound.uat_period_slot) 1 "F-04 append-only extension must preserve the allocated slot"
+        Assert-Equal ([string]$afterRound.uat_period_pool_sha256) $PoolHash "F-04 historical allocation must preserve its original pool digest"
+
+        $mutatedPoolPath = Join-Path $c.root "uat-period-pool-mutated.json"
+        $mutatedPool = [IO.File]::ReadAllText($extendedPoolPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+        $slotOne = @($mutatedPool.pairs | Where-Object { [int]$_.slot -eq 1 } | Select-Object -First 1)[0]
+        $slotOne.primary_period = $maxPeriod + 100
+        Write-Json $mutatedPoolPath $mutatedPool
+        $env:UAT_PERIOD_POOL_FILE = $mutatedPoolPath
+
+        $caught = ""
+        try { Invoke-Prepare $c "auto" }
+        catch { $caught = $_.Exception.Message }
+        Assert-True ($caught -like "*allocated durable UAT period slot 1 changed*") "F-04 must reject mutation of an allocated pair; actual='$caught'"
+    }
+    finally { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $c.root }
+}
+
 $allScenarios = @(
     "test-01-opus-r1-bug",
     "test-02-opus-r2-bug",
@@ -1126,7 +1169,8 @@ $allScenarios = @(
     "r8-reconcile-opus-blocked-ignores-retained-fable-marker",
     "r8-reconcile-fable-pass-stays-final-pass",
     "r8-reconcile-fable-reject-stays-final-reject",
-    "r8-reconcile-fable-blocked-stays-blocked"
+    "r8-reconcile-fable-blocked-stays-blocked",
+    "f04-period-pool-append-only"
 )
 
 $selected = if ($Scenario -eq "all") { $allScenarios } else { @($Scenario) }
@@ -1166,6 +1210,7 @@ try {
                 "r8-reconcile-fable-pass-stays-final-pass" { Invoke-R8ReconcileFablePassStaysFinalPass }
                 "r8-reconcile-fable-reject-stays-final-reject" { Invoke-R8ReconcileFableRejectStaysFinalReject }
                 "r8-reconcile-fable-blocked-stays-blocked" { Invoke-R8ReconcileFableBlockedStaysBlocked }
+                "f04-period-pool-append-only" { Invoke-F04PeriodPoolAppendOnly }
                 default { throw "unknown scenario: $name" }
             }
             $passed++
