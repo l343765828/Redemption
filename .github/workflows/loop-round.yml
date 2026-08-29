@@ -114,11 +114,18 @@ jobs:
       LOOP_CYCLE: ${{ inputs.cycle }}
       LOOP_ROUND: ${{ inputs.round }}
       LOOP_ROUND_ACTION: ${{ inputs.action }}
-      PRODUCER_OUTDIR: ${{ runner.temp }}\loop-engine-producer\run-${{ github.run_id }}-attempt-${{ github.run_attempt }}-cycle-${{ inputs.cycle }}-round-${{ inputs.round }}
       PREVIOUS_UAT_REPORT: ${{ inputs.previous_report }}
       FINDINGS_SOURCE: ${{ inputs.findings_source }}
       FINDINGS_REF: ${{ inputs.findings_ref }}
     steps:
+      - name: Bind producer staging directory
+        if: ${{ inputs.action != 'resume-verifier' }}
+        shell: powershell
+        run: |
+          if (-not $env:RUNNER_TEMP) { Write-Error "RUNNER_TEMP is unavailable after runner startup"; exit 1 }
+          $producerOutdir = Join-Path $env:RUNNER_TEMP ("loop-engine-producer\run-{0}-attempt-{1}-cycle-{2}-round-{3}" -f $env:GITHUB_RUN_ID, $env:GITHUB_RUN_ATTEMPT, $env:LOOP_CYCLE, $env:LOOP_ROUND)
+          "PRODUCER_OUTDIR=$producerOutdir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Windows PowerShell contract smoke
         shell: powershell
         run: |

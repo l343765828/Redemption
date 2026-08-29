@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -120,10 +121,26 @@ def test_windows_smoke_does_not_reject_append_only_pool_growth() -> None:
     assert "$pairs.Count -ne 10" not in smoke
 
 
+def test_producer_staging_is_bound_only_after_the_runner_starts() -> None:
+    workflow = yaml.safe_load(ROUND_WORKFLOW.read_text(encoding="utf-8"))
+    round_job = workflow["jobs"]["round"]
+
+    assert "PRODUCER_OUTDIR" not in round_job["env"]
+
+    bind_step = next(
+        step
+        for step in round_job["steps"]
+        if step.get("name") == "Bind producer staging directory"
+    )
+    script = bind_step["run"]
+    assert "$env:RUNNER_TEMP" in script
+    assert "$env:GITHUB_ENV" in script
+    assert "-Encoding utf8 -Append" in script
+
+
 def test_producer_can_write_only_to_controller_staging() -> None:
     workflow = ROUND_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "PRODUCER_OUTDIR:" in workflow
     assert "--add-dir $env:PRODUCER_OUTDIR" in workflow
     assert "--add-dir $env:OUTDIR" not in workflow
     assert '--output-last-message "$env:PRODUCER_OUTDIR\\codex-final.txt"' in workflow
