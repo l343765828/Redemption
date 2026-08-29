@@ -464,9 +464,10 @@ function Expand-ProfileCommand([object[]]$Command) {
 
 function Find-GitRepoByRemote([string]$Node, [string]$DebugImage, [string]$ExpectedRemote) {
     $find = Invoke-NodeDebugWithCleanup $Node @("chroot", "/host", "find", "/", "-maxdepth", "8", "-type", "d", "-name", ".git", "-print") $DebugImage
-    if ($find.ExitCode -ne 0) { throw "GIT_REPO_DISCOVERY_FAILED: find .git failed" }
+    $gitDirs = @($find.Output | Where-Object { ([string]$_).Trim().EndsWith("/.git") })
+    if ($find.ExitCode -ne 0 -and $gitDirs.Count -eq 0) { throw "GIT_REPO_DISCOVERY_FAILED: find .git failed" }
     $matches = New-Object System.Collections.Generic.List[string]
-    foreach ($gitDir in @($find.Output | Where-Object { ([string]$_).Trim().EndsWith("/.git") })) {
+    foreach ($gitDir in $gitDirs) {
         $repo = ([string]$gitDir).Trim().Substring(0, ([string]$gitDir).Trim().Length - 5)
         if (-not $repo -or $repo -match '[\x00\r\n]') { continue }
         $remote = Invoke-NodeDebugWithCleanup $Node @("chroot", "/host", "git", "-C", $repo, "config", "--get", "remote.origin.url") $DebugImage
@@ -492,9 +493,10 @@ function Find-PodGitRepoByRemote([string]$Pod, [string]$Container, [string]$Expe
     $args = @("--kubeconfig", $Kubeconfig, "exec", $Pod, "-n", $TargetNamespace)
     if ($Container) { $args += @("-c", $Container) }
     $find = Invoke-Kubectl ($args + @("--", "find", "/", "-maxdepth", "8", "-type", "d", "-name", ".git", "-print"))
-    if ($find.ExitCode -ne 0) { throw "GIT_POD_VIEW_FAILED: cannot discover repo in verification pod" }
+    $gitDirs = @($find.Output | Where-Object { ([string]$_).Trim().EndsWith("/.git") })
+    if ($find.ExitCode -ne 0 -and $gitDirs.Count -eq 0) { throw "GIT_POD_VIEW_FAILED: cannot discover repo in verification pod" }
     $matches = New-Object System.Collections.Generic.List[string]
-    foreach ($gitDir in @($find.Output | Where-Object { ([string]$_).Trim().EndsWith("/.git") })) {
+    foreach ($gitDir in $gitDirs) {
         $repo = ([string]$gitDir).Trim().Substring(0, ([string]$gitDir).Trim().Length - 5)
         if (-not $repo -or $repo -match '[\x00\r\n]') { continue }
         $remote = Invoke-Kubectl ($args + @("--", "git", "-c", ("safe.directory={0}" -f $repo), "-C", $repo, "config", "--get", "remote.origin.url"))
@@ -633,9 +635,10 @@ function Get-ConsumerLifecycleSelectedPods([string]$Deployment,[string]$Containe
         $name=([string]$item.metadata.name).Trim().ToLowerInvariant()
         if(-not $name){continue}
         if(-not $name.StartsWith($PodPrefix,[StringComparison]::Ordinal)){throw "UAT_RESOURCE_SCOPE_DENIED: selected ConsumerLifecycle pod outside versioned pod prefix: $name"}
+        if(([string]$item.status.phase) -ne 'Running'){continue}
         $matchingContainers=@($item.status.containerStatuses|Where-Object{([string]$_.name) -eq $Container})
         if($matchingContainers.Count -ne 1){throw "UAT_ENV_BLOCKED: Consumer runtime host container not found/ambiguous in pod $name"}
-        if(([string]$item.status.phase) -ne 'Running' -or -not [bool]$matchingContainers[0].ready){continue}
+        if(-not [bool]$matchingContainers[0].ready){continue}
         Assert-ResourceAllowed "pod" $name
         $names.Add($name)
     }

@@ -88,6 +88,12 @@ foreach ($requiredNs in @('userstats','placement','elite')) {
 }
 Write-Host "[V20-CONTROLLER-CONTRACT-SMOKE] PASS"
 
+$proxyRuntimeRegression = Join-Path $env:MAINREPO "tests\loop-engine\proxy-runtime-regressions.ps1"
+if (-not (Test-Path -LiteralPath $proxyRuntimeRegression -PathType Leaf)) { throw "proxy runtime regression script missing" }
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $proxyRuntimeRegression -Case all -ProxyPath $proxyContractPath
+if ($LASTEXITCODE -ne 0) { throw "proxy runtime behavior regressions failed" }
+Write-Host "[PROXY-RUNTIME-BEHAVIOR-SMOKE] PASS"
+
 # Regression: a single non-empty producer verdict line must remain an array item,
 # never degrade to a scalar string whose [-1] access returns a Char.
 $single = "READY_FOR_UAT`r`n"
