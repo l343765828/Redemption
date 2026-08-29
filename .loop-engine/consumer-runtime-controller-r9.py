@@ -100,6 +100,19 @@ def _proc_args(pid: int) -> list[str] | None:
     return []
 
 
+def _proc_state(pid: int) -> str | None:
+    stat_path = Path("/proc") / str(pid) / "stat"
+    if not stat_path.is_file():
+        return None
+    try:
+        value = stat_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    command_end = value.rfind(")")
+    fields = value[command_end + 1 :].strip().split() if command_end >= 0 else []
+    return fields[0] if fields else None
+
+
 def _args_run_module(args: list[str] | None, module: str) -> bool:
     if args is None:
         return False
@@ -139,15 +152,32 @@ def _state_status(payload: dict[str, Any]) -> dict[str, Any]:
             "running": False,
             "pid": None,
         }
+    if state.get("stopped"):
+        return {
+            "kind": RESULT_KIND,
+            "operation": "status",
+            "execution_id": execution_id,
+            "running": False,
+            "pid": None,
+            "process_state": None,
+            "stopped_reason": state.get("stopped_reason"),
+        }
     pid = int(state.get("pid") or 0)
     module = str(state.get("module") or "")
-    running = pid > 0 and bool(module) and _args_run_module(_proc_args(pid), module)
+    process_state = _proc_state(pid) if pid > 0 else None
+    running = (
+        pid > 0
+        and process_state != "Z"
+        and bool(module)
+        and _args_run_module(_proc_args(pid), module)
+    )
     return {
         "kind": RESULT_KIND,
         "operation": "status",
         "execution_id": execution_id,
         "running": running,
         "pid": pid if running else None,
+        "process_state": process_state,
         "role": state.get("role"),
         "bound_period": state.get("bound_period"),
         "calc_month": state.get("calc_month"),
@@ -295,7 +325,11 @@ def _start(payload: dict[str, Any]) -> dict[str, Any]:
     if existing:
         pid = int(existing.get("pid") or 0)
         module = str(existing.get("module") or "")
-        if pid > 0 and _args_run_module(_proc_args(pid), module):
+        if (
+            not existing.get("stopped")
+            and pid > 0
+            and _args_run_module(_proc_args(pid), module)
+        ):
             comparable = ("module", "candidate_sha", "role", "bound_period", "calc_month", "ledger_prefix")
             if all(existing.get(key) == contract.get(key) for key in comparable):
                 result = _state_status(payload)
@@ -341,7 +375,11 @@ def _start(payload: dict[str, Any]) -> dict[str, Any]:
     if process.poll() is not None:
         state.update({"stopped_at": time.time(), "exit_code": process.returncode})
         _atomic_write_json(state_path, state)
-        raise RuntimeContractError("PvEventConsumer exited during startup probe")
+        log_tail = " | ".join(_safe_log_lines(log_path)[-20:]) or "<empty>"
+        raise RuntimeContractError(
+            "PvEventConsumer exited during startup probe "
+            f"exit_code={process.returncode} log_tail={log_tail}"
+        )
     return {
         "kind": RESULT_KIND,
         "operation": "start",
@@ -370,24 +408,60 @@ def _stop(payload: dict[str, Any]) -> dict[str, Any]:
             "pid": None,
             "already_absent": True,
         }
+    if state.get("stopped"):
+        return {
+            "kind": RESULT_KIND,
+            "operation": "stop",
+            "execution_id": execution_id,
+            "stopped": True,
+            "pid": state.get("pid"),
+            "already_absent": True,
+            "process_state": None,
+        }
     pid = int(state.get("pid") or 0)
     module = str(state.get("module") or "")
-    args = _proc_args(pid) if pid > 0 else None
+    process_state = _proc_state(pid) if pid > 0 else None
+
+    # region 识别已退出的受管进程
+    # Linux 僵尸进程仍保留 PID，但已经不能继续执行或接收有效终止信号。
+    # restore 应将其按“已退出”处理，避免把空 cmdline 误判为 PID 归属变化。
+    zombie = process_state == "Z"
+    args = None if zombie else (_proc_args(pid) if pid > 0 else None)
     if args is not None and not _args_run_module(args, module):
         raise RuntimeContractError("runtime PID no longer belongs to the governed module")
+    # endregion
+
+    # region 终止仍在运行的受管进程
     if args is not None:
         os.kill(pid, signal.SIGTERM)
         deadline = time.monotonic() + float(payload.get("stop_timeout_seconds") or 30)
-        while time.monotonic() < deadline and _proc_args(pid) is not None:
+        while (
+            time.monotonic() < deadline
+            and _proc_state(pid) != "Z"
+            and _proc_args(pid) is not None
+        ):
             time.sleep(0.2)
-        if _proc_args(pid) is not None:
+        if _proc_state(pid) != "Z" and _proc_args(pid) is not None:
             os.kill(pid, signal.SIGKILL)
             deadline = time.monotonic() + 5
-            while time.monotonic() < deadline and _proc_args(pid) is not None:
+            while (
+                time.monotonic() < deadline
+                and _proc_state(pid) != "Z"
+                and _proc_args(pid) is not None
+            ):
                 time.sleep(0.1)
-        if _proc_args(pid) is not None:
+        if _proc_state(pid) != "Z" and _proc_args(pid) is not None:
             raise RuntimeContractError("PvEventConsumer did not terminate")
-    state.update({"stopped_at": time.time(), "stopped": True})
+    # endregion
+
+    stopped_reason = "zombie" if zombie else ("already_absent" if args is None else "terminated")
+    state.update(
+        {
+            "stopped_at": time.time(),
+            "stopped": True,
+            "stopped_reason": stopped_reason,
+        }
+    )
     _atomic_write_json(state_path, state)
     return {
         "kind": RESULT_KIND,
@@ -396,20 +470,21 @@ def _stop(payload: dict[str, Any]) -> dict[str, Any]:
         "stopped": True,
         "pid": pid or None,
         "already_absent": args is None,
+        "process_state": process_state,
     }
+
+
+def _safe_log_lines(log_path: Path) -> list[str]:
+    if not log_path.is_file():
+        return []
+    lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-400:]
+    return [line.replace("\x00", "").replace("\r", "")[:4000] for line in lines]
 
 
 def _logs(payload: dict[str, Any]) -> dict[str, Any]:
     execution_id = _execution_id(payload)
     _, _, log_path = _runtime_paths(payload)
-    if not log_path.is_file():
-        lines: list[str] = []
-    else:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-400:]
-    safe_lines = [
-        line.replace("\x00", "").replace("\r", "")[:4000]
-        for line in lines
-    ]
+    safe_lines = _safe_log_lines(log_path)
     return {
         "kind": RESULT_KIND,
         "operation": "logs",
@@ -467,5 +542,3 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
         raise SystemExit(1)
-
-

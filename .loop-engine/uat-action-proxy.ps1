@@ -617,7 +617,7 @@ function Invoke-PolicyExecProfile($Request, $Policy, [string]$ProfileName = "") 
     }
     if ($profile.PSObject.Properties.Name -contains 'repo_cwd' -and [bool]$profile.repo_cwd) {
         $repo = Get-PodRepoRoot $pod $container $Policy
-        $wrapper = "import os,subprocess,sys;os.chdir(sys.argv[1]);raise SystemExit(subprocess.call(sys.argv[2:]))"
+        $wrapper = "import os,subprocess,sys;os.environ['PYTHONDONTWRITEBYTECODE']='1';os.chdir(sys.argv[1]);raise SystemExit(subprocess.call(sys.argv[2:]))"
         $command = @("python3", "-c", $wrapper, $repo) + $command
     }
     return Invoke-PodCommand $pod $container $command
@@ -740,6 +740,11 @@ function Get-ConsumerRuntimeLogs([string]$Pod,[string]$Container) {
     return $runtime.Semantic
 }
 
+function New-UatBlockedResult([string]$Message,$Runtime,$Semantic) {
+    $output=if($Runtime){@($Runtime.Output)}else{@()}
+    return [pscustomobject]@{ExitCode=1;Output=$output;Semantic=$Semantic;ErrorMessage=$Message}
+}
+
 # V19-INVOKE-CONSUMERLIFECYCLE
 function Invoke-ConsumerLifecycle($Request,$Policy) {
     $op=([string]$Request.operation).Trim().ToLowerInvariant()
@@ -778,10 +783,14 @@ function Invoke-ConsumerLifecycle($Request,$Policy) {
         $ledgerPrefix="pvam:uat:work02:${ExecutionId}:"
         $payload=New-ConsumerRuntimePayload $target $role $period ([int]$calcMonth) $candidate $repo
         $runtime=Invoke-ConsumerRuntimeController $pod $container 'replace' $payload
-        if($runtime.ExitCode -ne 0){throw "UAT_ENV_BLOCKED: ConsumerLifecycle runtime replace failed"}
+        if($runtime.ExitCode -ne 0){
+            $diagnostic=[pscustomobject]@{kind='ConsumerLifecycleDiagnostic';operation=$op;runtime_exit_code=[int]$runtime.ExitCode;pod=$pod;container=$container;candidate_sha=$candidate}
+            return (New-UatBlockedResult "UAT_ENV_BLOCKED: ConsumerLifecycle runtime replace failed" $runtime $diagnostic)
+        }
         $state=$runtime.Semantic
         if(-not [bool]$state.running -or [string]$state.role -ne $role -or [string]$state.bound_period -ne [string]$period -or [string]$state.calc_month -ne $calcMonth -or [string]$state.candidate_sha -ne $candidate -or [string]$state.ledger_prefix -ne $ledgerPrefix){
-            throw "UAT_ENV_BLOCKED: ConsumerLifecycle runtime binding verification failed"
+            $diagnostic=[pscustomobject]@{kind='ConsumerLifecycleDiagnostic';operation=$op;runtime_exit_code=[int]$runtime.ExitCode;runtime_state=$state;pod=$pod;container=$container;candidate_sha=$candidate}
+            return (New-UatBlockedResult "UAT_ENV_BLOCKED: ConsumerLifecycle runtime binding verification failed" $runtime $diagnostic)
         }
         $podHeads=@([pscustomobject]@{pod=$pod;repo=$repo;head=$candidate})
         $semantic=[pscustomobject]@{kind='ConsumerLifecycleResult';runtime_mode='scheduler-pod-temporary-process';operation=$op;deployment=$deployment;container=$container;pod=$pod;pod_uid=$podUid;pod_name_prefix=[string]$target.pod_name_prefix;bound_period=$period;calc_month=$calcMonth;ledger_prefix=$ledgerPrefix;matching_process_count=1;candidate_sha=$candidate;pod_repo_heads=$podHeads;runtime_controller_operation=[string]$state.operation;process_pid=[int]$state.pid}
@@ -790,20 +799,40 @@ function Invoke-ConsumerLifecycle($Request,$Policy) {
     elseif($op -eq 'status'){
         Assert-RequiredTokens @('exec') 'ConsumerLifecycle'
         $runtime=Invoke-ConsumerRuntimeController $pod $container 'status' ([ordered]@{execution_id=$ExecutionId})
-        if($runtime.ExitCode -ne 0 -or -not [bool]$runtime.Semantic.running){throw "UAT_ENV_BLOCKED: governed PvEventConsumer is not running"}
-        $state=$runtime.Semantic
+        $runtimeState=if($runtime.PSObject.Properties.Name -contains 'Semantic'){$runtime.Semantic}else{$null}
+        if($runtime.ExitCode -ne 0 -or -not [bool]$runtimeState.running){
+            $diagnostic=[pscustomobject]@{kind='ConsumerLifecycleDiagnostic';operation='status';runtime_exit_code=[int]$runtime.ExitCode;runtime_state=$runtimeState;pod=$pod;container=$container;candidate_sha=$candidate}
+            return (New-UatBlockedResult "UAT_ENV_BLOCKED: governed PvEventConsumer is not running" $runtime $diagnostic)
+        }
+        $state=$runtimeState
         $semantic=[pscustomobject]@{kind='ConsumerLifecycleResult';runtime_mode='scheduler-pod-temporary-process';operation='status';deployment=$deployment;container=$container;pod=$pod;pod_uid=$podUid;pod_name_prefix=[string]$target.pod_name_prefix;bound_period=[int]$state.bound_period;calc_month=[int]$state.calc_month;ledger_prefix=[string]$state.ledger_prefix;matching_process_count=1;candidate_sha=[string]$state.candidate_sha;pod_repo_heads=@([pscustomobject]@{pod=$pod;repo=$repo;head=$candidate});process_pid=[int]$state.pid}
         return [pscustomobject]@{ExitCode=0;Output=@("runtime_mode=$runtimeMode","operation=status","pod=$pod","container=$container","matching_process_count=1");Semantic=$semantic}
     }
     elseif($op -eq 'restore'){
         Assert-RequiredTokens @('exec') 'ConsumerLifecycle'
         $runtime=Invoke-ConsumerRuntimeController $pod $container 'stop' ([ordered]@{execution_id=$ExecutionId})
-        if($runtime.ExitCode -ne 0 -or -not [bool]$runtime.Semantic.stopped){throw "UAT_ENV_BLOCKED: ConsumerLifecycle runtime stop failed"}
+        $runtimeState=if($runtime.PSObject.Properties.Name -contains 'Semantic'){$runtime.Semantic}else{$null}
+        if($runtime.ExitCode -ne 0 -or -not [bool]$runtimeState.stopped){
+            $diagnostic=[pscustomobject]@{kind='ConsumerLifecycleDiagnostic';operation='restore';runtime_exit_code=[int]$runtime.ExitCode;runtime_state=$runtimeState;pod=$pod;container=$container;candidate_sha=$candidate}
+            return (New-UatBlockedResult "UAT_ENV_BLOCKED: ConsumerLifecycle runtime stop failed" $runtime $diagnostic)
+        }
         $baselineSha=Get-TextSha256 "runtime_mode=$runtimeMode;execution_id=$ExecutionId;baseline=consumer-absent"
         $semantic=[pscustomobject]@{kind='ConsumerLifecycleResult';runtime_mode='scheduler-pod-temporary-process';operation='restore';deployment=$deployment;container=$container;pod=$pod;pod_uid=$podUid;pod_name_prefix=[string]$target.pod_name_prefix;restored=$true;matching_process_count=0;baseline_sha256=$baselineSha}
         return [pscustomobject]@{ExitCode=0;Output=@("runtime_mode=$runtimeMode","operation=restore","pod=$pod","container=$container","matching_process_count=0","baseline_sha256=$baselineSha");Semantic=$semantic}
     }
-    throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle operation must be bind-primary, bind-secondary, status, or restore"
+    elseif($op -eq 'logs'){
+        Assert-RequiredTokens @('exec') 'ConsumerLifecycle'
+        $runtime=Invoke-ConsumerRuntimeController $pod $container 'logs' ([ordered]@{execution_id=$ExecutionId})
+        if($runtime.ExitCode -ne 0){
+            $diagnostic=[pscustomobject]@{kind='ConsumerLifecycleDiagnostic';operation='logs';runtime_exit_code=[int]$runtime.ExitCode;pod=$pod;container=$container;candidate_sha=$candidate}
+            return (New-UatBlockedResult "UAT_ENV_BLOCKED: Consumer runtime logs unavailable" $runtime $diagnostic)
+        }
+        $state=$runtime.Semantic
+        $logText=(@($state.lines) -join "`n")
+        $semantic=[pscustomobject]@{kind='ConsumerLifecycleResult';runtime_mode=$runtimeMode;operation='logs';deployment=$deployment;container=$container;pod=$pod;pod_uid=$podUid;pod_name_prefix=[string]$target.pod_name_prefix;log_line_count=[int]$state.line_count;consumer_log_sha256=(Get-TextSha256 $logText);candidate_sha=$candidate}
+        return [pscustomobject]@{ExitCode=0;Output=@("runtime_mode=$runtimeMode","operation=logs","pod=$pod","container=$container","log_line_count=$($state.line_count)")+@($state.lines);Semantic=$semantic}
+    }
+    throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle operation must be bind-primary, bind-secondary, status, restore, or logs"
 }
 
 function Get-KafkaScenarioSemantic([string]$Scenario) {
@@ -932,7 +961,19 @@ print(json.dumps({'kind':'ConsumerRuntimeObservation','observations':out,'except
     $drainDetected=$combinedLogText.Contains('PERIOD DRAIN COMPLETE')
 
     $positive=(@($Policy.scenarios_require_dispatched_three_chain|ForEach-Object{[string]$_}) -contains $scenario) -or $isReplay
-    if($positive){foreach($row in @($obs.observations)){if([string]$row.delivery_status -ne 'DISPATCHED'){throw "UAT_ENV_BLOCKED: delivery ledger is not DISPATCHED for $($row.identity)"};foreach($ns in @('userstats','placement','elite')){if(-not [bool]$row.idempotency_namespaces.$ns){throw "UAT_ENV_BLOCKED: missing $ns idempotency done key for $($row.identity)"}}}}
+    $positiveError=''
+    if($positive){
+        foreach($row in @($obs.observations)){
+            if([string]$row.delivery_status -ne 'DISPATCHED'){$positiveError="UAT_ENV_BLOCKED: delivery ledger is not DISPATCHED for $($row.identity)";break}
+            foreach($ns in @('userstats','placement','elite')){if(-not [bool]$row.idempotency_namespaces.$ns){$positiveError="UAT_ENV_BLOCKED: missing $ns idempotency done key for $($row.identity)";break}}
+            if($positiveError){break}
+        }
+    }
+    if($positiveError){
+        $diagnostic=[pscustomobject]@{kind='ConsumerObserveDiagnostic';runtime_mode='scheduler-pod-temporary-process';scenario=$scenario;source_scenario=$sourceScenario;observations=@($obs.observations);exceptions=@($obs.exceptions);log_line_count=[int]$runtimeLogs.line_count;consumer_log_sha256=(Get-TextSha256 $combinedLogText);candidate_sha=$candidate;pod=$pod;container=$container;pod_repo=$repo}
+        $diagnosticOutput=@("scenario=$scenario","observations=$(@($obs.observations).Count)","exceptions=$(@($obs.exceptions).Count)","consumer_log_lines=$($runtimeLogs.line_count)")+@($runtimeLogs.lines)
+        return [pscustomobject]@{ExitCode=1;Output=$diagnosticOutput;Semantic=$diagnostic;ErrorMessage=$positiveError}
+    }
     $offsetProp=@($Policy.scenario_expected_offset_semantics.PSObject.Properties|Where-Object{$_.Name -eq $scenario}|Select-Object -First 1)[0];$offsetExpectation=if($offsetProp){[string]$offsetProp.Value}else{''};$offsetOk=$true
     foreach($row in @($obs.observations)){$committed=[long]$row.committed_offset;$source=[long]$row.offset;if($offsetExpectation -eq 'committed' -and $committed -le $source){$offsetOk=$false};if($offsetExpectation -eq 'not-committed' -and $committed -gt $source){$offsetOk=$false}}
     if(-not $offsetOk){throw "UAT_ENV_BLOCKED: ConsumerObserve consumer-group offset semantics mismatch for scenario $scenario expectation=$offsetExpectation"}
@@ -1032,6 +1073,12 @@ function Test-GitChangedPathAllowed([string]$Path, $Policy) {
     return $false
 }
 
+function Test-GitStatusLineIsGeneratedCache([string]$StatusLine) {
+    if(-not $StatusLine.StartsWith('?? ',[StringComparison]::Ordinal)){return $false}
+    $path=$StatusLine.Substring(3).Replace('\','/').Trim()
+    return $path -match '(^|/)__pycache__/' -or $path -match '(^|/)\.pytest_cache(/|$)' -or $path -match '\.py[co]$'
+}
+
 function Get-GitChangedHunks([string]$Worktree,[string]$Baseline,[string]$Head,[string]$Path) {
     $diff = Invoke-Native "git" @("-C",$Worktree,"diff","--unified=0","--no-color",("{0}..{1}" -f $Baseline,$Head),"--",$Path)
     if ($diff.ExitCode -ne 0) { throw "GIT_AUDIT_FAILED: git diff --unified=0 failed for $Path" }
@@ -1071,7 +1118,7 @@ function Invoke-GitAudit($Request, $Policy) {
 
     $status = Invoke-Native "git" @("-C",$worktree,"status","--porcelain=v1","--untracked-files=all")
     if ($status.ExitCode -ne 0) { throw "GIT_AUDIT_FAILED: git status failed" }
-    $dirty = @($status.Output | Where-Object { ([string]$_).Trim() })
+    $dirty = @($status.Output | Where-Object { ([string]$_).Trim() -and -not (Test-GitStatusLineIsGeneratedCache ([string]$_)) })
     $local = Invoke-Native "git" @("-C",$worktree,"rev-parse","HEAD")
     if ($local.ExitCode -ne 0) { throw "GIT_AUDIT_FAILED: git rev-parse HEAD failed" }
     $localHead = ((@($local.Output | Where-Object { ([string]$_).Trim() -match '^[0-9a-fA-F]{40}$' }) | Select-Object -Last 1) -as [string]).Trim().ToLowerInvariant()
@@ -1170,11 +1217,11 @@ function Invoke-PytestProfile($Request, $Policy, [bool]$Full) {
         $targets=@($rawTargets | ForEach-Object { Assert-PytestTargetAllowed $_ $Policy })
     }
     if ($Full) {
-        $code = "import os,sys,pytest;root=os.path.realpath(sys.argv[1]);os.chdir(root);excluded=sys.argv[2:];assert all(os.path.commonpath([root,os.path.realpath(os.path.join(root,f))])==root for f in excluded);raise SystemExit(pytest.main(['-q']+['--ignore='+p for p in excluded]))"
+        $code = "import os,sys;os.environ['PYTHONDONTWRITEBYTECODE']='1';sys.dont_write_bytecode=True;import pytest;root=os.path.realpath(sys.argv[1]);os.chdir(root);excluded=sys.argv[2:];assert all(os.path.commonpath([root,os.path.realpath(os.path.join(root,f))])==root for f in excluded);raise SystemExit(pytest.main(['-q','-p','no:cacheprovider']+['--ignore='+p for p in excluded]))"
         $r=Invoke-PodCommand $pod $container (@("python3","-c",$code,$repo) + $excludedPaths)
     }
     else {
-        $code = "import os,sys,pytest;root=os.path.realpath(sys.argv[1]);os.chdir(root);targets=sys.argv[2:];files=[t.split('::',1)[0] for t in targets];assert all(os.path.commonpath([root,os.path.realpath(os.path.join(root,f))])==root for f in files);raise SystemExit(pytest.main(['-q']+targets))"
+        $code = "import os,sys;os.environ['PYTHONDONTWRITEBYTECODE']='1';sys.dont_write_bytecode=True;import pytest;root=os.path.realpath(sys.argv[1]);os.chdir(root);targets=sys.argv[2:];files=[t.split('::',1)[0] for t in targets];assert all(os.path.commonpath([root,os.path.realpath(os.path.join(root,f))])==root for f in files);raise SystemExit(pytest.main(['-q','-p','no:cacheprovider']+targets))"
         $r=Invoke-PodCommand $pod $container (@("python3","-c",$code,$repo) + $targets)
     }
     $r | Add-Member -NotePropertyName Semantic -NotePropertyValue ([pscustomobject]@{kind=($(if($Full){'PytestFullResult'}else{'PytestSelectedResult'}));targets=@($targets);excluded_paths=@($excludedPaths);exit_code=[int]$r.ExitCode}) -Force
@@ -1284,7 +1331,7 @@ elif scenario=='drain-sentinel':
 else:raise RuntimeError('unsupported controller UAT scenario')
 producer=Producer({'bootstrap.servers':os.environ['PVAM_KAFKA_BOOTSTRAP'],'acks':'all'})
 for item in plan:
-    reports=[];encoded=json.dumps(item['payload'],ensure_ascii=False,separators=(',',':'),allow_nan=False).encode('utf-8')
+    reports=[];encoded=json.dumps(item['payload'],ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode('utf-8')
     kwargs={'key':item['key'].encode('utf-8'),'value':encoded,'callback':lambda err,m,rr=reports:rr.append((err,m))}
     if item['partition'] is not None:kwargs['partition']=int(item['partition'])
     producer.produce(item['topic'],**kwargs);remaining=producer.flush(30)
@@ -1354,12 +1401,29 @@ function Test-KeyContainsExactDeliveredIdentity([string]$Key) {
     return $false
 }
 
+function Test-KeyMatchesDeliveredBusinessRecord([string]$Key) {
+    if (-not (Test-Path -LiteralPath $EvidenceDir -PathType Container)) { return $false }
+    foreach($file in @(Get-ChildItem -LiteralPath $EvidenceDir -File -Filter 'action-*.log' -Force)) {
+        $fields=Read-ProxyEvidenceFields $file.FullName
+        if(([string]$fields['action']) -ne 'KafkaScenarioProduce' -or ([string]$fields['outcome']) -ne 'SUCCESS' -or -not $fields.ContainsKey('semantic_json_b64')){continue}
+        try { $raw=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$fields['semantic_json_b64'])); $s=$raw|ConvertFrom-Json } catch { continue }
+        foreach($delivery in @($s.deliveries)) {
+            $period=[int]$delivery.period
+            $userId=if($delivery.payload -and $delivery.payload.PSObject.Properties.Name -contains 'user_id'){([string]$delivery.payload.user_id).Trim()}else{''}
+            if(-not $userId){$userId=([string]$s.uat_user_id).Trim()}
+            if($period -gt 0 -and $userId -and $Key -ceq "user_stats:Model.User.UserStats.UserStats:${period}:$userId"){return $true}
+        }
+    }
+    return $false
+}
+
 function Test-RedisKeyGoverned([string]$Key,$Templates) {
     if (-not $Key -or $Key -match '[\x00\r\n ]') { return $false }
     $marker="uat-$ExecutionId-"
     foreach ($prefix in @(Get-ExpandedRedisPrefixes $Templates)) {
         if ($Key.StartsWith($prefix,[StringComparison]::Ordinal)) {
             if ($prefix.StartsWith('pvam:uat:work02:',[StringComparison]::Ordinal)) { return $true }
+            if ($prefix.StartsWith('user_stats:Model.User.UserStats.UserStats:',[StringComparison]::Ordinal)) { return (Test-KeyMatchesDeliveredBusinessRecord $Key) }
             if ($Key.Contains($marker)) { return $true }
             if (Test-KeyContainsExactDeliveredIdentity $Key) { return $true }
         }
@@ -1779,8 +1843,8 @@ try {
         }
         "ConsumerLifecycle" {
             $op=([string]$request.operation).Trim().ToLowerInvariant()
-            if($op -notin @('bind-primary','bind-secondary','status','restore')){
-                throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle operation must be bind-primary, bind-secondary, status, or restore"
+            if($op -notin @('bind-primary','bind-secondary','status','restore','logs')){
+                throw "UAT_ACTION_POLICY_DENIED: ConsumerLifecycle operation must be bind-primary, bind-secondary, status, restore, or logs"
             }
             $required=@('exec')
             $result = Invoke-ConsumerLifecycle $request $policy
@@ -1835,7 +1899,7 @@ try {
             $status = Invoke-NodeDebugWithCleanup $node @("chroot", "/host", "git", "-C", $repo, "status", "--porcelain", "--untracked-files=all") $debugImage
             if ($status.ExitCode -ne 0) { throw "GIT_STATUS_FAILED: cannot inspect node host worktree" }
             $statusLines = @($status.Output | Where-Object { ([string]$_).Trim() -and -not ([string]$_).StartsWith("debug_") -and -not ([string]$_).StartsWith("pod/") })
-            $dirty = @($statusLines | Where-Object { ([string]$_).Trim() -match '^[ MARCUD?!]{1,2}\s' })
+            $dirty = @($statusLines | Where-Object { ([string]$_).Trim() -match '^[ MARCUD?!]{1,2}\s' -and -not (Test-GitStatusLineIsGeneratedCache ([string]$_)) })
             if ($dirty.Count -gt 0) { throw "GIT_WORKTREE_DIRTY: node host repo contains unknown changes; refuse mutation" }
 
             $fetch = Invoke-NodeDebugWithCleanup $node @("chroot", "/host", "git", "-C", $repo, "fetch", "origin", $TargetBranch) $debugImage
@@ -1860,7 +1924,10 @@ try {
     }
 
     if ($null -eq $result) { throw "PROXY_FAILURE: action returned no result" }
-    if ([int]$result.ExitCode -ne 0) { throw "PROXY_COMMAND_FAILED: action $action exited $($result.ExitCode): $($result.Output -join ' ')" }
+    if ([int]$result.ExitCode -ne 0) {
+        if($result.PSObject.Properties.Name -contains 'ErrorMessage' -and ([string]$result.ErrorMessage).Trim()){throw ([string]$result.ErrorMessage)}
+        throw "PROXY_COMMAND_FAILED: action $action exited $($result.ExitCode): $($result.Output -join ' ')"
+    }
     $outcome = "SUCCESS"
     $exitCode = 0
 }

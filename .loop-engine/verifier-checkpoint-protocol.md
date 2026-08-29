@@ -200,7 +200,7 @@ The durable Cycle authorization is authoritative for headless Loop execution. Do
 
 ## v16 structured action notes
 
-`List` performs resource-scope-filtered discovery. `KafkaScenarioProduce` is restricted to allowlisted PVAM topics/current stage periods/durable-execution-bound order IDs and uses the controller-owned fixed producer embedded in the proxy. `RedisReadExactKeys` permits only exact allowlisted ledger reads; `RedisDeleteExactKeys` permits only exact durable-execution/period-scoped ledger keys and serializes even a singleton as a JSON array. `GitUpdate` rejects dirty host worktrees and requires remote, node-host, and scoped Pod/NFS HEAD agreement with the candidate SHA. All proxy outcomes write sanitized audit evidence.
+`List` performs resource-scope-filtered discovery. `KafkaScenarioProduce` is restricted to allowlisted PVAM topics/current stage periods/durable-execution-bound order IDs and uses the controller-owned fixed producer embedded in the proxy. `RedisReadExactKeys` permits only exact allowlisted ledger reads; `RedisDeleteExactKeys` permits only exact durable-execution/period-scoped ledger keys or the exact UserStats business key derived from successful Kafka `period + user_id` evidence, and serializes even a singleton as a JSON array. `GitUpdate` rejects dirty host worktrees and requires remote, node-host, and scoped Pod/NFS HEAD agreement with the candidate SHA. All proxy outcomes write sanitized audit evidence.
 
 ## v16 actual-period and resumable evidence contract
 
@@ -226,7 +226,7 @@ The durable Cycle authorization is authoritative for headless Loop execution. Do
 
 The controller reads the stage verdict before enforcing evidence completeness. Opus `PRECHECK_PASS` and Fable `PASS` require the full policy-defined action/scenario set. `REJECTED` and `BLOCKED` use `ValidateExistingOnly`: zero proxy evidence is valid when no proxy action was reached, while every record that exists must still pass request hash, authorization scope, execution ID, period/pool, token, outcome and semantic-integrity checks.
 
-Successful hard-gate actions carry controller-created semantic metadata. `GitAudit` binds clean status, local/remote Candidate HEAD and merge-base. `RedisDbSize` is phase-labelled (`before`/`after`). `RedisDeleteExactKeys` records requested/deleted/remaining counts and exact keys, and cleanup completeness is checked against Kafka delivery identities. `KafkaScenarioProduce` records scenario plus actual topic/key/partition/offset deliveries from the repository-owned producer.
+Successful hard-gate actions carry controller-created semantic metadata. `GitAudit` binds clean status, local/remote Candidate HEAD and merge-base. `RedisDbSize` is phase-labelled (`before`/`after`). `RedisDeleteExactKeys` records requested/deleted/remaining counts and exact keys, and cleanup completeness is checked against Kafka delivery identities and controller-derived period/user UserStats business records. `KafkaScenarioProduce` records scenario plus actual topic/key/partition/offset deliveries from the repository-owned producer.
 
 Selected pytest targets are canonicalized before execution. The exact contract path `MessageConsumer/Test/test_pv_event_consumer.py` is approved. Directory traversal, absolute paths and `.`/`..` segments are denied before the Pod command is built.
 
@@ -269,4 +269,4 @@ Fable requires the policy-defined subset. These proofs are not prose checklist i
 
 `RedisReadExactKeys` with `proof_id` derives the exact key set from controller Kafka evidence and rejects caller-supplied substitutions. Required Redis proof IDs are stage-specific and must report `expectations_satisfied=true` plus request/value SHA-256 digests.
 
-For all required ConsumerObserve scenarios, `business_value_proof_ok=true` is mandatory. Negative scenarios additionally require unchanged UserStats snapshots and zero delivery/order/refund/idempotency residue. Final cleanup must explicitly cover every known ledger key and all three idempotency namespaces for every delivery identity before `ConsumerLifecycle restore`.
+For all required ConsumerObserve scenarios, `business_value_proof_ok=true` is mandatory. Negative scenarios additionally require unchanged UserStats snapshots and zero delivery/order/refund/idempotency residue. Final cleanup must explicitly cover every known ledger key and all three idempotency namespaces for every delivery identity, plus the exact UserStats business key for each controller-delivered period/user pair, before `ConsumerLifecycle restore`.

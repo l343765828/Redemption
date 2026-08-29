@@ -171,7 +171,7 @@ class LoopEngineV19SecurityRegression(unittest.TestCase):
         start = self.proxy.index('        "ConsumerLifecycle" {')
         end = self.proxy.index('        "ConsumerObserve" {', start)
         dispatch = self.proxy[start:end]
-        self.assertIn("@('bind-primary','bind-secondary','status','restore')", dispatch)
+        self.assertIn("@('bind-primary','bind-secondary','status','restore','logs')", dispatch)
         self.assertIn("$required=@('exec')", dispatch)
         self.assertNotIn("@('deploy','restart','scale')", dispatch)
         self.assertNotIn("$op -eq 'stop'", dispatch)

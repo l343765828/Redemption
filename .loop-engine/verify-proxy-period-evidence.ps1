@@ -50,6 +50,9 @@ function Get-LedgerCleanupKeys($Record,[string]$ExecutionId){
         $original=([string]$Record.original_order_id).Trim()
         if($original){$keys.Add($base+'refund_reversal:'+$original)}
     }
+    $period=[int]$Record.period
+    $userId=if($Record.PSObject.Properties.Name -contains 'user_id'){([string]$Record.user_id).Trim()}else{''}
+    if($period -gt 0 -and $userId){$keys.Add("user_stats:Model.User.UserStats.UserStats:${period}:$userId")}
     return @($keys.ToArray())
 }
 function Test-GitHunkContract($Semantic,$Policy){
@@ -187,8 +190,8 @@ foreach($file in $files) {
         $scenario=([string]$semantic.scenario).Trim();if($scenario){$successfulScenarios[$scenario]=$true};if([int]$semantic.delivery_count -lt 1){throw 'KafkaScenario semantic delivery_count invalid'}
         foreach($d in @($semantic.deliveries)){
             if([string]$d.topic -notin @($policy.kafka_topics)){throw 'KafkaScenario semantic topic invalid'};if([int]$d.partition -lt 0 -or [long]$d.offset -lt 0){throw 'KafkaScenario semantic partition/offset invalid'}
-            $identity=([string]$d.key).Trim();$original='';if($d.payload){$original=([string]$d.payload.original_order_id).Trim()}
-            $deliveredRecords.Add([pscustomobject]@{identity=$identity;topic=[string]$d.topic;period=[int]$d.period;original_order_id=$original})
+            $identity=([string]$d.key).Trim();$original='';$userId='';if($d.payload){$original=([string]$d.payload.original_order_id).Trim();$userId=([string]$d.payload.user_id).Trim()}
+            $deliveredRecords.Add([pscustomobject]@{identity=$identity;topic=[string]$d.topic;period=[int]$d.period;original_order_id=$original;user_id=$userId})
         }
         foreach($k in @($semantic.delivered_keys)){$v=([string]$k).Trim();if($v -and -not $delivered.Contains($v)){$delivered.Add($v)}}
     }
