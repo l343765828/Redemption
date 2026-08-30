@@ -20,6 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from Redishelper.PVAmountConfigBootstrap import (
     PUBLISH_SNAPSHOT_LUA,
+    build_argument_parser,
     publish_manual_bootstrap,
 )
 from Redishelper.PVAmountConfigProvider import (
@@ -320,13 +321,13 @@ class FlagRuntimeContractTests(unittest.TestCase):
         self.assertEqual(1, provider.calls)
         self.assertFalse(hasattr(session, "refresh"))
 
-    def test_tc_flag_10_next_production_run_rejects_unapproved_11(self):
+    def test_tc_flag_10_next_production_run_admits_approved_11(self):
         provider = SequenceProvider([make_config(True, True, 21)])
 
-        self.assert_config_error(
-            "V2_STATE_NOT_AUTHORIZED",
-            lambda: PVAmountRunSession.start(provider),
-        )
+        session = PVAmountRunSession.start(provider)
+
+        self.assertEqual("11", session.config.state)
+        self.assertEqual(21, session.config.config_version)
         self.assertEqual(1, provider.calls)
 
     def test_tc_flag_11_cross_version_or_checksum_fails_loud(self):
@@ -385,6 +386,26 @@ class FlagRuntimeContractTests(unittest.TestCase):
         )
         self.assertIn("redis.call", LOAD_SNAPSHOT_LUA)
         self.assertIn("redis.call", PUBLISH_SNAPSHOT_LUA)
+
+    def test_tc_flag_12_explicit_v2_bootstrap_publishes_admitted_11(self):
+        redis = FakeRedis()
+
+        config = publish_manual_bootstrap(
+            1,
+            expected_active_version=None,
+            redis_client=redis,
+            enable_v2=True,
+        )
+        session = PVAmountRunSession.start(PVAmountConfigProvider(redis))
+        cli_args = build_argument_parser().parse_args(
+            ["--config-version", "2", "--expected-active-version", "1", "--enable-v2"]
+        )
+
+        self.assertEqual("11", config.state)
+        self.assertEqual("11", session.config.state)
+        self.assertEqual("true", redis.hashes[f"{SNAPSHOT_KEY_PREFIX}1"][READ_FIELD])
+        self.assertEqual("true", redis.hashes[f"{SNAPSHOT_KEY_PREFIX}1"][WRITE_FIELD])
+        self.assertTrue(cli_args.enable_v2)
 
     def test_tc_flag_13_consumers_do_not_read_flags_directly(self):
         root = Path(__file__).resolve().parents[3]

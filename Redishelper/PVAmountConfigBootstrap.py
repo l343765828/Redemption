@@ -148,11 +148,13 @@ def publish_manual_bootstrap(
         *,
         expected_active_version: Any = _EXPECTED_VERSION_UNSET,
         redis_client: Any = None,
+        enable_v2: bool = False,
 ) -> PVAmountRunConfig:
-    """原子发布当前批准的 01 snapshot，并执行 read-after-write verify。
+    """原子发布 01 或显式启用的 11 snapshot，并执行 read-after-write verify。
 
     第一次发布必须显式传入 expected_active_version=None。后续发布必须
-    显式传入调用方所批准的 active version；Lua 在原子边界内做 CAS。
+    显式传入调用方所批准的 active version；enable_v2 默认为 False，
+    只有调用方显式选择时才发布 11。Lua 在原子边界内做 CAS。
     """
 
     # region 发布前验证
@@ -162,6 +164,8 @@ def publish_manual_bootstrap(
     )
     if expected_active_version is _EXPECTED_VERSION_UNSET:
         raise PVAmountConfigError("EXPECTED_ACTIVE_VERSION_REQUIRED")
+    if type(enable_v2) is not bool:
+        raise PVAmountConfigError("INVALID_BOOL_TYPE", "enable_v2")
 
     if expected_active_version is None:
         expected_token = "INITIAL"
@@ -174,7 +178,7 @@ def publish_manual_bootstrap(
             raise PVAmountConfigError("STALE_CONFIG_VERSION")
         expected_token = str(expected_active_version)
 
-    read_v2 = False
+    read_v2 = enable_v2
     write_v2 = True
     checksum = compute_snapshot_checksum(
         read_v2=read_v2,
@@ -195,7 +199,7 @@ def publish_manual_bootstrap(
             SNAPSHOT_KEY_PREFIX,
             str(config_version),
             expected_token,
-            "false",
+            "true" if read_v2 else "false",
             "true",
             MANUAL_BOOTSTRAP_MODE,
             AR_CONFIG_SOURCE,
@@ -240,7 +244,7 @@ def publish_manual_bootstrap(
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Atomically publish the approved PVAM 01 Redis snapshot.",
+        description="Atomically publish a PVAM 01 or explicitly enabled 11 Redis snapshot.",
     )
     parser.add_argument(
         "--config-version",
@@ -259,6 +263,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         help="CAS against this active version",
     )
+    parser.add_argument(
+        "--enable-v2",
+        action="store_true",
+        help="explicitly publish the approved read-v2/write-v2 state 11",
+    )
     return parser
 
 
@@ -271,6 +280,7 @@ def main(argv: Any = None) -> int:
         config = publish_manual_bootstrap(
             args.config_version,
             expected_active_version=expected_active_version,
+            enable_v2=args.enable_v2,
         )
     except PVAmountConfigError as exc:
         print(f"PVAM_BOOTSTRAP_FAIL {exc}", file=sys.stderr)

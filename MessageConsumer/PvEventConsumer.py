@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import signal
 import socket
 import time
@@ -82,6 +83,10 @@ _NORMALIZE_RESIDUE_METHODS = {
     "claim_whole_order",
     "mark_dispatched",
 }
+_CONNECTION_URI_PATTERN = re.compile(
+    r"\b[a-z][a-z0-9+.-]*://[^\s]+",
+    re.IGNORECASE,
+)
 
 
 class ConsumerConfigurationError(RuntimeError):
@@ -670,6 +675,29 @@ class PvEventConsumer:
             decision,
             extra=extra,
         )
+        # 本地日志与异常 topic 共用脱敏消息，且不记录原始 payload 或金额。
+        sanitized_exc_info = None
+        if decision.unclassified and exc.__traceback__ is not None:
+            try:
+                sanitized_exc = type(exc)(record["exception_message"])
+            except Exception:
+                sanitized_exc = RuntimeError(record["exception_message"])
+            sanitized_exc_info = (
+                type(sanitized_exc),
+                sanitized_exc,
+                exc.__traceback__,
+            )
+        logger.error(
+            "PV event dispatch failed permanently: "
+            "event_identity=%s failed_stage=%s reason=%s "
+            "exception_class=%s exception_message=%s",
+            record["event_identity"],
+            record["failed_stage"],
+            record["reason"],
+            record["exception_class"],
+            record["exception_message"],
+            exc_info=sanitized_exc_info,
+        )
         if not self._send_exception_with_retry(msg, record):
             return
         if not self._commit_exception_offset_with_retry(msg):
@@ -906,6 +934,7 @@ class PvEventConsumer:
         return raw
 
     def _sanitize_exception_message(self, message: str) -> str:
+        message = _CONNECTION_URI_PATTERN.sub("[REDACTED_CONNECTION]", message)
         password = self.settings.redis_password
         return message.replace(password, "[REDACTED]") if password else message
 

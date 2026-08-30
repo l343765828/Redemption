@@ -1,13 +1,20 @@
 from collections import deque
 from dataclasses import replace
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
 
 from Common.PeriodResolver import PeriodResolutionError
+from Common.PeriodResolver import MappingPeriodRepository, PeriodResolver
+from MessageConsumer.PvEventDispatchCoordinator import PvEventDispatchCoordinator
 from MessageConsumer.PvEventNormalizer import EventIdentityConflict
+from MessageConsumer.PvEventNormalizer import InMemoryEventRegistry, PvEventNormalizer
 from Order.ConsumedOrderLedger import ConsumedOrderConflict
+from Order.ConsumedOrderLedger import InMemoryConsumedOrderLedger
+from Order.PvEventDeliveryLedger import InMemoryPvEventDeliveryLedger
+from Order.RefundReversalLedger import InMemoryRefundReversalLedger
 from MessageConsumer.PvEventConsumer import (
     BOUNDED_RETRY_ATTEMPTS,
     CIRCUIT_BREAKER_THRESHOLD,
@@ -716,6 +723,56 @@ def test_exception_message_contains_full_schema_and_fallback_key(settings):
     assert record["key"] == f"{TOPIC_ORDERS}:2:99"
 
 
+def test_permanent_failure_emits_sanitized_error_log(settings, caplog):
+    connection_uri = "redis://operator:test-password@redis.invalid:6379/0"
+    producer = FakeProducer()
+    subject = build_subject(
+        settings,
+        coordinator=SequenceCoordinator([ConsumedOrderConflict(connection_uri)]),
+        producer=producer,
+    )
+    caplog.set_level(logging.ERROR, logger="MessageConsumer.PvEventConsumer")
+
+    subject.process_message(FakeMessage(valid_order()))
+
+    error_records = [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert error_records
+    error_text = caplog.text
+    assert "event_identity=O-1" in error_text
+    assert "failed_stage=NORMALIZE" in error_text
+    assert "reason=PERSISTENT_FAILURE" in error_text
+    assert "exception_class=ConsumedOrderConflict" in error_text
+    assert "test-password" not in error_text
+    assert connection_uri not in error_text
+    assert "redis://" not in error_text
+    assert producer.records[-1]["payload"]["exception_message"] == "[REDACTED_CONNECTION]"
+
+
+def test_unclassified_permanent_failure_error_log_contains_traceback(settings, caplog):
+    class UnclassifiedCoordinator(SequenceCoordinator):
+        def update_placement_performance(self):
+            raise LookupError("unknown stage failure")
+
+        def dispatch_order(self, payload):
+            self.update_placement_performance()
+
+    retry_settings = replace(settings, bounded_retry_attempts=1)
+    subject = build_subject(
+        retry_settings,
+        coordinator=UnclassifiedCoordinator(),
+    )
+    caplog.set_level(logging.ERROR, logger="MessageConsumer.PvEventConsumer")
+
+    subject.process_message(FakeMessage(valid_order()))
+
+    assert any(record.levelno >= logging.ERROR for record in caplog.records)
+    assert "failed_stage=PLACEMENT_PERFORMANCE" in caplog.text
+    assert "reason=RETRY_EXHAUSTED" in caplog.text
+    assert "exception_class=LookupError" in caplog.text
+    assert "Traceback (most recent call last)" in caplog.text
+    assert "LookupError: unknown stage failure" in caplog.text
+
+
 def test_exception_delivery_failure_does_not_commit_when_shutdown(settings):
     consumer = FakeConsumer()
     producer = FakeProducer(errors=[RuntimeError("broker down")])
@@ -936,6 +993,101 @@ def test_traceback_stage_attribution_matrix(
     assert failure["failed_stage"] == expected_stage
     assert failure["completed_stages"] == expected_completed
     assert failure["has_redis_residue"] is True
+
+
+@pytest.mark.parametrize(
+    ("failing_stage", "expected_stage", "expected_completed"),
+    [
+        ("user", "ELITE_PERFORMANCE", []),
+        ("placement", "PLACEMENT_PERFORMANCE", ["ELITE_PERFORMANCE"]),
+        (
+            "elite",
+            "ELITE_BONUS",
+            ["ELITE_PERFORMANCE", "PLACEMENT_PERFORMANCE"],
+        ),
+    ],
+)
+def test_real_coordinator_stage_attribution_matches_done_markers(
+    settings,
+    failing_stage,
+    expected_stage,
+    expected_completed,
+):
+    class MarkerRedis:
+        def __init__(self):
+            self.values = {}
+
+        def set(self, key, value):
+            self.values[key] = value
+
+        def exists(self, key):
+            return key in self.values
+
+    marker_redis = MarkerRedis()
+
+    class UserStage:
+        def update_elite_performance(self, *, user_id, normalized_event):
+            if failing_stage == "user":
+                raise ValueError("injected user stage failure")
+            marker_redis.set(
+                f"system:idempotency:41:{normalized_event.identity}:done",
+                "1",
+            )
+
+    class PlacementStage:
+        def update_placement_performance(self, *, user_id, normalized_event):
+            if failing_stage == "placement":
+                raise ValueError("injected placement stage failure")
+            marker_redis.set(
+                f"system:idempotency:placement:41:{normalized_event.identity}:done",
+                "1",
+            )
+
+    class EliteStage:
+        def update_elite_bonus_incremental(self, *, user_id, normalized_event):
+            if failing_stage == "elite":
+                raise ValueError("injected elite stage failure")
+            marker_redis.set(
+                f"system:idempotency:elite:41:{normalized_event.identity}:done",
+                "1",
+            )
+
+    normalizer = PvEventNormalizer(
+        PeriodResolver(
+            MappingPeriodRepository(
+                [{"PERIOD_NUM": 41, "CALC_YEAR": 2099, "CALC_MONTH": 6}]
+            )
+        ),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=InMemoryConsumedOrderLedger(),
+        delivery_ledger=InMemoryPvEventDeliveryLedger(),
+    )
+    coordinator = PvEventDispatchCoordinator(
+        normalizer,
+        user_stats_service=UserStage(),
+        placement_service=PlacementStage(),
+        elite_bonus_service=EliteStage(),
+    )
+    producer = FakeProducer()
+    subject = build_subject(settings, coordinator=coordinator, producer=producer)
+
+    subject.process_message(FakeMessage(valid_order()))
+
+    failure = producer.records[-1]["payload"]
+    expected_marker_keys = {
+        "ELITE_PERFORMANCE": "system:idempotency:41:O-1:done",
+        "PLACEMENT_PERFORMANCE": "system:idempotency:placement:41:O-1:done",
+        "ELITE_BONUS": "system:idempotency:elite:41:O-1:done",
+    }
+    assert failure["failed_stage"] == expected_stage
+    assert failure["completed_stages"] == expected_completed
+    assert failure["pending_stages"] == list(_STAGE_ORDER[len(expected_completed):])
+    assert {
+        stage
+        for stage, key in expected_marker_keys.items()
+        if marker_redis.exists(key)
+    } == set(expected_completed)
 
 
 def test_unraised_unknown_failure_keeps_residue_unknown(settings):

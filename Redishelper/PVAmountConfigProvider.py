@@ -334,15 +334,13 @@ class PVAmountConfigProvider:
 
 
 def admit_production_run_config(config: PVAmountRunConfig) -> None:
-    """校验 production run 的四态；当前没有 11 的正式授权入口。"""
+    """校验 production run 四态；允许 00/01/11，继续拒绝无效的 10。"""
 
     if not isinstance(config, PVAmountRunConfig):
         raise PVAmountConfigError("RUN_CONFIG_TYPE_INVALID")
 
     if config.read_v2 and not config.write_v2:
         raise PVAmountConfigError("INVALID_STATE")
-    if config.read_v2 and config.write_v2:
-        raise PVAmountConfigError("V2_STATE_NOT_AUTHORIZED")
 
 
 @dataclass(frozen=True, slots=True)

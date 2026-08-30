@@ -428,9 +428,9 @@ class ConditionalFactoryContractTests(unittest.TestCase):
 
     # endregion
 
-    # region TC-FLAG-20～21：TEST-ONLY 11 与 production admission 隔离
+    # region TC-FLAG-20～21：正式 11 与 production admission
 
-    def test_tc_flag_20_direct_unit_domain_11_can_stamp_but_production_rejects(self):
+    def test_tc_flag_20_direct_unit_domain_11_stamps_and_production_admits(self):
         test_fixture = make_config(True, True, 77)
         fields = build_factory_amount_fields(
             test_fixture.state,
@@ -444,9 +444,7 @@ class ConditionalFactoryContractTests(unittest.TestCase):
         self.assertEqual(0, fields["estimated_bonus_cents"])
         require_v2_amount_record(fields)
 
-        with self.assertRaises(PVAmountConfigError) as captured:
-            admit_production_run_config(test_fixture)
-        self.assertEqual("V2_STATE_NOT_AUTHORIZED", captured.exception.code)
+        admit_production_run_config(test_fixture)
 
     def test_tc_flag_20_real_private_elite_factories_accept_test_only_11(self):
         incremental_module, global_module = load_real_elite_factory_modules()
