@@ -179,7 +179,23 @@ function Test-NativeStdinUsesExactUtf8Bytes {
     $payload = '{"message":"' + [char]0x6C49 + [char]0x5B57 + [char]::ConvertFromUtf32(0x1F600) + '","empty":[]}'
     $code = "import hashlib,sys; data=sys.stdin.buffer.read(); print(str(len(data)) + ':' + hashlib.sha256(data).hexdigest())"
 
-    $result = Invoke-Native -FilePath $script:TestPythonPath -Arguments @("-c", $code) -StandardInput $payload
+    $previousInputEncoding = [Console]::InputEncoding
+    try {
+        [Console]::InputEncoding = New-Object Text.UTF8Encoding($true)
+        $expectedPreamble = [BitConverter]::ToString([Console]::InputEncoding.GetPreamble())
+        Assert-Equal "EF-BB-BF" $expectedPreamble "test setup must establish UTF-8 with BOM"
+        $result = Invoke-Native -FilePath $script:TestPythonPath -Arguments @("-c", $code) -StandardInput $payload
+        Assert-Equal $expectedPreamble ([BitConverter]::ToString([Console]::InputEncoding.GetPreamble())) "native invocation must restore the parent stdin encoding after success"
+
+        $startFailure = $null
+        try {
+            Invoke-Native -FilePath (Join-Path ([IO.Path]::GetTempPath()) ("missing-native-" + [Guid]::NewGuid().ToString("N") + ".exe")) -Arguments @() -StandardInput $payload | Out-Null
+        }
+        catch { $startFailure = $_.Exception }
+        if (-not $startFailure) { throw "native start failure probe unexpectedly succeeded" }
+        Assert-Equal $expectedPreamble ([BitConverter]::ToString([Console]::InputEncoding.GetPreamble())) "native invocation must restore the parent stdin encoding after start failure"
+    }
+    finally { [Console]::InputEncoding = $previousInputEncoding }
 
     Assert-Equal 0 $result.ExitCode "native UTF-8 stdin probe must succeed"
     Assert-Equal "35:b2b3d42baac48f930ad203783dca5f1b73a9e7de72841427778fe9114ee389ff" (@($result.Output) -join "`n") "native stdin must reach the child as exact UTF-8 bytes without BOM"

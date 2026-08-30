@@ -326,7 +326,12 @@ function Invoke-Native([string]$FilePath, [string[]]$Arguments, $StandardInput =
             $process = New-Object Diagnostics.Process
             $process.StartInfo = $start
             try {
-                if (-not $process.Start()) { throw "native process did not start: $FilePath" }
+                $previousInputEncoding = [Console]::InputEncoding
+                try {
+                    [Console]::InputEncoding = $Utf8NoBom
+                    if (-not $process.Start()) { throw "native process did not start: $FilePath" }
+                }
+                finally { [Console]::InputEncoding = $previousInputEncoding }
                 $stdoutTask = $process.StandardOutput.ReadToEndAsync()
                 $stderrTask = $process.StandardError.ReadToEndAsync()
                 $stdinFailure = $null
