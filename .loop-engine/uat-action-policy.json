@@ -27,7 +27,9 @@
     "system:idempotency:{period}:",
     "system:idempotency:placement:{period}:",
     "system:idempotency:elite:{period}:",
-    "user_stats:Model.User.UserStats.UserStats:{period}:"
+    "user_stats:Model.User.UserStats.UserStats:{period}:",
+    "elite_bonus_stats:Model.User.EliteBonusStats.EliteBonusStats:{period}:",
+    "eb_source:{period}:"
   ],
   "exec_profiles": {
     "python-version": {

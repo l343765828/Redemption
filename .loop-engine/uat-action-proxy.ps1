@@ -1624,6 +1624,20 @@ function Get-ExpandedRedisPrefixes($Templates) {
     return $items.ToArray()
 }
 
+function ConvertTo-Utf8Base64Json([object[]]$Value) {
+    $json=ConvertTo-Json -InputObject $Value -Depth 20 -Compress
+    return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+}
+
+function Get-ControllerDerivedRedisScanPrefixes($Policy) {
+    $templates=@($Policy.redis_exact_cleanup_prefixes|Where-Object{([string]$_).Contains('{period}') -or ([string]$_).Contains('{uat_execution_id}')})
+    $prefixes=@(Get-ExpandedRedisPrefixes $templates|Select-Object -Unique)
+    foreach($prefix in $prefixes){
+        if(-not $prefix -or $prefix -match '[\x00\r\n *?\[\]]'){throw "UAT_ACTION_POLICY_DENIED: controller Redis scan prefix is not exact: $prefix"}
+    }
+    return $prefixes
+}
+
 function Get-DeliveredKafkaKeysFromControllerEvidence() {
     $keys=New-Object System.Collections.Generic.List[string]
     if (-not (Test-Path -LiteralPath $EvidenceDir -PathType Container)) { return $keys.ToArray() }
@@ -1721,20 +1735,32 @@ function Invoke-RedisExactCleanup($Request, $Policy) {
     $controllerDerived=($Request.PSObject.Properties.Name -contains 'controller_derived') -and [bool]$Request.controller_derived
     if($controllerDerived -and $Request.PSObject.Properties.Name -contains 'keys'){throw 'UAT_ACTION_POLICY_DENIED: controller-derived Redis cleanup does not accept caller keys'}
     $keys=if($controllerDerived){@(Get-ControllerDerivedRedisCleanupKeys $Policy)}else{@($Request.keys | ForEach-Object { [string]$_ })}
+    $scanPrefixes=if($controllerDerived){@(Get-ControllerDerivedRedisScanPrefixes $Policy)}else{@()}
     $maxKeys=if($controllerDerived){1000}else{100}
-    if($keys.Count -eq 0 -and $controllerDerived){
+    if($keys.Count -eq 0 -and $scanPrefixes.Count -eq 0 -and $controllerDerived){
         $semantic=[pscustomobject]@{kind='RedisDeleteResult';requested_count=0;deleted_count=0;remaining_count=0;remaining=@();requested_keys=@();cleanup_source='controller-evidence'}
         return [pscustomobject]@{ExitCode=0;Output=@('controller-derived exact cleanup no-op');Semantic=$semantic}
     }
-    if ($keys.Count -lt 1 -or $keys.Count -gt $maxKeys) { throw "UAT_ACTION_POLICY_DENIED: Redis cleanup requires 1..$maxKeys exact keys" }
+    if ($keys.Count -gt $maxKeys -or (-not $controllerDerived -and $keys.Count -lt 1)) { throw "UAT_ACTION_POLICY_DENIED: Redis cleanup requires 1..$maxKeys exact keys" }
     foreach ($key in $keys) { if (-not (Test-RedisKeyGoverned $key $Policy.redis_exact_cleanup_prefixes)) { throw "UAT_ACTION_POLICY_DENIED: Redis key outside durable execution/period scope or exact delivered Kafka identity: $key" } }
     $runtimeTarget=Resolve-ConsumerRuntimeTarget $Request $Policy 'RedisDeleteExactKeys'
     $pod=[string]$runtimeTarget.Pod;$container=[string]$runtimeTarget.Container;$repo=[string]$runtimeTarget.Repo
-    $keysJson=ConvertTo-Json -InputObject $keys -Compress
-    if (-not $keysJson.TrimStart().StartsWith('[',[StringComparison]::Ordinal)) { throw "REDIS_CLEANUP_SHAPE_INVALID: serialized exact-key list is not a JSON array" }
-    $b64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($keysJson))
-    $code="import base64,json,os,sys,redis;r=redis.Redis(host=os.environ['PVAM_REDIS_HOST'],port=int(os.environ['PVAM_REDIS_PORT']),db=int(os.environ['PVAM_REDIS_DB']),password=os.environ.get('PVAM_REDIS_PASSWORD') or None,decode_responses=True);ks=json.loads(base64.b64decode(sys.argv[1]));assert isinstance(ks,list) and all(isinstance(k,str) for k in ks);deleted=int(r.delete(*ks));remaining=[k for k in ks if r.exists(k)];print(json.dumps({'kind':'RedisDeleteResult','requested_count':len(ks),'deleted_count':deleted,'remaining_count':len(remaining),'remaining':remaining,'requested_keys':ks},sort_keys=True))"
-    $r=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @($b64)
+    $keysB64=ConvertTo-Utf8Base64Json $keys
+    $scanPrefixesB64=ConvertTo-Utf8Base64Json $scanPrefixes
+    $code=@'
+import base64,json,os,sys,redis
+r=redis.Redis(host=os.environ['PVAM_REDIS_HOST'],port=int(os.environ['PVAM_REDIS_PORT']),db=int(os.environ['PVAM_REDIS_DB']),password=os.environ.get('PVAM_REDIS_PASSWORD') or None,decode_responses=True)
+initial=json.loads(base64.b64decode(sys.argv[1]));prefixes=json.loads(base64.b64decode(sys.argv[2]))
+assert isinstance(initial,list) and all(isinstance(k,str) for k in initial)
+assert isinstance(prefixes,list) and all(isinstance(p,str) and p and not any(c in p for c in '*?[]') for p in prefixes)
+keys=set(initial)
+for prefix in prefixes:
+    keys.update(r.scan_iter(match=prefix+'*',count=200))
+if len(keys)>1000: raise RuntimeError('controller-derived Redis cleanup exceeds 1000 exact keys')
+keys=sorted(keys);deleted=int(r.delete(*keys)) if keys else 0;remaining=[k for k in keys if r.exists(k)]
+print(json.dumps({'kind':'RedisDeleteResult','requested_count':len(keys),'deleted_count':deleted,'remaining_count':len(remaining),'remaining':remaining,'requested_keys':keys,'discovered_count':len(set(keys)-set(initial)),'scan_prefix_count':len(prefixes)},sort_keys=True))
+'@
+    $r=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @($keysB64,$scanPrefixesB64)
     if($r.ExitCode -eq 0){ $json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1); if(-not $json){throw 'REDIS_CLEANUP_RESULT_INVALID: no structured result'}; $s=([string]$json)|ConvertFrom-Json; if([int]$s.remaining_count -ne 0){throw 'REDIS_CLEANUP_INCOMPLETE: exact keys remain after delete'}; if($controllerDerived){$s|Add-Member -NotePropertyName cleanup_source -NotePropertyValue 'controller-evidence' -Force}; $r|Add-Member -NotePropertyName Semantic -NotePropertyValue $s -Force }
     return $r
 }
@@ -1751,7 +1777,10 @@ function Get-RedisProofKeys([string]$ProofId,$Policy) {
         $order=@($kafka.deliveries|Where-Object{[string]$_.role -eq 'original-order'});$refund=@($kafka.deliveries|Where-Object{[string]$_.role -eq 'refund'})
         if($order.Count -ne 1 -or $refund.Count -ne 1){throw 'UAT_ACTION_POLICY_DENIED: cross-period Redis proof delivery roles invalid'}
         $orderId=[string]$order[0].key;$refundId=[string]$refund[0].key
-        foreach($k in @($base+'order_ledger:'+$orderId,$base+'refund_reversal:'+$orderId,$base+'event_delivery:'+$orderId,$base+'event_delivery:'+$refundId)){$keys.Add($k)}
+        $keys.Add($base+'order_ledger:'+$orderId)
+        $keys.Add($base+'refund_reversal:'+$orderId)
+        $keys.Add($base+'event_delivery:'+$orderId)
+        $keys.Add($base+'event_delivery:'+$refundId)
     }
     elseif($ProofId -eq 'duplicate-ledgers'){
         $rows=@($kafka.deliveries);$ids=@($rows|ForEach-Object{[string]$_.key}|Select-Object -Unique)
@@ -1888,32 +1917,32 @@ function Invoke-PendingRecoveryProof($Request,$Policy) {
     $firstProd=Invoke-ControllerUatProducer $pod $container $repo $Policy $prodSpec;if($firstProd.ExitCode -ne 0){return $firstProd}
     $deliveryLine=(@($firstProd.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $deliveryLine){throw 'UAT_ENV_BLOCKED: pending recovery initial producer evidence missing'};$delivery=([string]$deliveryLine)|ConvertFrom-Json
     $waitCode=@'
-import json,os,redis,sys,time
+import base64,json,os,redis,sys,time
 r=redis.Redis(host=os.environ['PVAM_REDIS_HOST'],port=int(os.environ['PVAM_REDIS_PORT']),db=int(os.environ['PVAM_REDIS_DB']),password=os.environ.get('PVAM_REDIS_PASSWORD') or None,decode_responses=True)
-k=sys.argv[1]; keys=json.loads(sys.argv[2]); end=time.time()+60; status=None
+k=sys.argv[1]; keys=json.loads(base64.b64decode(sys.argv[2])); end=time.time()+60; status=None
 while time.time()<end:
     status=r.hget(k,'status') if r.type(k)=='hash' else None
     if status=='DISPATCHED' and all(r.exists(x) for x in keys): break
     time.sleep(.25)
 print(json.dumps({'status':status,'three_chain':all(bool(r.exists(x)) for x in keys),'keys':keys},sort_keys=True))
 '@
-    $idemJson=$idemKeys|ConvertTo-Json -Compress
-    $firstWait=Invoke-RuntimePythonCommand $pod $container $repo $Policy $waitCode @($deliveryKey,$idemJson);if($firstWait.ExitCode -ne 0){return $firstWait}
+    $idemB64=ConvertTo-Utf8Base64Json $idemKeys
+    $firstWait=Invoke-RuntimePythonCommand $pod $container $repo $Policy $waitCode @($deliveryKey,$idemB64);if($firstWait.ExitCode -ne 0){return $firstWait}
     $firstJson=(@($firstWait.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $firstJson){throw 'UAT_ENV_BLOCKED: pending recovery initial completion evidence missing'};$firstSem=([string]$firstJson)|ConvertFrom-Json
     if([string]$firstSem.status -ne 'DISPATCHED' -or -not [bool]$firstSem.three_chain){throw 'UAT_ENV_BLOCKED: pending recovery could not establish a completed three-chain event'}
     $snapshotBeforeReplay=Invoke-UserStatsSnapshot $pod $container $repo $Policy $userId @($period);$pre0=Get-UserStatsPeriodSnapshot $snapshotBeforeFirst $period;$preReplay=Get-UserStatsPeriodSnapshot $snapshotBeforeReplay $period
     if(([long]$preReplay.pv-[long]$pre0.pv) -ne 1000000 -or [int]$preReplay.amount_encoding_version -ne 2){throw 'UAT_ENV_BLOCKED: pending recovery initial business dispatch did not apply exactly once'}
 
     $injectCode=@'
-import json,os,redis,sys
+import base64,json,os,redis,sys
 r=redis.Redis(host=os.environ['PVAM_REDIS_HOST'],port=int(os.environ['PVAM_REDIS_PORT']),db=int(os.environ['PVAM_REDIS_DB']),password=os.environ.get('PVAM_REDIS_PASSWORD') or None,decode_responses=True)
-k=sys.argv[1]; expected=sys.argv[2]; keys=json.loads(sys.argv[3]); current=r.hget(k,'payload_hash'); status=r.hget(k,'status')
+k=sys.argv[1]; expected=sys.argv[2]; keys=json.loads(base64.b64decode(sys.argv[3])); current=r.hget(k,'payload_hash'); status=r.hget(k,'status')
 if current!=expected or status!='DISPATCHED': raise RuntimeError('delivery ledger is not the expected completed event')
 if not all(r.exists(x) for x in keys): raise RuntimeError('stage idempotency markers are not all present before crash-window injection')
 r.hset(k,'status','PENDING')
 print(json.dumps({'crash_window_injected':True,'status':r.hget(k,'status'),'idempotency_present_before_restart':all(bool(r.exists(x)) for x in keys)},sort_keys=True))
 '@
-    $inject=Invoke-RuntimePythonCommand $pod $container $repo $Policy $injectCode @($deliveryKey,[string]$delivery.payload_sha256,$idemJson);if($inject.ExitCode -ne 0){return $inject}
+    $inject=Invoke-RuntimePythonCommand $pod $container $repo $Policy $injectCode @($deliveryKey,[string]$delivery.payload_sha256,$idemB64);if($inject.ExitCode -ne 0){return $inject}
     $injectJson=(@($inject.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $injectJson){throw 'UAT_ENV_BLOCKED: pending crash-window injection evidence missing'};$injectSem=([string]$injectJson)|ConvertFrom-Json
     if([string]$injectSem.status -ne 'PENDING' -or -not [bool]$injectSem.crash_window_injected -or -not [bool]$injectSem.idempotency_present_before_restart){throw 'UAT_ENV_BLOCKED: failed to establish PENDING-after-stages crash window'}
 
@@ -1924,7 +1953,7 @@ print(json.dumps({'crash_window_injected':True,'status':r.hget(k,'status'),'idem
     $newPod=$pod
     $newRepo=$repo
     $replay=Invoke-ControllerUatProducer $newPod $container $newRepo $Policy $prodSpec;if($replay.ExitCode -ne 0){return $replay}
-    $secondWait=Invoke-RuntimePythonCommand $newPod $container $newRepo $Policy $waitCode @($deliveryKey,$idemJson);if($secondWait.ExitCode -ne 0){return $secondWait}
+    $secondWait=Invoke-RuntimePythonCommand $newPod $container $newRepo $Policy $waitCode @($deliveryKey,$idemB64);if($secondWait.ExitCode -ne 0){return $secondWait}
     $secondJson=(@($secondWait.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $secondJson){throw 'UAT_ENV_BLOCKED: pending recovery replay completion evidence missing'};$secondSem=([string]$secondJson)|ConvertFrom-Json
     if([string]$secondSem.status -ne 'DISPATCHED' -or -not [bool]$secondSem.three_chain){throw 'UAT_ENV_BLOCKED: PENDING state did not recover to DISPATCHED after restart/replay'}
     $snapshotAfterReplay=Invoke-UserStatsSnapshot $newPod $container $newRepo $Policy $userId @($period);$postReplay=Get-UserStatsPeriodSnapshot $snapshotAfterReplay $period

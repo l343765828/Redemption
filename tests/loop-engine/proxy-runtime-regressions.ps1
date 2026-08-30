@@ -10,6 +10,10 @@ param(
         "pod-repo-scope-denied",
         "scheduler-skip-failed",
         "runtime-python-argv-safe",
+        "runtime-json-base64-safe",
+        "pending-recovery-json-safe",
+        "redis-proof-cross-period-distinct-keys",
+        "redis-cleanup-stage-prefixes",
         "runtime-config-policy-redirect-blocked",
         "consumer-controller-payload-safe",
         "pytest-full-exclusions",
@@ -403,6 +407,222 @@ print(json.dumps({'kind': 'RuntimeArgvProbe', 'args': sys.argv[1:], 'kafka': os.
     }
 }
 
+function Test-RuntimeJsonBase64Safe {
+    Import-ProxyFunctions @("Invoke-RuntimePythonCommand", "ConvertTo-Utf8Base64Json")
+    function script:Invoke-PodCommand {
+        param([string]$Pod, [string]$Container, [object[]]$Command)
+        return Invoke-LocalPythonFromPodCommand $Command
+    }
+
+    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("proxy-runtime-json-{0}" -f [Guid]::NewGuid().ToString("N"))
+    $modelRoot = Join-Path $tempRoot "Model"
+    try {
+        [IO.Directory]::CreateDirectory($modelRoot) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $modelRoot "__init__.py"), "", (New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText((Join-Path $modelRoot "Config.py"), @'
+SCHEDULE_ADDRESS = 'tcp://scheduler:8786'
+REDIS_HOST = 'redis'
+REDIS_PORT = 6379
+REDIS_DB = 1
+REDIS_PASSWORD = 'secret'
+'@, (New-Object Text.UTF8Encoding($false)))
+
+        $policy = [pscustomobject]@{
+            consumer_runtime_target = [pscustomobject]@{
+                repo_path = $tempRoot
+                kafka_bootstrap = "kafka:9092"
+                dask_scheduler = "tcp://scheduler:8786"
+                redis_host = "redis"
+                redis_port = 6379
+                redis_db = 1
+            }
+        }
+        $keys = @('system:idempotency:990014:uat-json:"quoted":done', 'system:idempotency:990014:space value:done')
+        $encoded = ConvertTo-Utf8Base64Json $keys
+        $runtimeCode = @'
+import base64, json, sys
+print(json.dumps({'kind': 'RuntimeJsonProbe', 'keys': json.loads(base64.b64decode(sys.argv[1]))}, sort_keys=True))
+'@
+        $result = Invoke-RuntimePythonCommand "scheduler-pod" "scheduler" $tempRoot $policy $runtimeCode @($encoded)
+        Assert-Equal 0 $result.ExitCode "Base64 JSON must survive the real PowerShell 5.1 native argv boundary"
+        $jsonLine = @($result.Output | Where-Object { ([string]$_).Trim().StartsWith("{") } | Select-Object -Last 1)
+        if ($jsonLine.Count -ne 1) { throw "runtime Base64 JSON probe returned no JSON" }
+        $semantic = ([string]$jsonLine[0]) | ConvertFrom-Json
+        Assert-Equal ($keys -join "|") (@($semantic.keys) -join "|") "decoded JSON values must remain exact"
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
+    }
+}
+
+function Test-PendingRecoveryJsonSafe {
+    Import-ProxyFunctions @("ConvertTo-Utf8Base64Json", "Invoke-PendingRecoveryProof")
+    function script:Assert-RequiredTokens { param($Tokens, [string]$Action) }
+    function script:Get-LatestConsumerLifecycleSemantic {
+        return [pscustomobject]@{operation="bind-secondary";deployment="dask-cluster-scheduler";container="scheduler";calc_month=1}
+    }
+    function script:Get-StageUatPeriodContext { return [pscustomobject]@{Primary=990013;Secondary=990014} }
+    function script:Get-ConsumerLifecycleTarget { param($Policy,[string]$Deployment,[string]$Container); return [pscustomobject]@{pod_name_prefix="dask-cluster-scheduler-"} }
+    function script:Get-ConsumerLifecycleSelectedPods { param([string]$Deployment,[string]$Container,[string]$Prefix); return @("scheduler-pod") }
+    function script:Assert-ResourceAllowed { param([string]$Kind,[string]$Name) }
+    function script:Get-CurrentCandidateSha { return "0123456789abcdef0123456789abcdef01234567" }
+    function script:Verify-PodGitView { param([string]$Pod,[string]$Container,[string]$Remote,[string]$Candidate); return "/mnt/dask/Redemption/Redemption" }
+    function script:Assert-SafeProducerValue { param([string]$Value,[string]$Name) }
+    function script:Invoke-UserStatsSnapshot { param([string]$Pod,[string]$Container,[string]$Repo,$Policy,[string]$UserId,$Periods); return [pscustomobject]@{} }
+    function script:Invoke-ControllerUatProducer {
+        param([string]$Pod,[string]$Container,[string]$Repo,$Policy,$Spec)
+        return [pscustomobject]@{
+            ExitCode=0
+            Output=@('{"payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}')
+        }
+    }
+    function script:Invoke-RuntimePythonCommand {
+        param([string]$Pod,[string]$Container,[string]$Repo,$Policy,[string]$Code,[string[]]$Arguments)
+        $decoded=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$Arguments[1]))|ConvertFrom-Json
+        Assert-Equal 3 @($decoded).Count "pending recovery must send all three idempotency keys as Base64 JSON"
+        Assert-Equal "system:idempotency:990014:" ([string]$decoded[0]).Substring(0,26) "pending recovery idempotency namespace mismatch"
+        throw "C02_CAPTURED"
+    }
+
+    $policy=[pscustomobject]@{repo_remote_url="git@github.com:l343765828/Redemption.git"}
+    Assert-ThrowsLike {
+        Invoke-PendingRecoveryProof ([pscustomobject]@{user_id="U-UAT-001"}) $policy
+    } "C02_CAPTURED" "pending recovery must Base64-encode JSON before the runtime boundary"
+}
+
+function Test-RedisProofCrossPeriodDistinctKeys {
+    Import-ProxyFunctions @("Get-RedisProofKeys")
+    $script:ExecutionId = "c2-r3-opus-s7-test"
+    function script:Get-KafkaScenarioSemantic {
+        param([string]$Scenario)
+        return [pscustomobject]@{
+            deliveries = @(
+                [pscustomobject]@{role="original-order";key="uat-c2-r3-opus-s7-test-order"},
+                [pscustomobject]@{role="refund";key="uat-c2-r3-opus-s7-test-refund"}
+            )
+        }
+    }
+    $policy = [pscustomobject]@{
+        redis_proof_contracts = [pscustomobject]@{
+            "cross-period-refund-ledgers" = [pscustomobject]@{scenario="cross-period-refund"}
+        }
+    }
+
+    $result = Get-RedisProofKeys "cross-period-refund-ledgers" $policy
+    $base = "pvam:uat:work02:$($script:ExecutionId):"
+    $expected = New-Object System.Collections.Generic.List[string]
+    $expected.Add($base + "order_ledger:uat-c2-r3-opus-s7-test-order")
+    $expected.Add($base + "refund_reversal:uat-c2-r3-opus-s7-test-order")
+    $expected.Add($base + "event_delivery:uat-c2-r3-opus-s7-test-order")
+    $expected.Add($base + "event_delivery:uat-c2-r3-opus-s7-test-refund")
+    Assert-Equal 4 @($result.Keys).Count "cross-period proof must retain four distinct exact Redis keys"
+    Assert-Equal ($expected.ToArray() -join "|") (@($result.Keys) -join "|") "cross-period proof key identities mismatch"
+}
+
+function Test-RedisCleanupStagePrefixes {
+    Import-ProxyFunctions @(
+        "Get-ExpandedRedisPrefixes",
+        "ConvertTo-Utf8Base64Json",
+        "Get-ControllerDerivedRedisScanPrefixes",
+        "Invoke-RuntimePythonCommand",
+        "Invoke-RedisExactCleanup"
+    )
+    $script:ExecutionId = "c2-r3-opus-s7-test"
+    function script:Get-StageUatPeriodContext {
+        return [pscustomobject]@{Primary=990013;Secondary=990014}
+    }
+    $policy = [IO.File]::ReadAllText($PolicyPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+
+    $actual = @(Get-ControllerDerivedRedisScanPrefixes $policy)
+    $expected = @(
+        "pvam:uat:work02:c2-r3-opus-s7-test:",
+        "system:idempotency:990013:",
+        "system:idempotency:990014:",
+        "system:idempotency:placement:990013:",
+        "system:idempotency:placement:990014:",
+        "system:idempotency:elite:990013:",
+        "system:idempotency:elite:990014:",
+        "user_stats:Model.User.UserStats.UserStats:990013:",
+        "user_stats:Model.User.UserStats.UserStats:990014:",
+        "elite_bonus_stats:Model.User.EliteBonusStats.EliteBonusStats:990013:",
+        "elite_bonus_stats:Model.User.EliteBonusStats.EliteBonusStats:990014:",
+        "eb_source:990013:",
+        "eb_source:990014:"
+    )
+    Assert-Equal ($expected -join "|") ($actual -join "|") "controller cleanup must scan only execution- or period-scoped prefixes"
+    if ($actual -contains "pvam:event_delivery:") { throw "controller cleanup must not scan an unscoped global prefix" }
+
+    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("proxy-redis-cleanup-{0}" -f [Guid]::NewGuid().ToString("N"))
+    $modelRoot = Join-Path $tempRoot "Model"
+    try {
+        [IO.Directory]::CreateDirectory($modelRoot) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $modelRoot "__init__.py"), "", (New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText((Join-Path $modelRoot "Config.py"), @'
+SCHEDULE_ADDRESS = 'tcp://scheduler:8786'
+REDIS_HOST = 'redis'
+REDIS_PORT = 6379
+REDIS_DB = 1
+REDIS_PASSWORD = 'secret'
+'@, (New-Object Text.UTF8Encoding($false)))
+        [IO.File]::WriteAllText((Join-Path $tempRoot "redis.py"), @'
+import fnmatch
+STORE = {
+    'pvam:uat:work02:c2-r3-opus-s7-test:event_delivery:failed-proof',
+    'eb_source:990013:U-UAT-001',
+    'elite_bonus_stats:Model.User.EliteBonusStats.EliteBonusStats:990014:1',
+    'user_stats:Model.User.UserStats.UserStats:990013:3',
+    'pvam:event_delivery:must-remain-unscoped',
+}
+class Redis:
+    def __init__(self, **kwargs): pass
+    def scan_iter(self, match, count=200):
+        return iter(sorted(k for k in STORE if fnmatch.fnmatchcase(k, match)))
+    def delete(self, *keys):
+        found = sum(1 for key in keys if key in STORE)
+        STORE.difference_update(keys)
+        return found
+    def exists(self, key): return key in STORE
+'@, (New-Object Text.UTF8Encoding($false)))
+
+        $initialKey = "pvam:uat:work02:c2-r3-opus-s7-test:exact-initial"
+        $policy = [pscustomobject]@{
+            redis_exact_cleanup_prefixes = @($policy.redis_exact_cleanup_prefixes)
+            consumer_runtime_target = [pscustomobject]@{
+                repo_path = $tempRoot
+                kafka_bootstrap = "kafka:9092"
+                dask_scheduler = "tcp://scheduler:8786"
+                redis_host = "redis"
+                redis_port = 6379
+                redis_db = 1
+            }
+        }
+        function script:Assert-RequiredTokens { param($Tokens, [string]$Action) }
+        function script:Get-ControllerDerivedRedisCleanupKeys { param($Policy) return @($initialKey) }
+        function script:Test-RedisKeyGoverned { param([string]$Key, $Templates) return $true }
+        function script:Resolve-ConsumerRuntimeTarget {
+            param($Request, $Policy, [string]$Action)
+            return [pscustomobject]@{Pod="scheduler-pod";Container="scheduler";Repo=$tempRoot}
+        }
+        function script:Invoke-PodCommand {
+            param([string]$Pod, [string]$Container, [object[]]$Command)
+            return Invoke-LocalPythonFromPodCommand $Command
+        }
+
+        $result = Invoke-RedisExactCleanup ([pscustomobject]@{controller_derived=$true}) $policy
+        if ($result.ExitCode -ne 0) { throw "controller-derived Redis cleanup runtime failed: $(@($result.Output) -join ' | ')" }
+        Assert-Equal 0 $result.ExitCode "controller-derived Redis cleanup runtime must succeed"
+        Assert-Equal 5 ([int]$result.Semantic.requested_count) "cleanup must union the exact evidence key with four stage-scoped discoveries"
+        Assert-Equal 4 ([int]$result.Semantic.discovered_count) "cleanup must report stage-scoped discoveries"
+        Assert-Equal 0 ([int]$result.Semantic.remaining_count) "cleanup must delete every resolved exact key"
+        if (@($result.Semantic.requested_keys) -contains "pvam:event_delivery:must-remain-unscoped") {
+            throw "controller cleanup must leave globally scoped Redis keys untouched"
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
+    }
+}
+
 function Test-RuntimeConfigPolicyRedirectBlocked {
     Import-ProxyFunctions @("Invoke-RuntimePythonCommand")
     function script:Invoke-PodCommand {
@@ -559,6 +779,10 @@ $cases = [ordered]@{
     "pod-repo-scope-denied" = { Test-PodRepoScopeDenied }
     "scheduler-skip-failed" = { Test-SchedulerSkipsFailedPods }
     "runtime-python-argv-safe" = { Test-RuntimePythonArgvSafe }
+    "runtime-json-base64-safe" = { Test-RuntimeJsonBase64Safe }
+    "pending-recovery-json-safe" = { Test-PendingRecoveryJsonSafe }
+    "redis-proof-cross-period-distinct-keys" = { Test-RedisProofCrossPeriodDistinctKeys }
+    "redis-cleanup-stage-prefixes" = { Test-RedisCleanupStagePrefixes }
     "runtime-config-policy-redirect-blocked" = { Test-RuntimeConfigPolicyRedirectBlocked }
     "consumer-controller-payload-safe" = { Test-ConsumerControllerPayloadSafe }
     "pytest-full-exclusions" = { Test-PytestFullExclusions }
