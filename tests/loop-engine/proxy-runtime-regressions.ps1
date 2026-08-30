@@ -14,6 +14,7 @@ param(
         "pending-recovery-json-safe",
         "redis-proof-cross-period-distinct-keys",
         "redis-cleanup-stage-prefixes",
+        "redis-cleanup-caller-key-sizes",
         "runtime-config-policy-redirect-blocked",
         "consumer-controller-payload-safe",
         "pytest-full-exclusions",
@@ -126,7 +127,7 @@ function Assert-ThrowsLike([scriptblock]$Action, [string]$Pattern, [string]$Mess
     }
 }
 
-function Invoke-LocalPythonFromPodCommand([object[]]$Command, [string]$PythonExecutable = $script:TestPythonPath) {
+function Invoke-LocalPythonFromPodCommand([object[]]$Command, [string]$PythonExecutable = $script:TestPythonPath, $StandardInput = $null) {
     if (@($Command).Count -lt 3 -or [string]$Command[0] -ne "python3") {
         throw "expected a python3 pod command"
     }
@@ -134,7 +135,12 @@ function Invoke-LocalPythonFromPodCommand([object[]]$Command, [string]$PythonExe
     $previousPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = "Continue"
-        $output = @(& $PythonExecutable @arguments 2>&1)
+        $output = if ($null -ne $StandardInput) {
+            @($StandardInput | & $PythonExecutable @arguments 2>&1)
+        }
+        else {
+            @(& $PythonExecutable @arguments 2>&1)
+        }
         $exitCode = $LASTEXITCODE
     }
     finally {
@@ -449,6 +455,11 @@ print(json.dumps({'kind': 'RuntimeJsonProbe', 'keys': json.loads(base64.b64decod
         if ($jsonLine.Count -ne 1) { throw "runtime Base64 JSON probe returned no JSON" }
         $semantic = ([string]$jsonLine[0]) | ConvertFrom-Json
         Assert-Equal ($keys -join "|") (@($semantic.keys) -join "|") "decoded JSON values must remain exact"
+
+        $empty = if ($false) { @("unreachable") } else { @() }
+        $emptyEncoded = ConvertTo-Utf8Base64Json $empty
+        $emptyJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($emptyEncoded))
+        Assert-Equal "[]" $emptyJson "a PowerShell pipeline-empty array must remain JSON []"
     }
     finally {
         if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
@@ -519,11 +530,12 @@ function Test-RedisProofCrossPeriodDistinctKeys {
     Assert-Equal ($expected.ToArray() -join "|") (@($result.Keys) -join "|") "cross-period proof key identities mismatch"
 }
 
-function Test-RedisCleanupStagePrefixes {
+function Test-RedisCleanupStagePrefixes([ValidateSet("controller", "caller")][string]$Mode = "controller") {
     Import-ProxyFunctions @(
         "Get-ExpandedRedisPrefixes",
         "ConvertTo-Utf8Base64Json",
         "Get-ControllerDerivedRedisScanPrefixes",
+        "Invoke-Native",
         "Invoke-RuntimePythonCommand",
         "Invoke-RedisExactCleanup"
     )
@@ -584,7 +596,9 @@ class Redis:
     def exists(self, key): return key in STORE
 '@, (New-Object Text.UTF8Encoding($false)))
 
-        $initialKey = "pvam:uat:work02:c2-r3-opus-s7-test:exact-initial"
+        $script:ControllerCleanupKeys = @(0..313 | ForEach-Object {
+            "pvam:uat:work02:c2-r3-opus-s7-test:event_delivery:large-$('{0:D3}' -f $_)-$(('x' * 64))"
+        })
         $policy = [pscustomobject]@{
             redis_exact_cleanup_prefixes = @($policy.redis_exact_cleanup_prefixes)
             consumer_runtime_target = [pscustomobject]@{
@@ -597,7 +611,7 @@ class Redis:
             }
         }
         function script:Assert-RequiredTokens { param($Tokens, [string]$Action) }
-        function script:Get-ControllerDerivedRedisCleanupKeys { param($Policy) return @($initialKey) }
+        function script:Get-ControllerDerivedRedisCleanupKeys { param($Policy) return @($script:ControllerCleanupKeys) }
         function script:Test-RedisKeyGoverned { param([string]$Key, $Templates) return $true }
         function script:Resolve-ConsumerRuntimeTarget {
             param($Request, $Policy, [string]$Action)
@@ -607,15 +621,34 @@ class Redis:
             param([string]$Pod, [string]$Container, [object[]]$Command)
             return Invoke-LocalPythonFromPodCommand $Command
         }
+        function script:Invoke-PodCommandWithInput {
+            param([string]$Pod, [string]$Container, [object[]]$Command, [string]$StandardInput)
+            if (@($Command).Count -lt 3 -or [string]$Command[0] -ne "python3") { throw "expected a python3 pod command" }
+            return Invoke-Native $script:TestPythonPath @($Command | Select-Object -Skip 1) $StandardInput
+        }
 
-        $result = Invoke-RedisExactCleanup ([pscustomobject]@{controller_derived=$true}) $policy
-        if ($result.ExitCode -ne 0) { throw "controller-derived Redis cleanup runtime failed: $(@($result.Output) -join ' | ')" }
-        Assert-Equal 0 $result.ExitCode "controller-derived Redis cleanup runtime must succeed"
-        Assert-Equal 5 ([int]$result.Semantic.requested_count) "cleanup must union the exact evidence key with four stage-scoped discoveries"
-        Assert-Equal 4 ([int]$result.Semantic.discovered_count) "cleanup must report stage-scoped discoveries"
-        Assert-Equal 0 ([int]$result.Semantic.remaining_count) "cleanup must delete every resolved exact key"
-        if (@($result.Semantic.requested_keys) -contains "pvam:event_delivery:must-remain-unscoped") {
-            throw "controller cleanup must leave globally scoped Redis keys untouched"
+        if ($Mode -eq "controller") {
+            $result = Invoke-RedisExactCleanup ([pscustomobject]@{controller_derived=$true}) $policy
+            if ($result.ExitCode -ne 0) { throw "controller-derived Redis cleanup runtime failed: $(@($result.Output) -join ' | ')" }
+            Assert-Equal 0 $result.ExitCode "controller-derived Redis cleanup runtime must succeed with more than 313 exact keys"
+            Assert-Equal 318 ([int]$result.Semantic.requested_count) "cleanup must union 314 exact evidence keys with four stage-scoped discoveries"
+            Assert-Equal 4 ([int]$result.Semantic.discovered_count) "cleanup must report stage-scoped discoveries"
+            Assert-Equal 0 ([int]$result.Semantic.remaining_count) "cleanup must delete every resolved exact key"
+            if (@($result.Semantic.requested_keys) -contains "pvam:event_delivery:must-remain-unscoped") {
+                throw "controller cleanup must leave globally scoped Redis keys untouched"
+            }
+        }
+        else {
+            foreach ($size in @(1, 2, 80)) {
+                $callerKeys = @(0..($size - 1) | ForEach-Object {
+                    "pvam:uat:work02:c2-r3-opus-s7-test:event_delivery:caller-$size-$('{0:D3}' -f $_)"
+                })
+                $result = Invoke-RedisExactCleanup ([pscustomobject]@{keys=$callerKeys}) $policy
+                if ($result.ExitCode -ne 0) { throw "caller Redis cleanup size $size failed: $(@($result.Output) -join ' | ')" }
+                Assert-Equal $size ([int]$result.Semantic.requested_count) "caller Redis cleanup key count mismatch for size $size"
+                Assert-Equal 0 ([int]$result.Semantic.discovered_count) "caller Redis cleanup must not perform stage-prefix discovery"
+                Assert-Equal 0 ([int]$result.Semantic.remaining_count) "caller Redis cleanup must leave no requested keys for size $size"
+            }
         }
     }
     finally {
@@ -783,6 +816,7 @@ $cases = [ordered]@{
     "pending-recovery-json-safe" = { Test-PendingRecoveryJsonSafe }
     "redis-proof-cross-period-distinct-keys" = { Test-RedisProofCrossPeriodDistinctKeys }
     "redis-cleanup-stage-prefixes" = { Test-RedisCleanupStagePrefixes }
+    "redis-cleanup-caller-key-sizes" = { Test-RedisCleanupStagePrefixes "caller" }
     "runtime-config-policy-redirect-blocked" = { Test-RuntimeConfigPolicyRedirectBlocked }
     "consumer-controller-payload-safe" = { Test-ConsumerControllerPayloadSafe }
     "pytest-full-exclusions" = { Test-PytestFullExclusions }

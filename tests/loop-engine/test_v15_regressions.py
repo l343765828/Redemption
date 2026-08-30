@@ -20,12 +20,6 @@ def test_v15_smoke_uses_numeric_authorization_run_id():
     assert all(re.fullmatch(r'[0-9]{1,32}', x) for x in ids)
 
 
-def test_v15_redis_single_key_json_preserves_array_shape():
-    assert 'ConvertTo-Json -InputObject $keys -Compress' in PROXY
-    assert '$keys | ConvertTo-Json -Compress' not in PROXY
-    assert 'REDIS_CLEANUP_SHAPE_INVALID' in PROXY
-
-
 def test_v15_proxy_resolves_period_pair_by_verifier_stage():
     assert 'function Get-StageUatPeriodContext' in PROXY
     assert 'LOOP_FINAL_UAT_PERIOD_PRIMARY' in PROXY

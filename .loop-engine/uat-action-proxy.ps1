@@ -271,13 +271,18 @@ function Assert-NoShellWrapper([string[]]$Command) {
     }
 }
 
-function Invoke-Native([string]$FilePath, [string[]]$Arguments) {
+function Invoke-Native([string]$FilePath, [string[]]$Arguments, $StandardInput = $null) {
     $previous = $ErrorActionPreference
     $output = @()
     $exitCode = -1
     try {
         $ErrorActionPreference = "Continue"
-        $output = @(& $FilePath @Arguments 2>&1)
+        $output = if ($null -ne $StandardInput) {
+            @($StandardInput | & $FilePath @Arguments 2>&1)
+        }
+        else {
+            @(& $FilePath @Arguments 2>&1)
+        }
         $exitCode = $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $previous }
@@ -529,7 +534,12 @@ function Invoke-PodCommand([string]$Pod, [string]$Container, [string[]]$Command)
     return Invoke-Kubectl ($args + @("--") + @($Command))
 }
 
-function Invoke-RuntimePythonCommand([string]$Pod,[string]$Container,[string]$Repo,$Policy,[string]$Code,[string[]]$Arguments) {
+function Invoke-PodCommandWithInput([string]$Pod, [string]$Container, [string[]]$Command, [string]$StandardInput) {
+    $args = @(Get-PodExecArguments $Pod $Container)
+    return Invoke-Native $Kubectl ($args + @("-i", "--") + @($Command)) $StandardInput
+}
+
+function Invoke-RuntimePythonCommand([string]$Pod,[string]$Container,[string]$Repo,$Policy,[string]$Code,[string[]]$Arguments,$StandardInput = $null) {
     $expectedRepo=([string]$Policy.consumer_runtime_target.repo_path).Trim()
     if(-not $expectedRepo -or $Repo -ne $expectedRepo){throw 'UAT_ACTION_POLICY_DENIED: runtime Python repository path is not the version-controlled target'}
     $target=$Policy.consumer_runtime_target
@@ -581,7 +591,9 @@ exec(compile(base64.b64decode(code_b64), "<uat-runtime>", "exec"), {"__name__": 
 '@
     $launcherB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($launcher))
     $launcherBootstrap="import base64,sys;source=base64.b64decode(sys.argv[1]);sys.argv=sys.argv[1:];exec(compile(source,'<uat-launcher>','exec'))"
-    return Invoke-PodCommand $Pod $Container (@('python3','-c',$launcherBootstrap,$launcherB64,$Repo,$kafka,$daskScheduler,$redisHost,[string]$redisPort,[string]$redisDb,$codeB64)+@($Arguments))
+    $command=@('python3','-c',$launcherBootstrap,$launcherB64,$Repo,$kafka,$daskScheduler,$redisHost,[string]$redisPort,[string]$redisDb,$codeB64)+@($Arguments)
+    if($null -ne $StandardInput){return Invoke-PodCommandWithInput $Pod $Container $command $StandardInput}
+    return Invoke-PodCommand $Pod $Container $command
 }
 
 function Get-CurrentCandidateSha() {
@@ -1625,7 +1637,7 @@ function Get-ExpandedRedisPrefixes($Templates) {
 }
 
 function ConvertTo-Utf8Base64Json([object[]]$Value) {
-    $json=ConvertTo-Json -InputObject $Value -Depth 20 -Compress
+    $json=if($null -eq $Value){'[]'}else{ConvertTo-Json -InputObject $Value -Depth 20 -Compress}
     return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
 }
 
@@ -1745,12 +1757,11 @@ function Invoke-RedisExactCleanup($Request, $Policy) {
     foreach ($key in $keys) { if (-not (Test-RedisKeyGoverned $key $Policy.redis_exact_cleanup_prefixes)) { throw "UAT_ACTION_POLICY_DENIED: Redis key outside durable execution/period scope or exact delivered Kafka identity: $key" } }
     $runtimeTarget=Resolve-ConsumerRuntimeTarget $Request $Policy 'RedisDeleteExactKeys'
     $pod=[string]$runtimeTarget.Pod;$container=[string]$runtimeTarget.Container;$repo=[string]$runtimeTarget.Repo
-    $keysB64=ConvertTo-Utf8Base64Json $keys
-    $scanPrefixesB64=ConvertTo-Utf8Base64Json $scanPrefixes
+    $payloadJson=([ordered]@{keys=@($keys);scan_prefixes=@($scanPrefixes)}|ConvertTo-Json -Depth 5 -Compress)
     $code=@'
-import base64,json,os,sys,redis
+import json,os,sys,redis
 r=redis.Redis(host=os.environ['PVAM_REDIS_HOST'],port=int(os.environ['PVAM_REDIS_PORT']),db=int(os.environ['PVAM_REDIS_DB']),password=os.environ.get('PVAM_REDIS_PASSWORD') or None,decode_responses=True)
-initial=json.loads(base64.b64decode(sys.argv[1]));prefixes=json.loads(base64.b64decode(sys.argv[2]))
+payload=json.load(sys.stdin);initial=payload['keys'];prefixes=payload['scan_prefixes']
 assert isinstance(initial,list) and all(isinstance(k,str) for k in initial)
 assert isinstance(prefixes,list) and all(isinstance(p,str) and p and not any(c in p for c in '*?[]') for p in prefixes)
 keys=set(initial)
@@ -1760,7 +1771,7 @@ if len(keys)>1000: raise RuntimeError('controller-derived Redis cleanup exceeds 
 keys=sorted(keys);deleted=int(r.delete(*keys)) if keys else 0;remaining=[k for k in keys if r.exists(k)]
 print(json.dumps({'kind':'RedisDeleteResult','requested_count':len(keys),'deleted_count':deleted,'remaining_count':len(remaining),'remaining':remaining,'requested_keys':keys,'discovered_count':len(set(keys)-set(initial)),'scan_prefix_count':len(prefixes)},sort_keys=True))
 '@
-    $r=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @($keysB64,$scanPrefixesB64)
+    $r=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @() $payloadJson
     if($r.ExitCode -eq 0){ $json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1); if(-not $json){throw 'REDIS_CLEANUP_RESULT_INVALID: no structured result'}; $s=([string]$json)|ConvertFrom-Json; if([int]$s.remaining_count -ne 0){throw 'REDIS_CLEANUP_INCOMPLETE: exact keys remain after delete'}; if($controllerDerived){$s|Add-Member -NotePropertyName cleanup_source -NotePropertyValue 'controller-evidence' -Force}; $r|Add-Member -NotePropertyName Semantic -NotePropertyValue $s -Force }
     return $r
 }
