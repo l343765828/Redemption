@@ -111,6 +111,7 @@ $required = @(
     $env:VERIFIER_OVERRIDE,
     $env:VERIFIER_PROTOCOL,
     $env:VERIFIER_SETTINGS,
+    $env:UAT_ACTION_POLICY_FILE,
     "$env:OUTDIR\pushed-sha.txt"
 )
 foreach ($path in $required) {
@@ -296,6 +297,7 @@ $promptHash = Get-FileSha256 $env:VERIFIER_PROMPT
 $overrideHash = Get-FileSha256 $env:VERIFIER_OVERRIDE
 $protocolHash = Get-FileSha256 $env:VERIFIER_PROTOCOL
 $settingsHash = Get-FileSha256 $effectiveSettings
+$policyHash = Get-FileSha256 $env:UAT_ACTION_POLICY_FILE
 $fingerprintMaterial = @(
     "schema=8",
     "verifier_stage=$env:VERIFIER_STAGE",
@@ -319,6 +321,7 @@ $fingerprintMaterial = @(
     "override=$overrideHash",
     "protocol=$protocolHash",
     "settings=$settingsHash",
+    "uat_action_policy=$policyHash",
     "model=$env:CLAUDE_MODEL",
     "effort=$env:CLAUDE_EFFORT"
 ) -join "`n"
@@ -469,6 +472,7 @@ if (-not (Test-Path $env:VERIFIER_PROGRESS)) {
         override_sha256 = $overrideHash
         protocol_sha256 = $protocolHash
         settings_sha256 = $settingsHash
+        uat_action_policy_sha256 = $policyHash
         claude_model = $env:CLAUDE_MODEL
         claude_effort = $env:CLAUDE_EFFORT
         status = "NEW"
@@ -521,6 +525,7 @@ $lines.Add("Authorized resource scope: $uatResourceScope")
 $lines.Add("Authorized target branch: $uatTargetBranch")
 $lines.Add("Authorized impact scope: $uatImpactScope")
 $lines.Add("Pinned local master AGENTS.md SHA-256: $masterAgentsSha256")
+$lines.Add("UAT action policy SHA-256: $policyHash")
 $lines.Add("Mode: $resumeMode")
 $lines.Add("GitHub run: $env:GITHUB_RUN_ID attempt $env:GITHUB_RUN_ATTEMPT")
 $lines.Add("")
@@ -557,6 +562,7 @@ Write-Host "uat_authorized_actions=$uatAuthorizedActions"
 Write-Host "uat_authorization_scope_sha256=$uatAuthorizationScopeSha256"
 Write-Host "uat_execution_id=$uatExecutionId"
 Write-Host "master_agents_sha256=$masterAgentsSha256"
+Write-Host "uat_action_policy_sha256=$policyHash"
 Write-Host "mode=$resumeMode"
 Write-Host "already_complete=$alreadyComplete"
 Write-Host "progress=$env:VERIFIER_PROGRESS"

@@ -3,8 +3,10 @@
 import json
 import base64
 import hashlib
+import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -12,6 +14,7 @@ REPO = Path(__file__).resolve().parents[2]
 ROLE_CONTRACT = REPO / ".loop-engine" / "agent-skill-contract.ps1"
 PERIOD_VERIFIER = REPO / ".loop-engine" / "verify-proxy-period-evidence.ps1"
 FINALIZER = REPO / ".loop-engine" / "finalize-pvam-v2-uat.ps1"
+PREPARE_VERIFIER_STATE = REPO / ".loop-engine" / "prepare-verifier-state.ps1"
 ROUND_WORKFLOW = REPO / ".github" / "workflows" / "loop-round.yml"
 POOL_SHA = "a" * 64
 SCOPE_SHA = "b" * 64
@@ -228,6 +231,133 @@ def test_workflow_stages_project_skill_only_for_codex_producer():
     assert "Copy-Item -LiteralPath $projectSkillSource" in workflow
     assert "-ProjectCommentSkillPath $stagedProjectSkillEntry" in workflow
     assert "--add-dir $env:PRODUCER_OUTDIR" in workflow
+
+
+def test_policy_change_starts_a_new_verifier_checkpoint():
+    with tempfile.TemporaryDirectory(prefix="loop-policy-fingerprint-") as temp:
+        root = Path(temp)
+        worktree = root / "candidate"
+        remote = root / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(remote)], check=True)
+        subprocess.run(["git", "init", str(worktree)], check=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "config", "user.email", "loop@test.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree), "config", "user.name", "Loop Test"],
+            check=True,
+        )
+        (worktree / "README.md").write_text("checkpoint test\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(worktree), "add", "README.md"], check=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "commit", "-m", "checkpoint fixture"],
+            check=True,
+        )
+        subprocess.run(["git", "-C", str(worktree), "branch", "-M", "smoke"], check=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "remote", "add", "origin", str(remote)],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree), "push", "-u", "origin", "smoke"],
+            check=True,
+        )
+        candidate = subprocess.check_output(
+            ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+
+        outdir = root / "out"
+        state_dir = outdir / "verifier-state" / "opus"
+        history_dir = outdir / "verifier-history" / "opus"
+        runtime_dir = outdir / "verifier-runtime" / "opus"
+        inputs = root / "inputs"
+        inputs.mkdir()
+        for name in ("prompt.md", "override.md", "protocol.md"):
+            (inputs / name).write_text(name + "\n", encoding="utf-8")
+        (inputs / "settings.json").write_text(
+            '{"permissions":{"allow":[],"deny":[]}}\n',
+            encoding="utf-8",
+        )
+        policy = inputs / "policy.json"
+        policy.write_text('{"version":1}\n', encoding="utf-8")
+        master_agents = inputs / "AGENTS.md"
+        master_agents.write_text("checkpoint fixture\n", encoding="utf-8")
+        outdir.mkdir()
+        (outdir / "pushed-sha.txt").write_text(candidate + "\n", encoding="utf-8")
+
+        env = os.environ.copy()
+        env.pop("PSModulePath", None)
+        env.update(
+            {
+                "VERIFIER_STAGE": "OPUS",
+                "VERIFIER_RESULT_FILE": str(outdir / "opus-result.txt"),
+                "VERIFIER_STATE_DIR": str(state_dir),
+                "VERIFIER_RUNTIME_DIR": str(runtime_dir),
+                "VERIFIER_HISTORY_DIR": str(history_dir),
+                "VERIFIER_PROGRESS": str(state_dir / "verifier-progress.json"),
+                "VERIFIER_RESUME_CONTEXT": str(state_dir / "resume-context.md"),
+                "VERIFIER_PROMPT": str(inputs / "prompt.md"),
+                "VERIFIER_OVERRIDE": str(inputs / "override.md"),
+                "VERIFIER_PROTOCOL": str(inputs / "protocol.md"),
+                "VERIFIER_SETTINGS": str(inputs / "settings.json"),
+                "UAT_ACTION_POLICY_FILE": str(policy),
+                "UAT_ACTION_PROXY_ALLOW": "Bash(powershell.exe -File proxy.ps1)",
+                "OUTDIR": str(outdir),
+                "WORKTREE": str(worktree),
+                "SSH_URL": str(remote),
+                "BRANCH": "smoke",
+                "CLAUDE_MODEL": "opus",
+                "CLAUDE_EFFORT": "ultracode",
+                "LOOP_UAT_PERIOD_SLOT": "1",
+                "LOOP_UAT_PERIOD_PRIMARY": "990001",
+                "LOOP_UAT_PERIOD_SECONDARY": "990002",
+                "LOOP_UAT_PERIOD_POOL_SHA256": "a" * 64,
+                "LOOP_UAT_AUTHORIZATION_ID": "TEST-AUTH",
+                "LOOP_UAT_AUTHORIZED_ACTIONS": "debug,exec",
+                "LOOP_UAT_AUTHORIZATION_SCOPE_SHA256": "b" * 64,
+                "LOOP_UAT_AUTHORIZATION_ACTOR": "test-operator",
+                "LOOP_UAT_AUTHORIZATION_STAGE": "OPUS",
+                "LOOP_UAT_EXECUTION_ID": "c1-r1-opus-s1-" + candidate[:12],
+                "LOOP_UAT_CYCLE_SCOPE_SHA256": "c" * 64,
+                "LOOP_UAT_TARGET_NAMESPACE": "dask-operator",
+                "LOOP_UAT_RESOURCE_SCOPE": "pod/dask-cluster-scheduler-*",
+                "LOOP_UAT_TARGET_BRANCH": "smoke",
+                "LOOP_UAT_IMPACT_SCOPE": "isolated-uat-only",
+                "LOOP_MASTER_AGENTS_SNAPSHOT": str(master_agents),
+                "LOOP_MASTER_AGENTS_SHA256": hashlib.sha256(
+                    master_agents.read_bytes()
+                ).hexdigest(),
+                "GITHUB_ENV": str(root / "github-env.txt"),
+                "GITHUB_RUN_ID": "1",
+                "GITHUB_RUN_ATTEMPT": "1",
+            }
+        )
+        command = [
+            shutil.which("pwsh") or powershell_executable(),
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(PREPARE_VERIFIER_STATE),
+        ]
+
+        subprocess.run(command, cwd=str(REPO), env=env, check=True)
+        first = json.loads((state_dir / "verifier-progress.json").read_text("utf-8"))
+        policy.write_text('{"version":2}\n', encoding="utf-8")
+        env["GITHUB_RUN_ID"] = "2"
+        subprocess.run(command, cwd=str(REPO), env=env, check=True)
+        second = json.loads((state_dir / "verifier-progress.json").read_text("utf-8"))
+
+        assert first["input_fingerprint"] != second["input_fingerprint"]
+        assert second["uat_action_policy_sha256"] == hashlib.sha256(
+            policy.read_bytes()
+        ).hexdigest()
+        assert any(history_dir.iterdir())
+        github_env = (root / "github-env.txt").read_text(encoding="utf-8")
+        assert github_env.rstrip().endswith("VERIFIER_ALREADY_COMPLETE=false")
+        assert "VERIFIER_RESUME_MODE=NEW" in github_env.splitlines()[-5:]
 
 
 def test_scheme_b_candidate_scope_is_exact_and_hunk_guards_are_removed():
