@@ -282,6 +282,21 @@ class EliteBonusService:
             raise TypeError("legacy pv_delta must already be strict units int")
 
         if pv_delta == 0:
+            # 零增量没有业务效果，但 normalized event 仍须留下完成态，避免 ACK 后三链标记不齐。
+            if event_done_key is not None:
+                if self._is_normalized_event_done(
+                    self.redis_conn,
+                    event_done_key,
+                    event_done_payload,
+                ):
+                    logger.info("Elite Bonus 检测到已完成事件，安全跳过: %s", event_done_key)
+                    return
+                self._batch_save([], event_done_key, event_done_payload)
+                logger.info(
+                    "Elite Bonus 增量为 0，跳过业务状态并记录 stage 完成态: user_id=%s",
+                    user_id,
+                )
+                return
             logger.info("Elite Bonus 增量为 0，跳过 stage 写入: user_id=%s", user_id)
             return
         # endregion
@@ -332,6 +347,8 @@ class EliteBonusService:
             # region 边界保护: 防退单 / 重复退单导致 pv 穿透到负
             next_pv_pcs = checked_add_int64(current_user.pv_pcs or 0, pv_delta)
             if next_pv_pcs < 0:
+                # 退款不下穿 Elite 累计 PV；业务状态保持不变，但 normalized event 必须完成。
+                self._batch_save([], event_done_key, event_done_payload)
                 logger.warning(
                     "用户 %s pv_pcs 穿透负值(当前 %s, 增量 %s),本次跳过",
                     user_id, current_user.pv_pcs, pv_delta,

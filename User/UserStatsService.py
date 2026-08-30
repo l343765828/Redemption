@@ -450,16 +450,32 @@ class UserStatsService:
         lock_key = f"system:idempotency:{period}:{order_id}:lock"
         # endregion
 
-        # region 数据验证
-        if bv == 0:
-            logger.info("增量 BV 为 0, 跳过处理: period=%s, user_id=%s, order_id=%s", period, user_id, order_id)
-            return
-        # endregion
-
         # region 幂等验证（已完成订单不创建新的业务 run）
         redis_conn = UserStats.db()
         if redis_conn.exists(done_key):
             logger.warning("检测到重复订单 %s，忽略本次请求。", order_id)
+            return
+        # endregion
+
+        # region 零增量完成态
+        if bv == 0:
+            # 零增量不改变业务状态，但必须标记完成，避免 coordinator ACK 后三链状态不一致。
+            done_payload = json.dumps(
+                {"period": period, "user_id": user_id, "bv": bv, "done_at": int(time.time())}
+            )
+            self._save_models_pipeline(
+                redis_conn,
+                [],
+                done_key=done_key,
+                done_payload=done_payload,
+            )
+            logger.info(
+                "增量 BV 为 0, 跳过业务状态并记录 stage 完成态: "
+                "period=%s, user_id=%s, order_id=%s",
+                period,
+                user_id,
+                order_id,
+            )
             return
         # endregion
 

@@ -360,14 +360,24 @@ class PlacementIncrementalService(UserStatsService):
         done_key = f"system:idempotency:placement:{period}:{order_id}:done"
         lock_key = f"system:idempotency:placement:{period}:{order_id}:lock"
 
-        if bv == 0:
-            logger.info("双轨增量 BV 为 0, 跳过处理: period=%s, user_id=%s, order_id=%s", period, user_id, order_id)
-            return
-
         # region 幂等验证（已完成订单不创建新的业务 run）
         redis_conn = UserStats.db()
         if redis_conn.exists(done_key):
             logger.warning("检测到双轨重复订单 %s，忽略本次请求。", order_id)
+            return
+        # endregion
+
+        # region 零增量完成态
+        if bv == 0:
+            # 零增量不改变双轨状态，但必须写完成键，使已 ACK 事件保留完整三链证据。
+            self._save_placement_pipeline(redis_conn, [], [], done_key, period)
+            logger.info(
+                "双轨增量 BV 为 0, 跳过业务状态并记录 stage 完成态: "
+                "period=%s, user_id=%s, order_id=%s",
+                period,
+                user_id,
+                order_id,
+            )
             return
         # endregion
 
