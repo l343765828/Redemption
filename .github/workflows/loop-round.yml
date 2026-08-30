@@ -584,7 +584,7 @@ jobs:
         shell: powershell
         run: |
           Write-Output "=== OPUS VERIFIER PROGRESS SNAPSHOT ==="
-          if (-not (Test-Path $env:VERIFIER_PROGRESS)) { Write-Output "progress ledger missing"; exit 0 }
+          if ([string]::IsNullOrWhiteSpace($env:VERIFIER_PROGRESS) -or -not (Test-Path -LiteralPath $env:VERIFIER_PROGRESS -PathType Leaf)) { Write-Output "progress ledger missing"; exit 0 }
           try {
             $s = [IO.File]::ReadAllText($env:VERIFIER_PROGRESS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
             Write-Output "stage=$($s.verifier_stage) candidate=$($s.candidate_sha) fingerprint=$($s.input_fingerprint) status=$($s.status)"
@@ -854,7 +854,7 @@ jobs:
         shell: powershell
         run: |
           Write-Output "=== FABLE FINAL AUDITOR PROGRESS SNAPSHOT ==="
-          if (-not (Test-Path $env:VERIFIER_PROGRESS)) { Write-Output "progress ledger missing"; exit 0 }
+          if ([string]::IsNullOrWhiteSpace($env:VERIFIER_PROGRESS) -or -not (Test-Path -LiteralPath $env:VERIFIER_PROGRESS -PathType Leaf)) { Write-Output "progress ledger missing"; exit 0 }
           try {
             $s = [IO.File]::ReadAllText($env:VERIFIER_PROGRESS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
             Write-Output "stage=$($s.verifier_stage) candidate=$($s.candidate_sha) fingerprint=$($s.input_fingerprint) status=$($s.status)"

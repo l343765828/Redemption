@@ -271,22 +271,75 @@ function Assert-NoShellWrapper([string[]]$Command) {
     }
 }
 
+function ConvertTo-NativeArgument([AllowEmptyString()][string]$Value) {
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') { return $Value }
+    $builder = New-Object Text.StringBuilder
+    [void]$builder.Append('"')
+    $slashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') { $slashes++; continue }
+        if ($character -eq '"') {
+            [void]$builder.Append(('\' * (($slashes * 2) + 1)))
+            [void]$builder.Append('"')
+            $slashes = 0
+            continue
+        }
+        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes)); $slashes = 0 }
+        [void]$builder.Append($character)
+    }
+    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2))) }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function ConvertFrom-NativeOutput([string]$Text) {
+    if ([string]::IsNullOrEmpty($Text)) { return @() }
+    $trimmed = $Text.TrimEnd("`r", "`n")
+    if (-not $trimmed) { return @() }
+    return @($trimmed -split "`r?`n")
+}
+
 function Invoke-Native([string]$FilePath, [string[]]$Arguments, $StandardInput = $null) {
     $previous = $ErrorActionPreference
     $output = @()
+    $stderr = @()
     $exitCode = -1
     try {
         $ErrorActionPreference = "Continue"
-        $output = if ($null -ne $StandardInput) {
-            @($StandardInput | & $FilePath @Arguments 2>&1)
+        if ($null -ne $StandardInput) {
+            $start = New-Object Diagnostics.ProcessStartInfo
+            $start.FileName = $FilePath
+            $start.Arguments = (@($Arguments | ForEach-Object { ConvertTo-NativeArgument ([string]$_) }) -join ' ')
+            $start.UseShellExecute = $false
+            $start.CreateNoWindow = $true
+            $start.RedirectStandardInput = $true
+            $start.RedirectStandardOutput = $true
+            $start.RedirectStandardError = $true
+            $process = New-Object Diagnostics.Process
+            $process.StartInfo = $start
+            try {
+                if (-not $process.Start()) { throw "native process did not start: $FilePath" }
+                $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+                $stderrTask = $process.StandardError.ReadToEndAsync()
+                $process.StandardInput.Write([string]$StandardInput)
+                $process.StandardInput.Close()
+                $process.WaitForExit()
+                $output = @(ConvertFrom-NativeOutput $stdoutTask.Result)
+                $stderr = @(ConvertFrom-NativeOutput $stderrTask.Result)
+                $output += $stderr
+                $exitCode = $process.ExitCode
+            }
+            finally { $process.Dispose() }
         }
         else {
-            @(& $FilePath @Arguments 2>&1)
+            $rawOutput = @(& $FilePath @Arguments 2>&1)
+            $stderr = @($rawOutput | Where-Object { $_ -is [Management.Automation.ErrorRecord] } | ForEach-Object { [string]$_ })
+            $output = @($rawOutput | ForEach-Object { [string]$_ })
+            $exitCode = $LASTEXITCODE
         }
-        $exitCode = $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $previous }
-    return [pscustomobject]@{ ExitCode = [int]$exitCode; Output = @($output | ForEach-Object { [string]$_ }) }
+    return [pscustomobject]@{ ExitCode = [int]$exitCode; Output = @($output); Stderr = @($stderr) }
 }
 
 function Invoke-Kubectl([string[]]$Arguments) { return Invoke-Native $Kubectl $Arguments }

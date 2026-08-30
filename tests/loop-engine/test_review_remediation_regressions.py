@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -153,3 +155,40 @@ def test_producer_can_write_only_to_controller_staging() -> None:
         override = override_path.read_text(encoding="utf-8")
         assert "PRODUCER_OUTDIR" in override
         assert "D:\\Redemption\\Redemption\\.loop-output\\IMPLEMENTATION_HANDOFF.md" not in override
+
+
+@pytest.mark.parametrize(
+    "step_name",
+    ("Snapshot Opus verifier progress", "Snapshot Fable final-auditor progress"),
+)
+def test_verifier_progress_snapshot_tolerates_unselected_stage(
+    tmp_path: Path, step_name: str
+) -> None:
+    workflow = yaml.safe_load(ROUND_WORKFLOW.read_text(encoding="utf-8"))
+    step = next(
+        item for item in workflow["jobs"]["round"]["steps"] if item.get("name") == step_name
+    )
+    script = tmp_path / "snapshot.ps1"
+    script.write_text(
+        '$ErrorActionPreference = "Stop"\n' + step["run"], encoding="utf-8-sig"
+    )
+    environment = os.environ.copy()
+    environment.pop("VERIFIER_PROGRESS", None)
+
+    completed = subprocess.run(
+        [
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+        ],
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "progress ledger missing" in completed.stdout

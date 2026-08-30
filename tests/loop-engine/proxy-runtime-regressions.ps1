@@ -9,6 +9,7 @@ param(
         "pod-repo-ambiguous",
         "pod-repo-scope-denied",
         "scheduler-skip-failed",
+        "native-stdin-stderr-exit",
         "runtime-python-argv-safe",
         "runtime-json-base64-safe",
         "pending-recovery-json-safe",
@@ -149,6 +150,21 @@ function Invoke-LocalPythonFromPodCommand([object[]]$Command, [string]$PythonExe
     return [pscustomobject]@{
         ExitCode = [int]$exitCode
         Output = @($output | ForEach-Object { [string]$_ })
+    }
+}
+
+function Test-NativeStdinPreservesStderrAndExit {
+    Import-ProxyFunctions @("ConvertTo-NativeArgument", "ConvertFrom-NativeOutput", "Invoke-Native")
+    $code = "import sys; print(sys.stdin.read(), end=''); print('native-stderr', file=sys.stderr); raise SystemExit(7)"
+    $result = Invoke-Native $script:TestPythonPath @("-c", $code) "native-stdin"
+
+    Assert-Equal 7 $result.ExitCode "native invocation must preserve the child exit code"
+    if ($result.PSObject.Properties.Name -notcontains "Stderr") {
+        throw "native invocation must preserve child stderr separately"
+    }
+    Assert-Equal "native-stderr" (@($result.Stderr) -join "`n") "native invocation must preserve exact child stderr"
+    if ((@($result.Output) -join "`n") -notmatch "native-stdin") {
+        throw "native invocation must deliver the provided stdin payload"
     }
 }
 
@@ -535,6 +551,8 @@ function Test-RedisCleanupStagePrefixes([ValidateSet("controller", "caller")][st
         "Get-ExpandedRedisPrefixes",
         "ConvertTo-Utf8Base64Json",
         "Get-ControllerDerivedRedisScanPrefixes",
+        "ConvertTo-NativeArgument",
+        "ConvertFrom-NativeOutput",
         "Invoke-Native",
         "Invoke-RuntimePythonCommand",
         "Invoke-RedisExactCleanup"
@@ -811,6 +829,7 @@ $cases = [ordered]@{
     "pod-repo-ambiguous" = { Test-PodRepoAmbiguous }
     "pod-repo-scope-denied" = { Test-PodRepoScopeDenied }
     "scheduler-skip-failed" = { Test-SchedulerSkipsFailedPods }
+    "native-stdin-stderr-exit" = { Test-NativeStdinPreservesStderrAndExit }
     "runtime-python-argv-safe" = { Test-RuntimePythonArgvSafe }
     "runtime-json-base64-safe" = { Test-RuntimeJsonBase64Safe }
     "pending-recovery-json-safe" = { Test-PendingRecoveryJsonSafe }
