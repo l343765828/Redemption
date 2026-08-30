@@ -11,6 +11,9 @@ param(
         "scheduler-skip-failed",
         "stdin-diagnostic-redaction",
         "native-stdin-stderr-exit",
+        "native-stdin-utf8-exact",
+        "native-stdin-early-exit",
+        "native-stdin-delivery-failure",
         "runtime-python-argv-safe",
         "runtime-json-base64-safe",
         "pending-recovery-json-safe",
@@ -168,6 +171,39 @@ function Test-NativeStdinPreservesStderrAndExit {
     if ((@($result.Output) -join "`n") -notmatch "native-stdin") {
         throw "native invocation must deliver the provided stdin payload"
     }
+}
+
+function Test-NativeStdinUsesExactUtf8Bytes {
+    $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
+    Import-ProxyFunctions @("Get-TextSha256", "Get-StdinDiagnostic", "ConvertTo-NativeArgument", "ConvertFrom-NativeOutput", "Invoke-Native")
+    $payload = '{"message":"' + [char]0x6C49 + [char]0x5B57 + [char]::ConvertFromUtf32(0x1F600) + '","empty":[]}'
+    $code = "import hashlib,sys; data=sys.stdin.buffer.read(); print(str(len(data)) + ':' + hashlib.sha256(data).hexdigest())"
+
+    $result = Invoke-Native -FilePath $script:TestPythonPath -Arguments @("-c", $code) -StandardInput $payload
+
+    Assert-Equal 0 $result.ExitCode "native UTF-8 stdin probe must succeed"
+    Assert-Equal "35:b2b3d42baac48f930ad203783dca5f1b73a9e7de72841427778fe9114ee389ff" (@($result.Output) -join "`n") "native stdin must reach the child as exact UTF-8 bytes without BOM"
+}
+
+function Test-NativeStdinEarlyExitPreservesStderrAndExit {
+    $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
+    Import-ProxyFunctions @("Get-TextSha256", "Get-StdinDiagnostic", "ConvertTo-NativeArgument", "ConvertFrom-NativeOutput", "Invoke-Native")
+    $code = "import sys; print('early-stderr', file=sys.stderr, flush=True); raise SystemExit(9)"
+
+    $result = Invoke-Native -FilePath $script:TestPythonPath -Arguments @("-c", $code) -StandardInput ("x" * 40436)
+
+    Assert-Equal 9 $result.ExitCode "native invocation must retain an early child exit code when stdin delivery is interrupted"
+    Assert-Equal "early-stderr" (@($result.Stderr) -join "`n") "native invocation must retain early child stderr when stdin delivery is interrupted"
+}
+
+function Test-NativeStdinDeliveryFailureIsExplicit {
+    $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
+    Import-ProxyFunctions @("Get-TextSha256", "Get-StdinDiagnostic", "ConvertTo-NativeArgument", "ConvertFrom-NativeOutput", "Invoke-Native")
+    $code = "import sys; print('early-zero', file=sys.stderr, flush=True)"
+
+    Assert-ThrowsLike {
+        Invoke-Native -FilePath $script:TestPythonPath -Arguments @("-c", $code) -StandardInput ("x" * 40436) | Out-Null
+    } "NATIVE_STDIN_DELIVERY_FAILED: exit_code=0*stderr=early-zero*" "native stdin delivery failure must not report a successful child result"
 }
 
 function Test-StdinDiagnosticRedaction {
@@ -661,7 +697,7 @@ class Redis:
             param([string]$Pod, [string]$Container, [object[]]$Command, [string]$StandardInput)
             Write-Host (Get-StdinDiagnostic "test-pod-with-input.entry" $StandardInput)
             if (@($Command).Count -lt 3 -or [string]$Command[0] -ne "python3") { throw "expected a python3 pod command" }
-            return Invoke-Native $script:TestPythonPath @($Command | Select-Object -Skip 1) $StandardInput
+            return Invoke-Native -FilePath $script:TestPythonPath -Arguments @($Command | Select-Object -Skip 1) -StandardInput $StandardInput
         }
 
         if ($Mode -eq "controller") {
@@ -850,6 +886,9 @@ $cases = [ordered]@{
     "scheduler-skip-failed" = { Test-SchedulerSkipsFailedPods }
     "stdin-diagnostic-redaction" = { Test-StdinDiagnosticRedaction }
     "native-stdin-stderr-exit" = { Test-NativeStdinPreservesStderrAndExit }
+    "native-stdin-utf8-exact" = { Test-NativeStdinUsesExactUtf8Bytes }
+    "native-stdin-early-exit" = { Test-NativeStdinEarlyExitPreservesStderrAndExit }
+    "native-stdin-delivery-failure" = { Test-NativeStdinDeliveryFailureIsExplicit }
     "runtime-python-argv-safe" = { Test-RuntimePythonArgvSafe }
     "runtime-json-base64-safe" = { Test-RuntimeJsonBase64Safe }
     "pending-recovery-json-safe" = { Test-PendingRecoveryJsonSafe }

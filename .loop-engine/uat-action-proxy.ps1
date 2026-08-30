@@ -329,13 +329,25 @@ function Invoke-Native([string]$FilePath, [string[]]$Arguments, $StandardInput =
                 if (-not $process.Start()) { throw "native process did not start: $FilePath" }
                 $stdoutTask = $process.StandardOutput.ReadToEndAsync()
                 $stderrTask = $process.StandardError.ReadToEndAsync()
-                $process.StandardInput.Write([string]$StandardInput)
-                $process.StandardInput.Close()
+                $stdinFailure = $null
+                try {
+                    $inputBytes = $Utf8NoBom.GetBytes([string]$StandardInput)
+                    $process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)
+                    $process.StandardInput.BaseStream.Flush()
+                }
+                catch { $stdinFailure = $_.Exception }
+                finally {
+                    try { $process.StandardInput.Close() }
+                    catch { if (-not $stdinFailure) { $stdinFailure = $_.Exception } }
+                }
                 $process.WaitForExit()
                 $output = @(ConvertFrom-NativeOutput $stdoutTask.Result)
                 $stderr = @(ConvertFrom-NativeOutput $stderrTask.Result)
                 $output += $stderr
                 $exitCode = $process.ExitCode
+                if ($stdinFailure -and $exitCode -eq 0) {
+                    throw "NATIVE_STDIN_DELIVERY_FAILED: exit_code=0 stderr=$($stderr -join ' | ') error=$($stdinFailure.Message)"
+                }
             }
             finally { $process.Dispose() }
         }
@@ -598,7 +610,7 @@ function Invoke-PodCommand([string]$Pod, [string]$Container, [string[]]$Command)
 function Invoke-PodCommandWithInput([string]$Pod, [string]$Container, [string[]]$Command, [string]$StandardInput) {
     Write-Host (Get-StdinDiagnostic "pod-with-input.entry" $StandardInput)
     $args = @(Get-PodExecArguments $Pod $Container)
-    return Invoke-Native $Kubectl ($args + @("-i", "--") + @($Command)) $StandardInput
+    return Invoke-Native -FilePath $Kubectl -Arguments ($args + @("-i", "--") + @($Command)) -StandardInput $StandardInput
 }
 
 function Invoke-RuntimePythonCommand([string]$Pod,[string]$Container,[string]$Repo,$Policy,[string]$Code,[string[]]$Arguments,$StandardInput = $null) {
@@ -656,7 +668,7 @@ exec(compile(base64.b64decode(code_b64), "<uat-runtime>", "exec"), {"__name__": 
     $launcherBootstrap="import base64,sys;source=base64.b64decode(sys.argv[1]);sys.argv=sys.argv[1:];exec(compile(source,'<uat-launcher>','exec'))"
     $command=@('python3','-c',$launcherBootstrap,$launcherB64,$Repo,$kafka,$daskScheduler,$redisHost,[string]$redisPort,[string]$redisDb,$codeB64)+@($Arguments)
     Write-Host (Get-StdinDiagnostic "runtime.dispatch" $StandardInput)
-    if($null -ne $StandardInput){return Invoke-PodCommandWithInput $Pod $Container $command $StandardInput}
+    if($null -ne $StandardInput){return Invoke-PodCommandWithInput -Pod $Pod -Container $Container -Command $command -StandardInput $StandardInput}
     return Invoke-PodCommand $Pod $Container $command
 }
 
@@ -1836,7 +1848,7 @@ if len(keys)>1000: raise RuntimeError('controller-derived Redis cleanup exceeds 
 keys=sorted(keys);deleted=int(r.delete(*keys)) if keys else 0;remaining=[k for k in keys if r.exists(k)]
 print(json.dumps({'kind':'RedisDeleteResult','requested_count':len(keys),'deleted_count':deleted,'remaining_count':len(remaining),'remaining':remaining,'requested_keys':keys,'discovered_count':len(set(keys)-set(initial)),'scan_prefix_count':len(prefixes)},sort_keys=True))
 '@
-    $r=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @() $payloadJson
+    $r=Invoke-RuntimePythonCommand -Pod $pod -Container $container -Repo $repo -Policy $Policy -Code $code -Arguments @() -StandardInput $payloadJson
     if($r.ExitCode -eq 0){ $json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1); if(-not $json){throw 'REDIS_CLEANUP_RESULT_INVALID: no structured result'}; $s=([string]$json)|ConvertFrom-Json; if([int]$s.remaining_count -ne 0){throw 'REDIS_CLEANUP_INCOMPLETE: exact keys remain after delete'}; if($controllerDerived){$s|Add-Member -NotePropertyName cleanup_source -NotePropertyValue 'controller-evidence' -Force}; $r|Add-Member -NotePropertyName Semantic -NotePropertyValue $s -Force }
     return $r
 }
