@@ -19,6 +19,10 @@ PROXY_PATH = ROOT / ".loop-engine" / "uat-action-proxy.ps1"
 RUNTIME_CONTROLLER = ROOT / ".loop-engine" / "consumer-runtime-controller-r9.py"
 
 
+def test_action_proxy_uses_utf8_bom_for_windows_powershell_51() -> None:
+    assert PROXY_PATH.read_bytes().startswith(b"\xef\xbb\xbf")
+
+
 def _function(source: str, name: str) -> str:
     match = re.search(rf"(?m)^function\s+{re.escape(name)}\b[^\n]*\{{", source)
     if not match:
