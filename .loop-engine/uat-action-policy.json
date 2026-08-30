@@ -160,6 +160,7 @@
       "KafkaScenarioProduce",
       "RedisDeleteExactKeys",
       "GitUpdate",
+      "PVAmountV2Config",
       "ConsumerLifecycle",
       "RedisReadExactKeys",
       "ConsumerObserve",
@@ -173,6 +174,7 @@
       "KafkaScenarioProduce",
       "RedisDeleteExactKeys",
       "GitUpdate",
+      "PVAmountV2Config",
       "ConsumerLifecycle",
       "RedisReadExactKeys",
       "ConsumerObserve",
@@ -240,18 +242,26 @@
   ],
   "git_change_allowlist": [
     "Common/PeriodResolver.py",
+    "Common/AmountModelAdapter.py",
     "Model/Order/NormalizedPvEvent.py",
     "MessageConsumer/PvEventSchema.py",
     "MessageConsumer/PvEventNormalizer.py",
     "MessageConsumer/PvEventConsumer.py",
+    "Redishelper/PVAmountConfigProvider.py",
+    "Redishelper/PVAmountConfigBootstrap.py",
+    "Redishelper/PVAmountMigration.py",
     "User/UserStatsService.py",
+    "User/PlacementIncrementalService.py",
     "User/EliteBonusService.py",
     "Model/Config.py",
     "Redishelper/BaseRedisModel.py",
     "MessageConsumer/Test/test_pv_event_consumer.py",
+    "Common/Test/test_amount_*",
+    "Redishelper/Test/test_pv_amount_*",
     "User/Test/test_period_resolver.py",
     "User/Test/test_pv_event_normalizer.py",
-    "User/Test/test_amount_dtype_migration.py"
+    "User/Test/test_amount_*",
+    "User/Test/test_pv_amount_*"
   ],
   "required_consumer_lifecycle_ops_by_stage": {
     "OPUS": [
@@ -261,6 +271,18 @@
     ],
     "FABLE": [
       "bind-primary",
+      "restore"
+    ]
+  },
+  "required_pvam_v2_config_ops_by_stage": {
+    "OPUS": [
+      "snapshot",
+      "activate",
+      "restore"
+    ],
+    "FABLE": [
+      "snapshot",
+      "activate",
       "restore"
     ]
   },
@@ -370,24 +392,7 @@
     },
     "elite_rate_percent": "15"
   },
-  "git_hunk_allowlist": {
-    "User/UserStatsService.py": [
-      {
-        "old_start": 32,
-        "old_count": 1,
-        "new_start": 32,
-        "new_count": 1
-      }
-    ],
-    "User/EliteBonusService.py": [
-      {
-        "old_start": 56,
-        "old_count": 1,
-        "new_start": 56,
-        "new_count": 1
-      }
-    ]
-  },
+  "git_hunk_allowlist": {},
   "scenarios_require_no_redis_side_effects": [
     "forbidden-field",
     "schema-invalid",

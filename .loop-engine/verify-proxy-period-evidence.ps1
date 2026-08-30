@@ -100,7 +100,7 @@ if ($files.Count -eq 0) {
     if($VerificationMode -eq 'ValidateExistingOnly'){Write-Output "[PROXY-EVIDENCE] PASS stage=$Stage mode=$VerificationMode files=0";exit 0}
     throw "proxy action evidence missing for required $Stage actions"
 }
-$success=@{};$successfulScenarios=@{};$dbsize=@{};$delivered=New-Object System.Collections.Generic.List[string];$deliveredRecords=New-Object System.Collections.Generic.List[object];$cleanupKeys=New-Object System.Collections.Generic.List[string];$successfulSelectedTargets=New-Object System.Collections.Generic.List[string];$lifecycleOps=@{};$observedScenarios=@{};$lifecycleOrder=@{};$observeOrder=@{};$dispatchedIdentities=@{};$redisProofs=@{};$uatProofs=@{};$uatProofOrder=@{};$runtimeGitUpdateOk=$false;[long]$totalDeleted=0;[int]$successOrdinal=0
+$success=@{};$successfulScenarios=@{};$dbsize=@{};$delivered=New-Object System.Collections.Generic.List[string];$deliveredRecords=New-Object System.Collections.Generic.List[object];$cleanupKeys=New-Object System.Collections.Generic.List[string];$successfulSelectedTargets=New-Object System.Collections.Generic.List[string];$lifecycleOps=@{};$lifecycleRestoreOrdinals=New-Object System.Collections.Generic.List[int];$observedScenarios=@{};$lifecycleOrder=@{};$observeOrder=@{};$dispatchedIdentities=@{};$redisProofs=@{};$uatProofs=@{};$uatProofOrder=@{};$pvamConfigOps=@{};$pvamConfigOrder=@{};$runtimeGitUpdateOk=$false;[long]$totalDeleted=0;[int]$latestCleanupOrdinal=0;[int]$successOrdinal=0
 foreach($file in $files) {
     $fields=Read-ProxyEvidenceFields $file.FullName
     foreach($name in @('stage','action','request_sha256','request_json_b64','stage_scope_sha256','uat_execution_id','stage_period_slot','stage_period_primary','stage_period_secondary','stage_period_pool_sha256','authorized_actions','required_tokens','outcome','exit_code')){if(-not $fields.ContainsKey($name)){throw "proxy evidence missing $name in $($file.Name)"}}
@@ -140,6 +140,40 @@ foreach($file in $files) {
         foreach($field in @('candidate_sha','remote_head','host_head','pod_head')){if(([string]$semantic.$field).ToLowerInvariant() -ne $ExpectedCandidateSha){throw "runtime candidate SHA mismatch in GitUpdate field ${field}"}}
         $runtimeGitUpdateOk=$true
     }
+    elseif($action -eq 'PVAmountV2Config'){
+        if(-not $semantic -or [string]$semantic.kind -ne 'PVAmountV2ConfigResult'){throw "PVAmountV2ConfigResult semantic evidence missing in $($file.Name)"}
+        $op=([string]$semantic.operation).Trim().ToLowerInvariant()
+        if($op -notin @('snapshot','activate','restore')){throw "PVAmountV2Config operation invalid in $($file.Name)"}
+        if(([string]$semantic.candidate_sha).ToLowerInvariant() -ne $ExpectedCandidateSha){throw 'PVAmountV2Config runtime Candidate SHA mismatch'}
+        $activePointer=([string]$semantic.active_pointer).Trim().ToLowerInvariant()
+        if($activePointer -notmatch '^[0-9]+:[0-9a-f]{64}$'){throw "PVAmountV2Config active pointer invalid in $($file.Name)"}
+        $pointerParts=$activePointer.Split(':',2)
+        if([string]$semantic.config_version -ne $pointerParts[0] -or ([string]$semantic.checksum).ToLowerInvariant() -ne $pointerParts[1]){throw "PVAmountV2Config pointer/config mismatch in $($file.Name)"}
+        if(([string]$semantic.state) -notin @('00','01','11')){throw "PVAmountV2Config state invalid in $($file.Name)"}
+
+        if($op -eq 'snapshot'){
+            if(([string]$semantic.original_pointer).ToLowerInvariant() -ne $activePointer){throw 'PVAmountV2Config snapshot original pointer mismatch'}
+        }
+        elseif($op -eq 'activate'){
+            if(-not $pvamConfigOps.ContainsKey('snapshot')){throw 'PVAmountV2Config activate requires prior snapshot evidence'}
+            $snapshot=$pvamConfigOps['snapshot']
+            if(([string]$semantic.original_pointer).ToLowerInvariant() -ne ([string]$snapshot.original_pointer).ToLowerInvariant()){throw 'PVAmountV2Config activate original pointer mismatch'}
+            if([string]$semantic.state -ne '11'){throw 'PVAmountV2Config activate did not prove state 11'}
+            if([long]$semantic.config_version -ne ([long]$snapshot.config_version + 1)){throw 'PVAmountV2Config activate version is not original + 1'}
+            if($activePointer -eq ([string]$snapshot.active_pointer).ToLowerInvariant()){throw 'PVAmountV2Config activate pointer did not change'}
+            $expectedSnapshotKey="pvam:amount_config:snapshot:$([long]$semantic.config_version)"
+            if(([string]$semantic.snapshot_key).Trim() -ne $expectedSnapshotKey){throw 'PVAmountV2Config activate snapshot key invalid'}
+        }
+        else{
+            if(-not $pvamConfigOps.ContainsKey('activate')){throw 'PVAmountV2Config restore requires prior activate evidence'}
+            $activate=$pvamConfigOps['activate'];$snapshot=$pvamConfigOps['snapshot']
+            if(-not [bool]$semantic.restored -or -not [bool]$semantic.snapshot_deleted){throw 'PVAmountV2Config restore semantic flags invalid'}
+            if(([string]$semantic.original_pointer).ToLowerInvariant() -ne ([string]$snapshot.original_pointer).ToLowerInvariant() -or ([string]$semantic.activated_pointer).ToLowerInvariant() -ne ([string]$activate.active_pointer).ToLowerInvariant()){throw 'PVAmountV2Config restore pointer lineage mismatch'}
+            if($activePointer -ne ([string]$snapshot.original_pointer).ToLowerInvariant()){throw 'PVAmountV2Config restore did not recover original pointer'}
+            if(([string]$semantic.snapshot_key).Trim() -ne ([string]$activate.snapshot_key).Trim()){throw 'PVAmountV2Config restore snapshot key mismatch'}
+        }
+        $pvamConfigOps[$op]=$semantic;$pvamConfigOrder[$op]=$successOrdinal
+    }
     elseif($action -eq 'ConsumerLifecycle'){
         if(-not $semantic -or [string]$semantic.kind -ne 'ConsumerLifecycleResult'){throw "ConsumerLifecycleResult semantic evidence missing in $($file.Name)"}
         if([string]$semantic.runtime_mode -ne 'scheduler-pod-temporary-process'){throw "ConsumerLifecycle runtime mode mismatch in $($file.Name)"}
@@ -148,6 +182,7 @@ foreach($file in $files) {
         if($op -eq 'bind-secondary'){if([int]$semantic.bound_period -ne $ExpectedSecondary){throw 'ConsumerLifecycle secondary bound period mismatch'}}
 
         if($op -eq 'restore'){
+            $lifecycleRestoreOrdinals.Add($successOrdinal)
             if(-not [bool]$semantic.restored){throw 'ConsumerLifecycle restore semantic evidence missing'}
             if([int]$semantic.matching_process_count -ne 0){throw 'ConsumerLifecycle restore did not prove governed process absence'}
             $baselineSha=([string]$semantic.baseline_sha256).Trim().ToLowerInvariant()
@@ -197,8 +232,11 @@ foreach($file in $files) {
     }
     elseif($action -eq 'RedisDeleteExactKeys'){
         if(-not $semantic -or [string]$semantic.kind -ne 'RedisDeleteResult'){throw "RedisDeleteResult semantic evidence missing in $($file.Name)"}
-        $requested=[int]$semantic.requested_count;$deleted=[int]$semantic.deleted_count;$remaining=[int]$semantic.remaining_count;if($requested -lt 1 -or $deleted -lt 0 -or $deleted -gt $requested -or $remaining -ne 0){throw 'RedisDelete semantic counts/remaining invalid'}
+        $requested=[int]$semantic.requested_count;$deleted=[int]$semantic.deleted_count;$remaining=[int]$semantic.remaining_count
+        $emptyControllerCleanup=$requested -eq 0 -and [string]$semantic.cleanup_source -eq 'controller-evidence'
+        if($requested -lt 0 -or ($requested -eq 0 -and -not $emptyControllerCleanup) -or $deleted -lt 0 -or $deleted -gt $requested -or $remaining -ne 0){throw 'RedisDelete semantic counts/remaining invalid'}
         $totalDeleted += $deleted
+        $latestCleanupOrdinal=$successOrdinal
         foreach($k in @($semantic.requested_keys)){$v=([string]$k).Trim();if($v -and -not $cleanupKeys.Contains($v)){$cleanupKeys.Add($v)}}
     }
     elseif($action -eq 'RedisReadExactKeys'){
@@ -230,6 +268,12 @@ foreach($file in $files) {
         foreach($target in @($semantic.targets)){ $v=([string]$target).Trim(); if($v -and -not $successfulSelectedTargets.Contains($v)){ $successfulSelectedTargets.Add($v) } }
     }
 }
+
+# An activated temporary config is never acceptable evidence, even when the
+# verifier verdict only validates the actions that already ran.
+if($pvamConfigOps.ContainsKey('activate')){
+    if(-not $pvamConfigOps.ContainsKey('restore') -or [int]$pvamConfigOrder['restore'] -le [int]$pvamConfigOrder['activate']){throw 'PVAmountV2Config activation was not restored'}
+}
 if($VerificationMode -eq 'RequireComplete'){
     foreach($action in $required_success_actions){if(-not $success.ContainsKey($action)){throw "required proxy action has no SUCCESS evidence for ${Stage}: $action"}}
     if($success.ContainsKey('RedisDeleteExactKeys') -and $totalDeleted -le 0){throw 'Redis cleanup produced no actual deletion'}
@@ -257,12 +301,26 @@ if($VerificationMode -eq 'RequireComplete'){
             if(-not ($primaryOrdinal -lt $futureOrdinal -and $futureOrdinal -lt $secondaryOrdinal -and $primaryOrdinal -lt $drainOrdinal -and $drainOrdinal -lt $secondaryOrdinal -and $secondaryOrdinal -lt $replayOrdinal)){throw 'period-switch lifecycle sequence invalid: expected bind-primary -> future-period + drain-sentinel -> bind-secondary -> future-period-replay'}
         }
     }
+    $configProp=@($policy.required_pvam_v2_config_ops_by_stage.PSObject.Properties|Where-Object {$_.Name -eq $Stage}|Select-Object -First 1)[0]
+    if($configProp){
+        [int]$previousConfigOrdinal=0
+        foreach($op in @($configProp.Value|ForEach-Object{[string]$_})){
+            if(-not $pvamConfigOps.ContainsKey($op)){throw "required PVAmountV2Config operation missing for ${Stage}: $op"}
+            [int]$currentConfigOrdinal=$pvamConfigOrder[$op]
+            if($previousConfigOrdinal -gt 0 -and $currentConfigOrdinal -le $previousConfigOrdinal){throw "PVAmountV2Config operation order invalid for ${Stage}"}
+            $previousConfigOrdinal=$currentConfigOrdinal
+        }
+        if($lifecycleOrder.ContainsKey('bind-primary') -and [int]$pvamConfigOrder['activate'] -ge [int]$lifecycleOrder['bind-primary']){throw 'PVAmountV2Config activate must occur before ConsumerLifecycle bind-primary'}
+        if(@($lifecycleRestoreOrdinals|Where-Object{$_ -lt [int]$pvamConfigOrder['snapshot']}).Count -lt 1){throw 'PVAmountV2Config snapshot requires prior ConsumerLifecycle restore'}
+        if($lifecycleOrder.ContainsKey('restore') -and [int]$pvamConfigOrder['restore'] -le [int]$lifecycleOrder['restore']){throw 'PVAmountV2Config restore must occur after ConsumerLifecycle restore'}
+    }
     $observeProp=@($policy.consumer_observation_required_scenarios_by_stage.PSObject.Properties|Where-Object {$_.Name -eq $Stage}|Select-Object -First 1)[0]
     if($observeProp){foreach($scenario in @($observeProp.Value|ForEach-Object{[string]$_})){if(-not $observedScenarios.ContainsKey($scenario)){throw "required consumer observation missing for ${Stage}: $scenario"}}}
     
     # V20-RESTORE-AFTER-OBSERVATIONS-AND-PROOFS
     if($lifecycleOrder.ContainsKey('restore')){
         [int]$restoreOrdinal=$lifecycleOrder['restore']
+        if($latestCleanupOrdinal -le 0 -or $latestCleanupOrdinal -ge $restoreOrdinal){throw 'ConsumerLifecycle final restore must occur after exact Redis cleanup'}
         if($observeProp){foreach($requiredObservedScenario in @($observeProp.Value|ForEach-Object{[string]$_})){if($observeOrder.ContainsKey($requiredObservedScenario) -and $restoreOrdinal -le [int]$observeOrder[$requiredObservedScenario]){throw "ConsumerLifecycle restore must occur after required ConsumerObserve scenario: $requiredObservedScenario"}}}
         if($uatProofProp){foreach($proofId in @($uatProofProp.Value|ForEach-Object{[string]$_})){if($uatProofOrder.ContainsKey($proofId) -and $restoreOrdinal -le [int]$uatProofOrder[$proofId]){throw "ConsumerLifecycle restore must occur after mandatory UAT proof: $proofId"}}}
     }

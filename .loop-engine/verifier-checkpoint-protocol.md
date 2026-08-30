@@ -270,3 +270,16 @@ Fable requires the policy-defined subset. These proofs are not prose checklist i
 `RedisReadExactKeys` with `proof_id` derives the exact key set from controller Kafka evidence and rejects caller-supplied substitutions. Required Redis proof IDs are stage-specific and must report `expectations_satisfied=true` plus request/value SHA-256 digests.
 
 For all required ConsumerObserve scenarios, `business_value_proof_ok=true` is mandatory. Negative scenarios additionally require unchanged UserStats snapshots and zero delivery/order/refund/idempotency residue. Final cleanup must explicitly cover every known ledger key and all three idempotency namespaces for every delivery identity, plus the exact UserStats business key for each controller-delivered period/user pair, before `ConsumerLifecycle restore`.
+
+## v21 PVAM v2 configuration transaction
+
+Each Opus/Fable stage owns one ordered configuration transaction in schema-10 Controller evidence:
+
+1. `ConsumerLifecycle restore` proves zero managed processes.
+2. `PVAmountV2Config snapshot` records the original pointer, state, version, checksum, and Candidate SHA.
+3. `PVAmountV2Config activate` publishes state `11` through the Candidate Bootstrap; caller-supplied pointer/version/checksum fields are forbidden.
+4. The first `ConsumerLifecycle bind-*` occurs only after activation.
+5. Exact Redis cleanup completes before the final Consumer restore.
+6. `PVAmountV2Config restore` occurs after final Consumer restore, restores the exact original pointer by Controller-only CAS, deletes the exact UAT snapshot, and proves `restored=true` plus `snapshot_deleted=true`.
+
+`ValidateExistingOnly` still rejects an activation without a later successful restore. On abnormal verifier exit, `.loop-engine/finalize-pvam-v2-uat.ps1` derives cleanup keys only from successful Controller evidence and executes cleanup -> Consumer restore -> config restore. Pointer drift is fail-closed and requires operator intervention; the finalizer never overwrites an external config update.

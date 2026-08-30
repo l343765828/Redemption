@@ -2,6 +2,18 @@
 
 This file is managed by Loop Engine v20 and supersedes legacy interactive authorization instructions during headless Loop Engine execution.
 
+## Reviewer Skill isolation
+
+- Opus and Fable MUST NOT read, load, invoke, or claim use of Superpowers or Ponytail skills, plugins, instruction files, or methodology.
+- Producer declarations about those skills are not review evidence. Reviewers decide independently from project rules, Candidate diff, raw tests, Controller evidence, and governed UAT.
+- Project Skills required by the pinned AGENTS.md remain applicable; only Superpowers and Ponytail are prohibited for reviewers.
+
+## Current F-201 business decision
+
+- The operator approved Scheme B for WORK-PVAM-02: production admission accepts states `00`, `01`, and `11`, while `10` remains invalid.
+- State `11` is the authorized v2 read/write state. New records carry `amount_encoding_version=2`; existing records require explicit migration and may not be silently upgraded in Consumer or service code.
+- This current decision supersedes the original construction file whitelist and historical `V2_STATE_NOT_AUTHORIZED` conclusion only for the exact Scheme B files/tests listed in the Controller policy. Reviewers must still reject unrelated scope expansion.
+
 ## Non-interactive Cycle authorization
 
 - GitHub `workflow_dispatch` is the single explicit preauthorization event for the current Cycle. Do not ask for per-command or per-stage human confirmation inside Opus or Fable.
@@ -14,7 +26,7 @@ This file is managed by Loop Engine v20 and supersedes legacy interactive author
 - Both Opus and Fable route every Kubernetes/UAT command through `.loop-engine/uat-action-proxy.ps1`.
 - Do not call kubectl, git, `sh -c`, `bash -c`, arbitrary PowerShell, or another mutable shell path directly.
 - Mutable actions are hard mapped to `test-data-write`, `exec`, `debug`, `git-update`, `deploy`, `restart`, `scale`, and `delete` tokens.
-- Governed actions include `List`, `Get`, `GetJsonPath`, `Describe`, `Logs`, `Wait`, `RolloutStatus`, `ExecProfile`, `DebugProfile`, `KafkaScenarioProduce`, `ConsumerObserve`, `RedisReadExactKeys`, `RedisDeleteExactKeys`, `UatProof`, `GitUpdate`, `SetImage`, `Restart`, `Scale`, and `Delete`.
+- Governed actions include `List`, `Get`, `GetJsonPath`, `Describe`, `Logs`, `Wait`, `RolloutStatus`, `ExecProfile`, `DebugProfile`, `PVAmountV2Config`, `KafkaScenarioProduce`, `ConsumerObserve`, `RedisReadExactKeys`, `RedisDeleteExactKeys`, `UatProof`, `GitUpdate`, `SetImage`, `Restart`, `Scale`, and `Delete`.
 - `KafkaScenarioProduce` is limited to policy-allowlisted PVAM topics, the current stage periods, and `order_id` values prefixed with the durable `uat_execution_id` marker.
 - `RedisReadExactKeys` reads only exact policy-allowlisted PVAM ledger keys; `RedisDeleteExactKeys` deletes only exact durable-execution/period-scoped keys or the exact UserStats business key derived from successful Kafka `period + user_id` evidence, and preserves JSON array shape even for one key.
 - `GitUpdate` discovers the host repository by exact Redemption remote URL, rejects dirty state, checks the remote candidate SHA before checkout, and verifies node-host plus scoped Pod/NFS HEADs after checkout.
@@ -54,6 +66,14 @@ Use only the governed proxy, which internally uses `D:\Redemption\Redemption\K8S
 - `KafkaScenarioProduce` uses only the controller-owned fixed producer embedded in `uat-action-proxy.ps1`. Candidate-owned `tests/pvam/WORK-PVAM-02/*` is outside the construction allowlist and must never define UAT delivery semantics.
 - `dask-actor-rebuild` runs `python3 -m User.UserService` from the discovered Redemption repository root. `DaskListDatasets` verifies published datasets through the governed profile.
 - `environment-summary` is prohibited. Use only `runtime-summary` or other policy-owned bounded outputs; proxy evidence output is line/byte capped and sanitized.
+
+## v21 PVAM v2 configuration transaction and finalizer
+
+- Before `PVAmountV2Config snapshot`, the latest successful `ConsumerLifecycle` action must be `restore` with zero matching managed processes. Snapshot records the current immutable pointer/state/version/checksum without accepting caller-owned values.
+- `PVAmountV2Config activate` must follow that snapshot for the same Candidate and calls the Candidate Bootstrap with explicit v2 enablement. The result must be state `11`, config version `original + 1`, and a pointer/checksum matching the created immutable snapshot.
+- The first Consumer bind occurs only after activation. Final stage order is exact Redis cleanup, `ConsumerLifecycle restore`, then `PVAmountV2Config restore`.
+- Restore is Controller-only CAS: it proceeds only while the active pointer exactly equals this UAT activation, restores the saved original pointer, deletes the exact UAT-created snapshot, and verifies the original state/version/checksum. Pointer drift or missing snapshot is `UAT_ENV_BLOCKED`; it is never overwritten.
+- The workflow runs `.loop-engine/finalize-pvam-v2-uat.ps1` with `!cancelled()` after each verifier stage. A pending activation triggers Controller-derived exact cleanup, Consumer restore, and config restore; an already-restored or never-activated stage is an idempotent no-op.
 
 
 ## Verdict-aware evidence and semantic cleanup contract (retained in v20)

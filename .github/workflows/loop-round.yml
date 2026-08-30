@@ -81,6 +81,7 @@ env:
   UAT_ACTION_PROXY_ALLOW: Bash(powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:/Redemption/Redemption/.loop-engine/uat-action-proxy.ps1)
   PROTECTED_EVIDENCE_HASH_SCRIPT: D:\Redemption\Redemption\.loop-engine\protected-evidence-hash.ps1
   PROXY_PERIOD_VERIFY_SCRIPT: D:\Redemption\Redemption\.loop-engine\verify-proxy-period-evidence.ps1
+  PVAM_V2_FINALIZER_SCRIPT: D:\Redemption\Redemption\.loop-engine\finalize-pvam-v2-uat.ps1
   CONTROLLER_PROXY_EVIDENCE_ROOT: D:\Redemption\Redemption\.loop-output\controller-evidence\schema-10
 
   OPUS_VERIFIER_STATE_DIR: D:\Redemption\Redemption\.loop-output\verifier-state\opus
@@ -242,6 +243,23 @@ jobs:
           if (-not (Test-Path $env:PRODUCER_PROMPT)) { Write-Error "producer prompt missing: $env:PRODUCER_PROMPT"; exit 1 }
           $override = [IO.File]::ReadAllText($env:PRODUCER_OVERRIDE, [System.Text.Encoding]::UTF8)
           $basePrompt = [IO.File]::ReadAllText($env:PRODUCER_PROMPT, [System.Text.Encoding]::UTF8)
+          $projectSkillSource = Join-Path $env:MAINREPO ".agents\skills\redemption-comment-style"
+          $projectSkillEntry = Join-Path $projectSkillSource "SKILL.md"
+          $projectSkillReference = Join-Path $projectSkillSource "references\comment-patterns.md"
+          if (-not (Test-Path $projectSkillEntry) -or -not (Test-Path $projectSkillReference)) { Write-Error "project comment skill or required reference missing: $projectSkillSource"; exit 1 }
+          $stagedSkillRoot = Join-Path $env:PRODUCER_OUTDIR "skills"
+          New-Item -ItemType Directory -Force $stagedSkillRoot | Out-Null
+          Copy-Item -LiteralPath $projectSkillSource -Destination $stagedSkillRoot -Recurse -Force
+          $stagedProjectSkillEntry = Join-Path $stagedSkillRoot "redemption-comment-style\SKILL.md"
+          $stagedProjectSkillReference = Join-Path $stagedSkillRoot "redemption-comment-style\references\comment-patterns.md"
+          if (-not (Test-Path $stagedProjectSkillEntry) -or -not (Test-Path $stagedProjectSkillReference)) { Write-Error "staged project comment skill copy is incomplete"; exit 1 }
+          $projectSkillEntryHash = (Get-FileHash -Algorithm SHA256 $stagedProjectSkillEntry).Hash.ToLowerInvariant()
+          $projectSkillReferenceHash = (Get-FileHash -Algorithm SHA256 $stagedProjectSkillReference).Hash.ToLowerInvariant()
+          $skillContractScript = Join-Path $env:MAINREPO ".loop-engine\agent-skill-contract.ps1"
+          if (-not (Test-Path $skillContractScript)) { Write-Error "producer skill contract missing: $skillContractScript"; exit 1 }
+          $producerSkillContract = (@(& $skillContractScript -Role PRODUCER -ProjectCommentSkillPath $stagedProjectSkillEntry) -join "`n").Trim()
+          $producerSkillContract += "`nController-staged project Skill SHA-256: $projectSkillEntryHash`nController-staged reference SHA-256: $projectSkillReferenceHash"
+          if (-not $producerSkillContract) { Write-Error "producer skill contract is empty"; exit 1 }
           if (-not $env:LOOP_MASTER_AGENTS_SNAPSHOT -or -not (Test-Path $env:LOOP_MASTER_AGENTS_SNAPSHOT)) { Write-Error "pinned master AGENTS snapshot missing before Codex"; exit 1 }
           $masterAgentsHash = (Get-FileHash -Algorithm SHA256 $env:LOOP_MASTER_AGENTS_SNAPSHOT).Hash.ToLowerInvariant()
           if ($masterAgentsHash -ne ([string]$env:LOOP_MASTER_AGENTS_SHA256).ToLowerInvariant()) { Write-Error "pinned master AGENTS snapshot hash mismatch before Codex"; exit 1 }
@@ -272,6 +290,8 @@ jobs:
             $prompt = @(
               $override,
               "",
+              $producerSkillContract,
+              "",
               $masterAgentsContext,
               "",
               $producerOutputContext,
@@ -296,6 +316,8 @@ jobs:
           } else {
             $prompt = @(
               $override,
+              "",
+              $producerSkillContract,
               "",
               $masterAgentsContext,
               "",
@@ -547,6 +569,14 @@ jobs:
           if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "Opus verifier already complete for this fingerprint; skipping Claude execution"; exit 0 }
           if (-not (Test-Path $env:VERIFIER_RUNNER_SCRIPT)) { Write-Error "runner script missing: $env:VERIFIER_RUNNER_SCRIPT"; exit 1 }
           & $env:VERIFIER_RUNNER_SCRIPT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Finalize Opus PVAM v2 UAT transaction
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:PVAM_V2_FINALIZER_SCRIPT `
+            -EvidenceDir "$env:CONTROLLER_PROXY_EVIDENCE_ROOT\cycle-$env:LOOP_CYCLE\round-$env:LOOP_ROUND\opus"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Snapshot Opus verifier progress
@@ -809,6 +839,14 @@ jobs:
         run: |
           if ($env:VERIFIER_ALREADY_COMPLETE -eq "true") { Write-Output "Fable final audit already complete; skipping Claude execution"; exit 0 }
           & $env:VERIFIER_RUNNER_SCRIPT
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Finalize Fable PVAM v2 UAT transaction
+        if: ${{ !cancelled() && steps.opus_gate.outputs.run_fable == 'true' }}
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:PVAM_V2_FINALIZER_SCRIPT `
+            -EvidenceDir "$env:CONTROLLER_PROXY_EVIDENCE_ROOT\cycle-$env:LOOP_CYCLE\round-$env:LOOP_ROUND\fable"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Snapshot Fable final-auditor progress

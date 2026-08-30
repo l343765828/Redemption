@@ -698,13 +698,19 @@ if ($verifyContract -notmatch 'function Read-ProxyEvidenceFields') { throw "v20 
 if ($verifyContract -match 'if\s*\(\s*\$ExpectedCandidateSha\s+(-and|\))') { throw "v20 optional candidate guard remains" }
 if ([int]$policyV20.schema_version -ne 8 -or [int]$policyV20.controller_evidence_schema -ne 10) { throw "v20 policy/schema mismatch" }
 if ($null -eq $policyV20.consumer_runtime_target -or [string]$policyV20.consumer_runtime_target.mode -ne 'scheduler-pod-temporary-process') { throw "v20 consumer_runtime_target missing" }
-if (-not $policyV20.git_hunk_allowlist.'User/UserStatsService.py') { throw "v20 UserStats line-level Git hunk guard missing" }
-if (-not $policyV20.git_hunk_allowlist.'User/EliteBonusService.py') { throw "v20 EliteBonus line-level Git hunk guard missing" }
+if (@($policyV20.git_hunk_allowlist.PSObject.Properties).Count -ne 0) { throw "v21 Scheme B must not retain historical exact-line Git hunk guards" }
+foreach ($schemeBPath in @('Common/AmountModelAdapter.py','Redishelper/PVAmountConfigProvider.py','Redishelper/PVAmountConfigBootstrap.py','Redishelper/PVAmountMigration.py','User/PlacementIncrementalService.py')) {
+    if (@($policyV20.git_change_allowlist | ForEach-Object { [string]$_ }) -notcontains $schemeBPath) { throw "v21 Scheme B path missing from Git allowlist: $schemeBPath" }
+}
 if (@($policyV20.pytest_selected_required_targets) -notcontains 'User/Test/test_amount_dtype_migration.py') { throw "v20 amount dtype migration required pytest target missing" }
 if ($proxyContract -notmatch 'function Invoke-ControllerUatProducer') { throw "v20 controller-owned UAT producer missing" }
 if ($proxyContract -match 'tests/pvam/WORK-PVAM-02/uat_message_producer.py') { throw "v20 Candidate-owned UAT producer path remains" }
 if ($proxyContract -notmatch 'business_value_proof_ok') { throw "v20 UserStats business-value proof missing" }
 if ($verifyContract -notmatch 'mandatory UAT proof missing') { throw "v20 mandatory UAT proof verifier gate missing" }
+if ($proxyContract -notmatch 'function Invoke-PVAmountV2Config') { throw "v21 PVAmountV2Config action missing" }
+if ($verifyContract -notmatch 'PVAmountV2Config activation was not restored') { throw "v21 config restoration evidence gate missing" }
+$finalizerContract = [IO.File]::ReadAllText((Join-Path $env:MAINREPO ".loop-engine\finalize-pvam-v2-uat.ps1"), [Text.Encoding]::UTF8)
+if ($finalizerContract -notmatch 'RedisDeleteExactKeys' -or $finalizerContract -notmatch 'PVAmountV2Config') { throw "v21 abnormal-path finalizer contract missing" }
 $opusProofs = @($policyV20.mandatory_uat_proofs_by_stage.OPUS | ForEach-Object { [string]$_ })
 foreach ($proof in @('cross-period-refund-routing','duplicate-no-double','pending-dispatched-recovery','int64-end-to-end','pause-rebalance','dispatch-p99')) {
     if ($opusProofs -notcontains $proof) { throw "v20 mandatory OPUS proof missing: $proof" }

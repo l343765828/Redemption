@@ -96,6 +96,8 @@ foreach ($relative in @(
     ".loop-engine\loop-state.ps1",
     ".loop-engine\prepare-verifier-state.ps1",
     ".loop-engine\claude-verifier-runner.ps1",
+    ".loop-engine\agent-skill-contract.ps1",
+    ".loop-engine\finalize-pvam-v2-uat.ps1",
     ".loop-engine\automated-override.md",
     ".loop-engine\verifier-checkpoint-protocol.md",
     ".loop-engine\uat-period-pool.json",

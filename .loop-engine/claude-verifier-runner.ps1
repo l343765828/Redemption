@@ -139,6 +139,10 @@ $override = [IO.File]::ReadAllText($env:VERIFIER_OVERRIDE, [System.Text.Encoding
 $prompt = [IO.File]::ReadAllText($env:VERIFIER_PROMPT, [System.Text.Encoding]::UTF8)
 $protocol = [IO.File]::ReadAllText($env:VERIFIER_PROTOCOL, [System.Text.Encoding]::UTF8)
 $resumeContext = [IO.File]::ReadAllText($env:VERIFIER_RESUME_CONTEXT, [System.Text.Encoding]::UTF8)
+$skillContractScript = Join-Path $env:MAINREPO ".loop-engine\agent-skill-contract.ps1"
+if (-not (Test-Path -LiteralPath $skillContractScript -PathType Leaf)) { throw "reviewer skill contract missing: $skillContractScript" }
+$reviewerSkillContract = (@(& $skillContractScript -Role $env:VERIFIER_STAGE) -join "`n").Trim()
+if (-not $reviewerSkillContract) { throw "reviewer skill contract is empty for $env:VERIFIER_STAGE" }
 
 if (-not $env:LOOP_MASTER_AGENTS_SHA256) { throw "LOOP_MASTER_AGENTS_SHA256 is required before Claude" }
 $masterAgentsHash = (Get-FileHash -Algorithm SHA256 $env:LOOP_MASTER_AGENTS_SNAPSHOT).Hash.ToLowerInvariant()
@@ -225,12 +229,13 @@ Mandatory enforcement:
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:/Redemption/Redemption/.loop-engine/uat-action-proxy.ps1
 - Do not invoke kubectl, git, sh -c, bash -c, arbitrary PowerShell, or other mutable shell commands directly.
 - The proxy is the enforcement boundary: it maps each mutable structured action to required tokens, namespace/resources/branch/impact scope, and fixed command templates.
-- Use structured actions, not free-form commands. Important v20 actions: `List`/`Get`/`GetJsonPath`/`Describe`/`Logs`/`Wait`/`RolloutStatus` for scoped observation; `ExecProfile`/`DebugProfile` for versioned read/test profiles; `GitAudit` for fixed read-only git status/log/diff/ls-remote/merge-base; `PytestFull`/`PytestSelected` for governed repo tests; `DaskListDatasets` for the fixed dataset check; `ConsumerLifecycle` for governed primary/secondary Consumer binding; `KafkaScenarioProduce` for the project-delivered WORK-PVAM-02 scenario producer; `ConsumerObserve` for controller-owned delivery-ledger/three-chain/log/business-delta assertions; `RedisDbSize` and `RedisReadExactKeys` for Redis assertions; `UatProof` for mandatory controller-owned cross-period/duplicate/PENDING/int64/pause/p99 proofs; `RedisDeleteExactKeys` for exact durable-execution-marked cleanup; `SetImage`/`Restart`/`Scale`/`Delete` for scoped Kubernetes mutations; and `GitUpdate` for the candidate branch.
+- Use structured actions, not free-form commands. Important v21 actions: `List`/`Get`/`GetJsonPath`/`Describe`/`Logs`/`Wait`/`RolloutStatus` for scoped observation; `ExecProfile`/`DebugProfile` for versioned read/test profiles; `GitAudit` for fixed read-only git status/log/diff/ls-remote/merge-base; `PytestFull`/`PytestSelected` for governed repo tests; `DaskListDatasets` for the fixed dataset check; `PVAmountV2Config` for Controller-owned `snapshot`/`activate`/`restore`; `ConsumerLifecycle` for governed primary/secondary Consumer binding; `KafkaScenarioProduce` for the Controller-owned WORK-PVAM-02 scenario producer; `ConsumerObserve` for delivery-ledger/three-chain/log/business-delta assertions; `RedisDbSize` and `RedisReadExactKeys` for Redis assertions; `UatProof` for mandatory controller-owned cross-period/duplicate/PENDING/int64/pause/p99 proofs; `RedisDeleteExactKeys` for exact durable-execution-marked cleanup; `SetImage`/`Restart`/`Scale`/`Delete` for scoped Kubernetes mutations; and `GitUpdate` for the candidate branch.
 - `KafkaScenarioProduce` uses the controller-owned fixed producer embedded in `.loop-engine/uat-action-proxy.ps1`; Candidate-owned `tests/pvam/WORK-PVAM-02/*` is not authorized; use the durable execution identity `$env:LOOP_UAT_EXECUTION_ID`, not the current GitHub Run ID. Do not supply `period_role`; the controller-owned scenario-to-period/binding policy selects primary/secondary and requires the matching ConsumerLifecycle binding. Fable must use the final-audit period pair, never the Opus pair.
 - `GitUpdate` requires `node` plus `verification_pod` (and optional `verification_container`). The proxy discovers the Redemption repo by exact remote URL, rejects a dirty host worktree before mutation, validates remote/host/pod HEAD equality to `pushed-sha.txt`, and performs mandatory UID-bound node-debugger cleanup.
 - Before repo tests or Kafka UAT, run `GitUpdate`; every repo-backed proxy action independently re-verifies the Pod/NFS HEAD equals the Candidate SHA.
+- Before configuration snapshot or activation, invoke `ConsumerLifecycle restore` and prove zero managed processes. Then invoke `PVAmountV2Config snapshot`, followed by `PVAmountV2Config activate`; activation is Controller-derived from the saved pointer and must publish state `11` through the Candidate Bootstrap before the first Consumer bind. Never supply pointer, version, checksum, or snapshot-key fields.
 - Use `ConsumerLifecycle` `bind-primary` before primary-period scenarios and `bind-secondary` for the period-switch path. Use `ConsumerLifecycle logs` for managed Consumer diagnostics. Do not supply `calc_month`, Deployment, container, or Pod unless repeating the exact version-controlled values: the controller resolves the unique Running+Ready scheduler Pod and starts/replaces `MessageConsumer.PvEventConsumer` there as a governed temporary process.
-- After the final required ConsumerObserve and UatProof actions for the stage, invoke `ConsumerLifecycle restore`. Restore stops only the process owned by this durable execution ID; it does not restart or mutate the scheduler Deployment.
+- After the final required ConsumerObserve and UatProof actions for the stage, perform exact Redis cleanup, invoke `ConsumerLifecycle restore`, and finally invoke `PVAmountV2Config restore`. Configuration restore uses Controller-only pointer CAS and deletes only the UAT-created immutable snapshot. The workflow finalizer repeats this sequence on abnormal exit and is idempotent when no activation is pending.
 - ConsumerLifecycle runtime mode, namespace, scheduler host Deployment/container, Pod prefix, repository path, Kafka bootstrap, and role-specific calc months come from the version-controlled `consumer_runtime_target`. Never guess or broaden a target. Binding/status/restore require `exec`; the pending-recovery proof additionally requires `restart` because it intentionally replaces the governed Consumer process.
 - For Kafka, Redis, ConsumerObserve, selected pytest, and Dask profile requests, omit Pod/container or repeat only the exact scheduler Pod/container resolved by the proxy. The proxy rejects stale or worker-Pod targets. Auxiliary Python commands use policy-pinned non-secret Redis/Dask endpoints and fail closed unless Candidate `Model.Config` matches them; only the Redis credential is loaded inside the scheduler process and never placed in request arguments or evidence.
 - After Kafka scenarios, run `ConsumerObserve` for the required scenario set. Positive paths must prove `DISPATCHED` plus all three idempotency namespaces (`system:idempotency`, `placement`, `elite`) before exact cleanup. Cleanup must also include the exact UserStats business key derived from each successful Kafka delivery's `period + user_id`; never broaden that prefix.
@@ -304,6 +309,8 @@ You are the independent final auditor, not the iterative debug verifier.
 $freshPrompt = @"
 $override
 
+$reviewerSkillContract
+
 $masterAgentsContext
 
 $prompt
@@ -325,6 +332,8 @@ $resumeContext
 
 $resumePrompt = @"
 $masterAgentsContext
+
+$reviewerSkillContract
 
 $periodContext
 

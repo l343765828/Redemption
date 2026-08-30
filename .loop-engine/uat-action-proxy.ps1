@@ -860,6 +860,248 @@ function Get-LatestConsumerLifecycleSemantic() {
     return $latest
 }
 
+function Get-LatestSuccessfulActionSemantic([string]$Action,[string]$Kind) {
+    $latest=$null
+    if(-not (Test-Path -LiteralPath $EvidenceDir -PathType Container)){return $null}
+    foreach($file in @(Get-ChildItem -LiteralPath $EvidenceDir -File -Filter 'action-*.log' -Force|Sort-Object FullName)){
+        $fields=Read-ProxyEvidenceFields $file.FullName
+        if([string]$fields['action'] -ne $Action -or [string]$fields['outcome'] -ne 'SUCCESS' -or -not $fields.ContainsKey('semantic_json_b64')){continue}
+        try{$raw=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$fields['semantic_json_b64']));$semantic=$raw|ConvertFrom-Json}catch{continue}
+        if([string]$semantic.kind -eq $Kind){$latest=$semantic}
+    }
+    return $latest
+}
+
+function Assert-LatestConsumerLifecycleRestored() {
+    $latest=Get-LatestSuccessfulActionSemantic 'ConsumerLifecycle' 'ConsumerLifecycleResult'
+    if(-not $latest -or ([string]$latest.operation).ToLowerInvariant() -ne 'restore' -or -not [bool]$latest.restored -or [int]$latest.matching_process_count -ne 0){
+        throw 'UAT_ENV_BLOCKED: PVAmountV2Config requires the latest ConsumerLifecycle operation to prove restore with zero managed processes'
+    }
+}
+
+function Convert-PVAmountV2RuntimeResult($Runtime,[string]$Operation,[string]$Candidate) {
+    if([int]$Runtime.ExitCode -ne 0){return $Runtime}
+    $json=@($Runtime.Output|Where-Object{([string]$_).Trim().StartsWith('{')}|Select-Object -Last 1)
+    if($json.Count -ne 1){throw "PVAM_CONFIG_RESULT_INVALID: $Operation returned no unique structured result"}
+    try{$semantic=([string]$json[0])|ConvertFrom-Json}catch{throw "PVAM_CONFIG_RESULT_INVALID: $Operation returned invalid JSON"}
+    if([string]$semantic.kind -ne 'PVAmountV2ConfigResult' -or [string]$semantic.operation -ne $Operation){throw "PVAM_CONFIG_RESULT_INVALID: $Operation semantic contract mismatch"}
+    $semantic|Add-Member -NotePropertyName candidate_sha -NotePropertyValue $Candidate -Force
+    $Runtime|Add-Member -NotePropertyName Semantic -NotePropertyValue $semantic -Force
+    return $Runtime
+}
+
+function Invoke-PVAmountV2Config($Request,$Policy) {
+    $operation=([string]$Request.operation).Trim().ToLowerInvariant()
+    if($operation -notin @('snapshot','activate','restore')){throw 'UAT_ACTION_POLICY_DENIED: PVAmountV2Config operation must be snapshot, activate, or restore'}
+    foreach($callerOwned in @('original_pointer','active_pointer','activated_pointer','config_version','snapshot_key')){
+        if($Request.PSObject.Properties.Name -contains $callerOwned){throw "UAT_ACTION_POLICY_DENIED: PVAmountV2Config $callerOwned is controller-owned"}
+    }
+
+    Assert-LatestConsumerLifecycleRestored
+    $runtimeTarget=Resolve-ConsumerRuntimeTarget $Request $Policy 'PVAmountV2Config'
+    $pod=[string]$runtimeTarget.Pod;$container=[string]$runtimeTarget.Container;$repo=[string]$runtimeTarget.Repo;$candidate=[string]$runtimeTarget.Candidate
+
+    if($operation -eq 'snapshot'){
+        Assert-RequiredTokens @('exec') 'PVAmountV2Config'
+        $code=@'
+import json
+import os
+import redis
+
+from Redishelper.PVAmountConfigProvider import (
+    ACTIVE_POINTER_KEY,
+    PVAmountConfigError,
+    PVAmountConfigProvider,
+)
+
+
+# region 读取并验证当前活动配置
+client = redis.Redis(
+    host=os.environ["PVAM_REDIS_HOST"],
+    port=int(os.environ["PVAM_REDIS_PORT"]),
+    db=int(os.environ["PVAM_REDIS_DB"]),
+    password=os.environ.get("PVAM_REDIS_PASSWORD") or None,
+    decode_responses=True,
+)
+pointer = client.get(ACTIVE_POINTER_KEY)
+if not pointer:
+    raise RuntimeError("PVAM_CONFIG_ACTIVE_MISSING")
+try:
+    config = PVAmountConfigProvider(client).load_run_config()
+except PVAmountConfigError as exc:
+    raise RuntimeError("PVAM_CONFIG_STATE_INVALID") from exc
+expected_pointer = f"{config.config_version}:{config.checksum}"
+if pointer != expected_pointer:
+    raise RuntimeError("PVAM_CONFIG_POINTER_DRIFT")
+state = f"{int(config.read_v2)}{int(config.write_v2)}"
+if state not in {"00", "01", "11"}:
+    raise RuntimeError("PVAM_CONFIG_STATE_INVALID")
+# endregion
+
+print(json.dumps({
+    "kind": "PVAmountV2ConfigResult",
+    "operation": "snapshot",
+    "original_pointer": pointer,
+    "active_pointer": pointer,
+    "state": state,
+    "config_version": config.config_version,
+    "checksum": config.checksum,
+}, sort_keys=True))
+'@
+        $runtime=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @()
+    }
+    elseif($operation -eq 'activate'){
+        Assert-RequiredTokens @('exec','test-data-write') 'PVAmountV2Config'
+        $snapshot=Get-LatestSuccessfulActionSemantic 'PVAmountV2Config' 'PVAmountV2ConfigResult'
+        if(-not $snapshot -or ([string]$snapshot.operation).ToLowerInvariant() -ne 'snapshot'){throw 'UAT_ACTION_POLICY_DENIED: PVAmountV2Config activate requires the latest config operation to be snapshot'}
+        if(([string]$snapshot.candidate_sha).ToLowerInvariant() -ne $candidate){throw 'UAT_ENV_BLOCKED: PVAmountV2Config snapshot Candidate SHA is stale'}
+        $originalPointer=([string]$snapshot.original_pointer).Trim().ToLowerInvariant()
+        $code=@'
+import json
+import os
+import redis
+import sys
+
+from Redishelper.PVAmountConfigBootstrap import publish_manual_bootstrap
+from Redishelper.PVAmountConfigProvider import (
+    ACTIVE_POINTER_KEY,
+    PVAmountConfigError,
+    SNAPSHOT_KEY_PREFIX,
+)
+
+
+# region 使用已保存 pointer 约束显式 11 发布
+original_pointer = sys.argv[1]
+original_version_text, _ = original_pointer.split(":", 1)
+original_version = int(original_version_text)
+client = redis.Redis(
+    host=os.environ["PVAM_REDIS_HOST"],
+    port=int(os.environ["PVAM_REDIS_PORT"]),
+    db=int(os.environ["PVAM_REDIS_DB"]),
+    password=os.environ.get("PVAM_REDIS_PASSWORD") or None,
+    decode_responses=True,
+)
+if client.get(ACTIVE_POINTER_KEY) != original_pointer:
+    raise RuntimeError("PVAM_CONFIG_POINTER_DRIFT")
+try:
+    config = publish_manual_bootstrap(
+        original_version + 1,
+        expected_active_version=original_version,
+        enable_v2=True,
+        redis_client=client,
+    )
+except PVAmountConfigError as exc:
+    if exc.code in {
+        "ACTIVE_POINTER_INVALID",
+        "ACTIVE_SNAPSHOT_MISSING",
+        "SNAPSHOT_ALREADY_EXISTS",
+        "STALE_CONFIG_VERSION",
+    }:
+        raise RuntimeError("PVAM_CONFIG_POINTER_DRIFT") from exc
+    raise
+active_pointer = client.get(ACTIVE_POINTER_KEY)
+expected_pointer = f"{config.config_version}:{config.checksum}"
+if active_pointer != expected_pointer or not config.read_v2 or not config.write_v2:
+    raise RuntimeError("PVAM_CONFIG_ACTIVATION_VERIFY_FAILED")
+# endregion
+
+print(json.dumps({
+    "kind": "PVAmountV2ConfigResult",
+    "operation": "activate",
+    "original_pointer": original_pointer,
+    "active_pointer": active_pointer,
+    "state": "11",
+    "config_version": config.config_version,
+    "checksum": config.checksum,
+    "snapshot_key": f"{SNAPSHOT_KEY_PREFIX}{config.config_version}",
+}, sort_keys=True))
+'@
+        $runtime=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @($originalPointer)
+    }
+    else{
+        Assert-RequiredTokens @('exec','test-data-write') 'PVAmountV2Config'
+        $activate=Get-LatestSuccessfulActionSemantic 'PVAmountV2Config' 'PVAmountV2ConfigResult'
+        if(-not $activate -or ([string]$activate.operation).ToLowerInvariant() -ne 'activate'){throw 'UAT_ACTION_POLICY_DENIED: PVAmountV2Config restore requires the latest config operation to be activate'}
+        if(([string]$activate.candidate_sha).ToLowerInvariant() -ne $candidate){throw 'UAT_ENV_BLOCKED: PVAmountV2Config activate Candidate SHA is stale'}
+        $originalPointer=([string]$activate.original_pointer).Trim().ToLowerInvariant();$activatedPointer=([string]$activate.active_pointer).Trim().ToLowerInvariant();$snapshotKey=([string]$activate.snapshot_key).Trim()
+        $code=@'
+import json
+import os
+import redis
+import sys
+
+from Redishelper.PVAmountConfigProvider import ACTIVE_POINTER_KEY, PVAmountConfigProvider
+
+
+# region CAS 恢复原 pointer 并清理本次 UAT snapshot
+original_pointer, activated_pointer, snapshot_key = sys.argv[1:4]
+client = redis.Redis(
+    host=os.environ["PVAM_REDIS_HOST"],
+    port=int(os.environ["PVAM_REDIS_PORT"]),
+    db=int(os.environ["PVAM_REDIS_DB"]),
+    password=os.environ.get("PVAM_REDIS_PASSWORD") or None,
+    decode_responses=True,
+)
+reply = client.eval(
+    """
+    if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+        return {'DRIFT'}
+    end
+    if redis.call('EXISTS', KEYS[2]) ~= 1 then
+        return {'SNAPSHOT_MISSING'}
+    end
+    redis.call('SET', KEYS[1], ARGV[2])
+    redis.call('DEL', KEYS[2])
+    return {'OK'}
+    """,
+    2,
+    ACTIVE_POINTER_KEY,
+    snapshot_key,
+    activated_pointer,
+    original_pointer,
+)
+status = reply[0].decode("utf-8") if isinstance(reply[0], bytes) else str(reply[0])
+if status == "DRIFT":
+    raise RuntimeError("PVAM_CONFIG_POINTER_DRIFT")
+if status != "OK":
+    raise RuntimeError(f"PVAM_CONFIG_RESTORE_{status}")
+config = PVAmountConfigProvider(client).load_run_config()
+active_pointer = client.get(ACTIVE_POINTER_KEY)
+expected_pointer = f"{config.config_version}:{config.checksum}"
+snapshot_deleted = not bool(client.exists(snapshot_key))
+if active_pointer != original_pointer or active_pointer != expected_pointer or not snapshot_deleted:
+    raise RuntimeError("PVAM_CONFIG_RESTORE_VERIFY_FAILED")
+state = f"{int(config.read_v2)}{int(config.write_v2)}"
+# endregion
+
+print(json.dumps({
+    "kind": "PVAmountV2ConfigResult",
+    "operation": "restore",
+    "original_pointer": original_pointer,
+    "activated_pointer": activated_pointer,
+    "active_pointer": active_pointer,
+    "state": state,
+    "config_version": config.config_version,
+    "checksum": config.checksum,
+    "snapshot_key": snapshot_key,
+    "restored": True,
+    "snapshot_deleted": snapshot_deleted,
+}, sort_keys=True))
+'@
+        $runtime=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @($originalPointer,$activatedPointer,$snapshotKey)
+    }
+
+    if([int]$runtime.ExitCode -ne 0){
+        $runtimeText=@($runtime.Output) -join "`n"
+        if($runtimeText -match 'PVAM_CONFIG_(ACTIVE_MISSING|POINTER_DRIFT|STATE_INVALID|RESTORE_SNAPSHOT_MISSING)'){
+            $diagnostic=[pscustomobject]@{kind='PVAmountV2ConfigDiagnostic';operation=$operation;candidate_sha=$candidate;pod=$pod;container=$container;runtime_exit_code=[int]$runtime.ExitCode}
+            return (New-UatBlockedResult "UAT_ENV_BLOCKED: PVAmountV2Config $operation detected missing state or pointer drift" $runtime $diagnostic)
+        }
+        return $runtime
+    }
+    return Convert-PVAmountV2RuntimeResult $runtime $operation $candidate
+}
+
 function Get-ScenarioPolicyValue($Map,[string]$Scenario,[string]$Label) {
     $prop=@($Map.PSObject.Properties|Where-Object{$_.Name -eq $Scenario}|Select-Object -First 1)[0]
     if(-not $prop){throw "UAT_ACTION_POLICY_DENIED: missing $Label policy for scenario $Scenario"}
@@ -1387,8 +1629,9 @@ function Get-DeliveredKafkaKeysFromControllerEvidence() {
     if (-not (Test-Path -LiteralPath $EvidenceDir -PathType Container)) { return $keys.ToArray() }
     foreach($file in @(Get-ChildItem -LiteralPath $EvidenceDir -File -Filter 'action-*.log' -Force)) {
         $fields=Read-ProxyEvidenceFields $file.FullName
-        if(([string]$fields['action']) -ne 'KafkaScenarioProduce' -or ([string]$fields['outcome']) -ne 'SUCCESS' -or -not $fields.ContainsKey('semantic_json_b64')){continue}
+        if(([string]$fields['action']) -notin @('KafkaScenarioProduce','UatProof') -or ([string]$fields['outcome']) -ne 'SUCCESS' -or -not $fields.ContainsKey('semantic_json_b64')){continue}
         try { $raw=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$fields['semantic_json_b64'])); $s=$raw|ConvertFrom-Json } catch { continue }
+        if([string]$s.kind -notin @('KafkaScenarioResult','UatProofResult')){continue}
         foreach($k in @($s.delivered_keys)){ $v=([string]$k).Trim(); if($v -and -not $keys.Contains($v)){ $keys.Add($v) } }
     }
     return $keys.ToArray()
@@ -1405,11 +1648,12 @@ function Test-KeyMatchesDeliveredBusinessRecord([string]$Key) {
     if (-not (Test-Path -LiteralPath $EvidenceDir -PathType Container)) { return $false }
     foreach($file in @(Get-ChildItem -LiteralPath $EvidenceDir -File -Filter 'action-*.log' -Force)) {
         $fields=Read-ProxyEvidenceFields $file.FullName
-        if(([string]$fields['action']) -ne 'KafkaScenarioProduce' -or ([string]$fields['outcome']) -ne 'SUCCESS' -or -not $fields.ContainsKey('semantic_json_b64')){continue}
+        if(([string]$fields['action']) -notin @('KafkaScenarioProduce','UatProof') -or ([string]$fields['outcome']) -ne 'SUCCESS' -or -not $fields.ContainsKey('semantic_json_b64')){continue}
         try { $raw=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$fields['semantic_json_b64'])); $s=$raw|ConvertFrom-Json } catch { continue }
-        foreach($delivery in @($s.deliveries)) {
+        $records=if([string]$s.kind -eq 'KafkaScenarioResult'){@($s.deliveries)}else{@($s.delivered_records)}
+        foreach($delivery in $records) {
             $period=[int]$delivery.period
-            $userId=if($delivery.payload -and $delivery.payload.PSObject.Properties.Name -contains 'user_id'){([string]$delivery.payload.user_id).Trim()}else{''}
+            $userId=if($delivery.payload -and $delivery.payload.PSObject.Properties.Name -contains 'user_id'){([string]$delivery.payload.user_id).Trim()}elseif($delivery.PSObject.Properties.Name -contains 'user_id'){([string]$delivery.user_id).Trim()}else{''}
             if(-not $userId){$userId=([string]$s.uat_user_id).Trim()}
             if($period -gt 0 -and $userId -and $Key -ceq "user_stats:Model.User.UserStats.UserStats:${period}:$userId"){return $true}
         }
@@ -1431,19 +1675,67 @@ function Test-RedisKeyGoverned([string]$Key,$Templates) {
     return $false
 }
 
+function Get-ControllerDerivedRedisCleanupKeys($Policy) {
+    $keys=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    if (-not (Test-Path -LiteralPath $EvidenceDir -PathType Container)) { return @() }
+    $base="pvam:uat:work02:${ExecutionId}:"
+    foreach($file in @(Get-ChildItem -LiteralPath $EvidenceDir -File -Filter 'action-*.log' -Force|Sort-Object FullName)) {
+        $fields=Read-ProxyEvidenceFields $file.FullName
+        if([string]$fields['outcome'] -ne 'SUCCESS' -or -not $fields.ContainsKey('semantic_json_b64')){continue}
+        try{$raw=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$fields['semantic_json_b64']));$semantic=$raw|ConvertFrom-Json}catch{continue}
+        if([string]$semantic.kind -eq 'KafkaScenarioResult'){
+            foreach($delivery in @($semantic.deliveries)){
+                $identity=([string]$delivery.key).Trim();$period=[int]$delivery.period
+                if(-not $identity -or $period -lt 1){continue}
+                [void]$keys.Add($base+'event_delivery:'+$identity)
+                if([string]$delivery.topic -eq 'pvam-pv-orders'){
+                    [void]$keys.Add($base+'order_ledger:'+$identity)
+                    [void]$keys.Add($base+'order_ledger:__period_index__')
+                }
+                elseif([string]$delivery.topic -eq 'pvam-pv-refunds'){
+                    $original=if($delivery.payload -and $delivery.payload.PSObject.Properties.Name -contains 'original_order_id'){([string]$delivery.payload.original_order_id).Trim()}else{''}
+                    if($original){[void]$keys.Add($base+'refund_reversal:'+$original)}
+                }
+                foreach($namespace in @('','placement:','elite:')){[void]$keys.Add("system:idempotency:${namespace}${period}:${identity}:done")}
+                $userId=if($delivery.payload -and $delivery.payload.PSObject.Properties.Name -contains 'user_id'){([string]$delivery.payload.user_id).Trim()}else{([string]$semantic.uat_user_id).Trim()}
+                if($userId){[void]$keys.Add("user_stats:Model.User.UserStats.UserStats:${period}:$userId")}
+            }
+        }
+        elseif([string]$semantic.kind -eq 'UatProofResult'){
+            foreach($key in @($semantic.cleanup_keys)){$value=([string]$key).Trim();if($value){[void]$keys.Add($value)}}
+            foreach($record in @($semantic.delivered_records)){
+                $period=[int]$record.period
+                $userId=if($record.PSObject.Properties.Name -contains 'user_id'){([string]$record.user_id).Trim()}else{([string]$semantic.uat_user_id).Trim()}
+                if($period -gt 0 -and $userId){[void]$keys.Add("user_stats:Model.User.UserStats.UserStats:${period}:$userId")}
+            }
+        }
+    }
+    $derived=@($keys|Sort-Object)
+    if($derived.Count -gt 1000){throw 'UAT_ACTION_POLICY_DENIED: controller-derived Redis cleanup exceeds 1000 exact keys'}
+    foreach($key in $derived){if(-not (Test-RedisKeyGoverned $key $Policy.redis_exact_cleanup_prefixes)){throw "UAT_ACTION_POLICY_DENIED: controller-derived Redis key is outside governed evidence: $key"}}
+    return $derived
+}
+
 function Invoke-RedisExactCleanup($Request, $Policy) {
     Assert-RequiredTokens @("exec", "test-data-write") "RedisDeleteExactKeys"
+    $controllerDerived=($Request.PSObject.Properties.Name -contains 'controller_derived') -and [bool]$Request.controller_derived
+    if($controllerDerived -and $Request.PSObject.Properties.Name -contains 'keys'){throw 'UAT_ACTION_POLICY_DENIED: controller-derived Redis cleanup does not accept caller keys'}
+    $keys=if($controllerDerived){@(Get-ControllerDerivedRedisCleanupKeys $Policy)}else{@($Request.keys | ForEach-Object { [string]$_ })}
+    $maxKeys=if($controllerDerived){1000}else{100}
+    if($keys.Count -eq 0 -and $controllerDerived){
+        $semantic=[pscustomobject]@{kind='RedisDeleteResult';requested_count=0;deleted_count=0;remaining_count=0;remaining=@();requested_keys=@();cleanup_source='controller-evidence'}
+        return [pscustomobject]@{ExitCode=0;Output=@('controller-derived exact cleanup no-op');Semantic=$semantic}
+    }
+    if ($keys.Count -lt 1 -or $keys.Count -gt $maxKeys) { throw "UAT_ACTION_POLICY_DENIED: Redis cleanup requires 1..$maxKeys exact keys" }
+    foreach ($key in $keys) { if (-not (Test-RedisKeyGoverned $key $Policy.redis_exact_cleanup_prefixes)) { throw "UAT_ACTION_POLICY_DENIED: Redis key outside durable execution/period scope or exact delivered Kafka identity: $key" } }
     $runtimeTarget=Resolve-ConsumerRuntimeTarget $Request $Policy 'RedisDeleteExactKeys'
     $pod=[string]$runtimeTarget.Pod;$container=[string]$runtimeTarget.Container;$repo=[string]$runtimeTarget.Repo
-    $keys=@($Request.keys | ForEach-Object { [string]$_ })
-    if ($keys.Count -lt 1 -or $keys.Count -gt 100) { throw "UAT_ACTION_POLICY_DENIED: Redis cleanup requires 1..100 exact keys" }
-    foreach ($key in $keys) { if (-not (Test-RedisKeyGoverned $key $Policy.redis_exact_cleanup_prefixes)) { throw "UAT_ACTION_POLICY_DENIED: Redis key outside durable execution/period scope or exact delivered Kafka identity: $key" } }
     $keysJson=ConvertTo-Json -InputObject $keys -Compress
     if (-not $keysJson.TrimStart().StartsWith('[',[StringComparison]::Ordinal)) { throw "REDIS_CLEANUP_SHAPE_INVALID: serialized exact-key list is not a JSON array" }
     $b64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($keysJson))
     $code="import base64,json,os,sys,redis;r=redis.Redis(host=os.environ['PVAM_REDIS_HOST'],port=int(os.environ['PVAM_REDIS_PORT']),db=int(os.environ['PVAM_REDIS_DB']),password=os.environ.get('PVAM_REDIS_PASSWORD') or None,decode_responses=True);ks=json.loads(base64.b64decode(sys.argv[1]));assert isinstance(ks,list) and all(isinstance(k,str) for k in ks);deleted=int(r.delete(*ks));remaining=[k for k in ks if r.exists(k)];print(json.dumps({'kind':'RedisDeleteResult','requested_count':len(ks),'deleted_count':deleted,'remaining_count':len(remaining),'remaining':remaining,'requested_keys':ks},sort_keys=True))"
     $r=Invoke-RuntimePythonCommand $pod $container $repo $Policy $code @($b64)
-    if($r.ExitCode -eq 0){ $json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1); if(-not $json){throw 'REDIS_CLEANUP_RESULT_INVALID: no structured result'}; $s=([string]$json)|ConvertFrom-Json; if([int]$s.remaining_count -ne 0){throw 'REDIS_CLEANUP_INCOMPLETE: exact keys remain after delete'}; $r|Add-Member -NotePropertyName Semantic -NotePropertyValue $s -Force }
+    if($r.ExitCode -eq 0){ $json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1); if(-not $json){throw 'REDIS_CLEANUP_RESULT_INVALID: no structured result'}; $s=([string]$json)|ConvertFrom-Json; if([int]$s.remaining_count -ne 0){throw 'REDIS_CLEANUP_INCOMPLETE: exact keys remain after delete'}; if($controllerDerived){$s|Add-Member -NotePropertyName cleanup_source -NotePropertyValue 'controller-evidence' -Force}; $r|Add-Member -NotePropertyName Semantic -NotePropertyValue $s -Force }
     return $r
 }
 
@@ -1639,7 +1931,7 @@ print(json.dumps({'crash_window_injected':True,'status':r.hget(k,'status'),'idem
     $businessUnchanged=Test-UserStatsPeriodStateEqual $preReplay $postReplay
     if(-not $businessUnchanged){throw 'UAT_ENV_BLOCKED: PENDING replay duplicated or lost business PV'}
     $orderIndexKey=$ledgerPrefix+'order_ledger:__period_index__';$cleanup=@($deliveryKey,$orderKey,$orderIndexKey)+@($idemKeys)
-    return [pscustomobject]@{ExitCode=0;Output=@('proof=pending-dispatched-recovery','runtime_mode=scheduler-pod-temporary-process','crash_window_injected=True','idempotency_present_before_restart=True','restart_completed=True','dispatched_after_restart=True','business_unchanged_after_replay=True');Semantic=[pscustomobject]@{kind='UatProofResult';proof_id='pending-dispatched-recovery';runtime_mode='scheduler-pod-temporary-process';passed=$true;period=$period;identity=$identity;payload_hash=[string]$delivery.payload_sha256;pending_before_restart=$true;crash_window_injected=$true;idempotency_present_before_restart=$true;restart_completed=$true;dispatched_after_restart=$true;three_chain_after_restart=$true;business_unchanged_after_replay=$true;business_snapshot_before_replay=$snapshotBeforeReplay;business_snapshot_after_replay=$snapshotAfterReplay;delivered_keys=@($identity);delivered_records=@([pscustomobject]@{identity=$identity;topic='pvam-pv-orders';period=$period;original_order_id=''});cleanup_keys=$cleanup;proof_nonce=$nonce;candidate_sha=$candidate}}
+    return [pscustomobject]@{ExitCode=0;Output=@('proof=pending-dispatched-recovery','runtime_mode=scheduler-pod-temporary-process','crash_window_injected=True','idempotency_present_before_restart=True','restart_completed=True','dispatched_after_restart=True','business_unchanged_after_replay=True');Semantic=[pscustomobject]@{kind='UatProofResult';proof_id='pending-dispatched-recovery';runtime_mode='scheduler-pod-temporary-process';passed=$true;period=$period;identity=$identity;payload_hash=[string]$delivery.payload_sha256;pending_before_restart=$true;crash_window_injected=$true;idempotency_present_before_restart=$true;restart_completed=$true;dispatched_after_restart=$true;three_chain_after_restart=$true;business_unchanged_after_replay=$true;business_snapshot_before_replay=$snapshotBeforeReplay;business_snapshot_after_replay=$snapshotAfterReplay;delivered_keys=@($identity);delivered_records=@([pscustomobject]@{identity=$identity;topic='pvam-pv-orders';period=$period;original_order_id='';user_id=$userId});cleanup_keys=$cleanup;uat_user_id=$userId;proof_nonce=$nonce;candidate_sha=$candidate}}
 }
 
 function Invoke-DispatchP99Proof($Request,$Policy) {
@@ -1681,8 +1973,8 @@ print(json.dumps({'latencies_ms':ordered,'p99_ms':ordered[rank],'samples':sample
     $json=(@($r.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1);if(-not $json){throw 'UAT_ENV_BLOCKED: dispatch p99 structured result missing'};$x=([string]$json)|ConvertFrom-Json
     if([string]$x.p99_nonce -ne $nonce){throw 'UAT_ENV_BLOCKED: dispatch p99 nonce mismatch'}
     if([double]$x.p99_ms -gt [double]$limit){throw "UAT_ENV_BLOCKED: dispatch p99 exceeds policy limit p99_ms=$($x.p99_ms) limit_ms=$limit"}
-    $ids=@($x.samples|ForEach-Object{[string]$_.identity});$records=@($x.samples|ForEach-Object{[pscustomobject]@{identity=[string]$_.identity;topic='pvam-pv-orders';period=$period;original_order_id=''}});$cleanup=@($x.samples|ForEach-Object{@($_.cleanup_keys)}|ForEach-Object{$_})
-    $r|Add-Member -NotePropertyName Semantic -NotePropertyValue ([pscustomobject]@{kind='UatProofResult';proof_id='dispatch-p99';passed=$true;p99_ms=[double]$x.p99_ms;limit_ms=$limit;sample_count=$count;period=$period;p99_nonce=$nonce;sample_completed_at=@($x.samples|ForEach-Object{$_.sample_completed_at});delivered_keys=$ids;delivered_records=$records;cleanup_keys=$cleanup;candidate_sha=$candidate}) -Force;return $r
+    $ids=@($x.samples|ForEach-Object{[string]$_.identity});$records=@($x.samples|ForEach-Object{[pscustomobject]@{identity=[string]$_.identity;topic='pvam-pv-orders';period=$period;original_order_id='';user_id=$userId}});$cleanup=@($x.samples|ForEach-Object{@($_.cleanup_keys)}|ForEach-Object{$_})
+    $r|Add-Member -NotePropertyName Semantic -NotePropertyValue ([pscustomobject]@{kind='UatProofResult';proof_id='dispatch-p99';passed=$true;p99_ms=[double]$x.p99_ms;limit_ms=$limit;sample_count=$count;period=$period;p99_nonce=$nonce;sample_completed_at=@($x.samples|ForEach-Object{$_.sample_completed_at});delivered_keys=$ids;delivered_records=$records;cleanup_keys=$cleanup;uat_user_id=$userId;candidate_sha=$candidate}) -Force;return $r
 }
 
 function Invoke-UatProof($Request,$Policy) {
@@ -1848,6 +2140,13 @@ try {
             }
             $required=@('exec')
             $result = Invoke-ConsumerLifecycle $request $policy
+        }
+        "PVAmountV2Config" {
+            $op=([string]$request.operation).Trim().ToLowerInvariant()
+            if($op -eq 'snapshot'){$required=@('exec')}
+            elseif($op -in @('activate','restore')){$required=@('exec','test-data-write')}
+            else{throw 'UAT_ACTION_POLICY_DENIED: PVAmountV2Config operation must be snapshot, activate, or restore'}
+            $result=Invoke-PVAmountV2Config $request $policy
         }
         "ConsumerObserve" { $required=@('exec'); $result = Invoke-ConsumerObserve $request $policy }
         "UatProof" {
