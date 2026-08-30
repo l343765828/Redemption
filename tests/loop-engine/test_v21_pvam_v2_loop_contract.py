@@ -241,9 +241,15 @@ def test_scheme_b_candidate_scope_is_exact_and_hunk_guards_are_removed():
         "User/PlacementIncrementalService.py",
         "User/EliteBonusService.py",
         "MessageConsumer/PvEventConsumer.py",
+        "tests/pvam/WORK-PVAM-01/test_flag_factory_contract.py",
+        "tests/pvam/WORK-PVAM-01C/test_flag_runtime_contract.py",
+        "tests/pvam/WORK-PVAM-02/test_amount_migration.py",
+        "tests/pvam/WORK-PVAM-02/test_three_chain_scheme_b.py",
     }
 
     assert required.issubset(set(current["git_change_allowlist"]))
+    assert "tests/*" not in current["git_change_allowlist"]
+    assert "tests/**" not in current["git_change_allowlist"]
     assert current["git_hunk_allowlist"] == {}
 
 
