@@ -280,7 +280,9 @@ class EliteBonusService:
             )
         elif not isinstance(pv_delta, int) or isinstance(pv_delta, bool):
             raise TypeError("legacy pv_delta must already be strict units int")
+        # endregion
 
+        # region 零增量完成态
         if pv_delta == 0:
             # 零增量没有业务效果，但 normalized event 仍须留下完成态，避免 ACK 后三链标记不齐。
             if event_done_key is not None:
