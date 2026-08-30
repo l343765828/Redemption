@@ -9,6 +9,7 @@ param(
         "pod-repo-ambiguous",
         "pod-repo-scope-denied",
         "scheduler-skip-failed",
+        "stdin-diagnostic-redaction",
         "native-stdin-stderr-exit",
         "runtime-python-argv-safe",
         "runtime-json-base64-safe",
@@ -154,7 +155,8 @@ function Invoke-LocalPythonFromPodCommand([object[]]$Command, [string]$PythonExe
 }
 
 function Test-NativeStdinPreservesStderrAndExit {
-    Import-ProxyFunctions @("ConvertTo-NativeArgument", "ConvertFrom-NativeOutput", "Invoke-Native")
+    $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
+    Import-ProxyFunctions @("Get-TextSha256", "Get-StdinDiagnostic", "ConvertTo-NativeArgument", "ConvertFrom-NativeOutput", "Invoke-Native")
     $code = "import sys; print(sys.stdin.read(), end=''); print('native-stderr', file=sys.stderr); raise SystemExit(7)"
     $result = Invoke-Native $script:TestPythonPath @("-c", $code) "native-stdin"
 
@@ -166,6 +168,19 @@ function Test-NativeStdinPreservesStderrAndExit {
     if ((@($result.Output) -join "`n") -notmatch "native-stdin") {
         throw "native invocation must deliver the provided stdin payload"
     }
+}
+
+function Test-StdinDiagnosticRedaction {
+    $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
+    Import-ProxyFunctions @("Get-TextSha256", "Get-StdinDiagnostic")
+    $payload = '{"secret":"must-not-appear"}'
+
+    $diagnostic = Get-StdinDiagnostic "test-boundary" $payload
+    Assert-Equal "[STDIN-DIAG] boundary=test-boundary stdin_is_null=false char_length=28 sha256=f287fd10d17bed92d5255b7a834053ced0c267392fc30e282c1201c9575561a9" $diagnostic "stdin diagnostic must expose only shape and digest"
+    if ($diagnostic.Contains("must-not-appear")) { throw "stdin diagnostic leaked payload content" }
+
+    Assert-Equal "[STDIN-DIAG] boundary=null-boundary stdin_is_null=true char_length=0 sha256=none" (Get-StdinDiagnostic "null-boundary" $null) "stdin diagnostic must distinguish null"
+    Assert-Equal "[STDIN-DIAG] boundary=empty-boundary stdin_is_null=false char_length=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" (Get-StdinDiagnostic "empty-boundary" "") "stdin diagnostic must distinguish empty text"
 }
 
 function Test-NodeRepoPartialFind {
@@ -547,7 +562,10 @@ function Test-RedisProofCrossPeriodDistinctKeys {
 }
 
 function Test-RedisCleanupStagePrefixes([ValidateSet("controller", "caller")][string]$Mode = "controller") {
+    $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
     Import-ProxyFunctions @(
+        "Get-TextSha256",
+        "Get-StdinDiagnostic",
         "Get-ExpandedRedisPrefixes",
         "ConvertTo-Utf8Base64Json",
         "Get-ControllerDerivedRedisScanPrefixes",
@@ -641,6 +659,7 @@ class Redis:
         }
         function script:Invoke-PodCommandWithInput {
             param([string]$Pod, [string]$Container, [object[]]$Command, [string]$StandardInput)
+            Write-Host (Get-StdinDiagnostic "test-pod-with-input.entry" $StandardInput)
             if (@($Command).Count -lt 3 -or [string]$Command[0] -ne "python3") { throw "expected a python3 pod command" }
             return Invoke-Native $script:TestPythonPath @($Command | Select-Object -Skip 1) $StandardInput
         }
@@ -829,6 +848,7 @@ $cases = [ordered]@{
     "pod-repo-ambiguous" = { Test-PodRepoAmbiguous }
     "pod-repo-scope-denied" = { Test-PodRepoScopeDenied }
     "scheduler-skip-failed" = { Test-SchedulerSkipsFailedPods }
+    "stdin-diagnostic-redaction" = { Test-StdinDiagnosticRedaction }
     "native-stdin-stderr-exit" = { Test-NativeStdinPreservesStderrAndExit }
     "runtime-python-argv-safe" = { Test-RuntimePythonArgvSafe }
     "runtime-json-base64-safe" = { Test-RuntimeJsonBase64Safe }

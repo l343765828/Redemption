@@ -45,6 +45,13 @@ function Get-TextSha256([string]$Text) {
     finally { $sha.Dispose() }
 }
 
+function Get-StdinDiagnostic([string]$Boundary, $StandardInput) {
+    $isNull = $null -eq $StandardInput
+    $text = if ($isNull) { "" } else { [string]$StandardInput }
+    $hash = if ($isNull) { "none" } else { Get-TextSha256 $text }
+    return "[STDIN-DIAG] boundary=$Boundary stdin_is_null=$($isNull.ToString().ToLowerInvariant()) char_length=$($text.Length) sha256=$hash"
+}
+
 # V19-STRICT-EVIDENCE-PARSER
 function Read-ProxyEvidenceFields([string]$Path) {
     $fields = @{}
@@ -300,6 +307,7 @@ function ConvertFrom-NativeOutput([string]$Text) {
 }
 
 function Invoke-Native([string]$FilePath, [string[]]$Arguments, $StandardInput = $null) {
+    Write-Host (Get-StdinDiagnostic "native.entry" $StandardInput)
     $previous = $ErrorActionPreference
     $output = @()
     $stderr = @()
@@ -588,11 +596,13 @@ function Invoke-PodCommand([string]$Pod, [string]$Container, [string[]]$Command)
 }
 
 function Invoke-PodCommandWithInput([string]$Pod, [string]$Container, [string[]]$Command, [string]$StandardInput) {
+    Write-Host (Get-StdinDiagnostic "pod-with-input.entry" $StandardInput)
     $args = @(Get-PodExecArguments $Pod $Container)
     return Invoke-Native $Kubectl ($args + @("-i", "--") + @($Command)) $StandardInput
 }
 
 function Invoke-RuntimePythonCommand([string]$Pod,[string]$Container,[string]$Repo,$Policy,[string]$Code,[string[]]$Arguments,$StandardInput = $null) {
+    Write-Host (Get-StdinDiagnostic "runtime.entry" $StandardInput)
     $expectedRepo=([string]$Policy.consumer_runtime_target.repo_path).Trim()
     if(-not $expectedRepo -or $Repo -ne $expectedRepo){throw 'UAT_ACTION_POLICY_DENIED: runtime Python repository path is not the version-controlled target'}
     $target=$Policy.consumer_runtime_target
@@ -645,6 +655,7 @@ exec(compile(base64.b64decode(code_b64), "<uat-runtime>", "exec"), {"__name__": 
     $launcherB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($launcher))
     $launcherBootstrap="import base64,sys;source=base64.b64decode(sys.argv[1]);sys.argv=sys.argv[1:];exec(compile(source,'<uat-launcher>','exec'))"
     $command=@('python3','-c',$launcherBootstrap,$launcherB64,$Repo,$kafka,$daskScheduler,$redisHost,[string]$redisPort,[string]$redisDb,$codeB64)+@($Arguments)
+    Write-Host (Get-StdinDiagnostic "runtime.dispatch" $StandardInput)
     if($null -ne $StandardInput){return Invoke-PodCommandWithInput $Pod $Container $command $StandardInput}
     return Invoke-PodCommand $Pod $Container $command
 }
@@ -1811,6 +1822,7 @@ function Invoke-RedisExactCleanup($Request, $Policy) {
     $runtimeTarget=Resolve-ConsumerRuntimeTarget $Request $Policy 'RedisDeleteExactKeys'
     $pod=[string]$runtimeTarget.Pod;$container=[string]$runtimeTarget.Container;$repo=[string]$runtimeTarget.Repo
     $payloadJson=([ordered]@{keys=@($keys);scan_prefixes=@($scanPrefixes)}|ConvertTo-Json -Depth 5 -Compress)
+    Write-Host (Get-StdinDiagnostic "redis-cleanup.payload" $payloadJson)
     $code=@'
 import json,os,sys,redis
 r=redis.Redis(host=os.environ['PVAM_REDIS_HOST'],port=int(os.environ['PVAM_REDIS_PORT']),db=int(os.environ['PVAM_REDIS_DB']),password=os.environ.get('PVAM_REDIS_PASSWORD') or None,decode_responses=True)
