@@ -10,6 +10,7 @@ param(
         "pod-repo-scope-denied",
         "scheduler-skip-failed",
         "stdin-diagnostic-redaction",
+        "audit-empty-request",
         "native-stdin-stderr-exit",
         "native-stdin-utf8-exact",
         "native-stdin-early-exit",
@@ -233,6 +234,36 @@ function Test-StdinDiagnosticRedaction {
 
     Assert-Equal "[STDIN-DIAG] boundary=null-boundary stdin_is_null=true char_length=0 sha256=none" (Get-StdinDiagnostic "null-boundary" $null) "stdin diagnostic must distinguish null"
     Assert-Equal "[STDIN-DIAG] boundary=empty-boundary stdin_is_null=false char_length=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" (Get-StdinDiagnostic "empty-boundary" "") "stdin diagnostic must distinguish empty text"
+}
+
+function Test-AuditEmptyRequestIsRecorded {
+    $script:Utf8NoBom = New-Object Text.UTF8Encoding($false)
+    Import-ProxyFunctions @("Write-Utf8NoBom", "Sanitize-AuditText", "Write-ProxyAuditRecord")
+    $root = Join-Path ([IO.Path]::GetTempPath()) ("proxy-empty-request-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        $script:EvidenceDir = $root
+        $script:Stage = "OPUS"
+        $script:AuditRequestJson = ""
+        $script:AuthorizedActionsRaw = "exec"
+        $script:ResourceScopeRaw = "pod/dask-cluster-scheduler-*"
+        $script:ExecutionId = "c1-r1-opus-s1-0123456789ab"
+        $script:TargetNamespace = "dask-operator"
+        $script:TargetBranch = "codex/test"
+        $script:ImpactScope = "isolated-uat-only"
+        $script:StagePeriodContext = [pscustomobject]@{Slot=1;Primary=990001;Secondary=990002;PoolSha256=("a" * 64)}
+
+        $path = Write-ProxyAuditRecord "" "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" @() "DENIED" "UAT_ACTION_POLICY_DENIED" "invalid structured UAT action" $null ""
+        $fields = @{}
+        foreach ($line in [IO.File]::ReadAllLines($path, [Text.Encoding]::UTF8)) {
+            if (-not $line) { continue }
+            $separator = $line.IndexOf('=')
+            if ($separator -gt 0) { $fields[$line.Substring(0, $separator)] = $line.Substring($separator + 1) }
+        }
+
+        if (-not $fields.ContainsKey("request_json_b64")) { throw "empty request audit must retain request_json_b64" }
+        Assert-Equal "" ([string]$fields["request_json_b64"]) "empty request audit must encode the empty payload as empty base64"
+    }
+    finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 function Test-NodeRepoPartialFind {
@@ -901,6 +932,7 @@ $cases = [ordered]@{
     "pod-repo-scope-denied" = { Test-PodRepoScopeDenied }
     "scheduler-skip-failed" = { Test-SchedulerSkipsFailedPods }
     "stdin-diagnostic-redaction" = { Test-StdinDiagnosticRedaction }
+    "audit-empty-request" = { Test-AuditEmptyRequestIsRecorded }
     "native-stdin-stderr-exit" = { Test-NativeStdinPreservesStderrAndExit }
     "native-stdin-utf8-exact" = { Test-NativeStdinUsesExactUtf8Bytes }
     "native-stdin-early-exit" = { Test-NativeStdinEarlyExitPreservesStderrAndExit }

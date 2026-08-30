@@ -95,10 +95,8 @@ function Write-ProxyAuditRecord(
         $lines.Add("stage=$Stage")
         $lines.Add("action=$ActionName")
         $lines.Add("request_sha256=$RequestHash")
-        if ($script:AuditRequestJson) {
-            $requestB64 = [Convert]::ToBase64String($Utf8NoBom.GetBytes($script:AuditRequestJson))
-            $lines.Add("request_json_b64=$requestB64")
-        }
+        $requestB64 = [Convert]::ToBase64String($Utf8NoBom.GetBytes([string]$script:AuditRequestJson))
+        $lines.Add("request_json_b64=$requestB64")
         $lines.Add("authorization_id=$env:LOOP_UAT_AUTHORIZATION_ID")
         $lines.Add("cycle_scope_sha256=$env:LOOP_UAT_CYCLE_SCOPE_SHA256")
         $lines.Add("stage_scope_sha256=$env:LOOP_UAT_AUTHORIZATION_SCOPE_SHA256")

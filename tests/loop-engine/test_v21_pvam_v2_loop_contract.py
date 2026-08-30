@@ -94,6 +94,34 @@ def write_action_evidence(path, ordinal, action, request_body, required, semanti
     )
 
 
+def write_empty_denied_evidence(path, ordinal, include_request_field=False, **overrides):
+    fields = {
+        "stage": "OPUS",
+        "action": "",
+        "request_sha256": hashlib.sha256(b"").hexdigest(),
+        "stage_scope_sha256": SCOPE_SHA,
+        "uat_execution_id": EXECUTION_ID,
+        "stage_period_slot": "1",
+        "stage_period_primary": "209906",
+        "stage_period_secondary": "209907",
+        "stage_period_pool_sha256": POOL_SHA,
+        "authorized_actions": "exec",
+        "required_tokens": "",
+        "outcome": "DENIED",
+        "error_class": "UAT_ACTION_POLICY_DENIED",
+        "exit_code": "1",
+    }
+    fields.update(overrides)
+    if include_request_field:
+        fields["request_json_b64"] = ""
+    path.mkdir(parents=True, exist_ok=True)
+    text = "".join("{}={}\n".format(key, value) for key, value in fields.items())
+    (path / "action-empty-{:03d}.log".format(ordinal)).write_text(
+        text,
+        encoding="utf-8",
+    )
+
+
 def write_proxy_evidence(path, ordinal, operation, semantic):
     required = "exec" if operation == "snapshot" else "exec,test-data-write"
     write_action_evidence(
@@ -425,6 +453,43 @@ def test_period_verifier_accepts_controller_derived_empty_cleanup(tmpdir):
     stdout, stderr = run_period_verifier(evidence_dir)
 
     assert "[PROXY-EVIDENCE] PASS" in stdout, stderr
+
+
+def test_period_verifier_accepts_denied_empty_request_records(tmpdir):
+    evidence_dir = Path(str(tmpdir)) / "denied-empty-request"
+    write_empty_denied_evidence(evidence_dir, 1)
+    write_empty_denied_evidence(evidence_dir, 2, include_request_field=True)
+
+    stdout, stderr = run_period_verifier(evidence_dir)
+
+    assert "[PROXY-EVIDENCE] PASS" in stdout, stderr
+    assert "successful_actions=0" in stdout
+
+
+def test_period_verifier_rejects_broader_missing_request_exceptions(tmpdir):
+    mutations = [
+        {"outcome": "FAILED"},
+        {"error_class": "PROXY_FAILURE"},
+        {"action": "Readyz"},
+        {"request_sha256": "0" * 64},
+        {"exit_code": "0"},
+        {"outcome": "denied"},
+        {"error_class": "uat_action_policy_denied"},
+        {"request_sha256": hashlib.sha256(b"").hexdigest().upper()},
+        {"exit_code": "01"},
+        {"exit_code": "+1"},
+        {"exit_code": "1.0"},
+        {"exit_code": "1e0"},
+        {"exit_code": " 1"},
+    ]
+    for ordinal, mutation in enumerate(mutations, 1):
+        evidence_dir = Path(str(tmpdir)) / "invalid-empty-{:03d}".format(ordinal)
+        write_empty_denied_evidence(evidence_dir, ordinal, **mutation)
+
+        stdout, stderr = run_period_verifier(evidence_dir)
+
+        assert "[PROXY-EVIDENCE] PASS" not in stdout
+        assert "missing request_json_b64" in stderr
 
 
 def test_finalizer_dry_run_reports_pending_activation(tmpdir):

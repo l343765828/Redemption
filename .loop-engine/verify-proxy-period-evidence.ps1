@@ -103,19 +103,24 @@ if ($files.Count -eq 0) {
 $success=@{};$successfulScenarios=@{};$dbsize=@{};$delivered=New-Object System.Collections.Generic.List[string];$deliveredRecords=New-Object System.Collections.Generic.List[object];$cleanupKeys=New-Object System.Collections.Generic.List[string];$successfulSelectedTargets=New-Object System.Collections.Generic.List[string];$lifecycleOps=@{};$lifecycleRestoreOrdinals=New-Object System.Collections.Generic.List[int];$observedScenarios=@{};$lifecycleOrder=@{};$observeOrder=@{};$dispatchedIdentities=@{};$redisProofs=@{};$uatProofs=@{};$uatProofOrder=@{};$pvamConfigOps=@{};$pvamConfigOrder=@{};$runtimeGitUpdateOk=$false;[long]$totalDeleted=0;[int]$latestCleanupOrdinal=0;[int]$successOrdinal=0
 foreach($file in $files) {
     $fields=Read-ProxyEvidenceFields $file.FullName
-    foreach($name in @('stage','action','request_sha256','request_json_b64','stage_scope_sha256','uat_execution_id','stage_period_slot','stage_period_primary','stage_period_secondary','stage_period_pool_sha256','authorized_actions','required_tokens','outcome','exit_code')){if(-not $fields.ContainsKey($name)){throw "proxy evidence missing $name in $($file.Name)"}}
+    foreach($name in @('stage','action','request_sha256','stage_scope_sha256','uat_execution_id','stage_period_slot','stage_period_primary','stage_period_secondary','stage_period_pool_sha256','authorized_actions','required_tokens','outcome','exit_code')){if(-not $fields.ContainsKey($name)){throw "proxy evidence missing $name in $($file.Name)"}}
     if([string]$fields['stage'] -ne $Stage){throw "proxy evidence stage mismatch in $($file.Name)"}
     if([string]$fields['stage_scope_sha256'] -ne $ExpectedAuthorizationScopeSha256){throw "proxy evidence authorization scope mismatch in $($file.Name)"}
     if([string]$fields['uat_execution_id'] -ne $ExpectedExecutionId){throw "proxy evidence execution identity mismatch in $($file.Name)"}
     if([int]$fields['stage_period_slot'] -ne $ExpectedSlot -or [int]$fields['stage_period_primary'] -ne $ExpectedPrimary -or [int]$fields['stage_period_secondary'] -ne $ExpectedSecondary){throw "proxy evidence period mismatch in $($file.Name)"}
     if(([string]$fields['stage_period_pool_sha256']).ToLowerInvariant() -ne $ExpectedPoolSha256.ToLowerInvariant()){throw "proxy evidence period pool SHA mismatch in $($file.Name)"}
-    try{$raw=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$fields['request_json_b64']))}catch{throw "proxy evidence request_json_b64 invalid in $($file.Name)"}
-    if((Get-TextSha256 $raw) -ne ([string]$fields['request_sha256']).ToLowerInvariant()){throw "proxy evidence request hash mismatch in $($file.Name)"}
-    try{$request=$raw|ConvertFrom-Json}catch{throw "proxy evidence request JSON invalid in $($file.Name)"}
-    $action=[string]$fields['action'];if(([string]$request.action).Trim() -ne $action){throw "proxy evidence action/request mismatch in $($file.Name)"}
+    $action=[string]$fields['action']
     $authorized=@(([string]$fields['authorized_actions']).Split(',')|ForEach-Object {$_.Trim().ToLowerInvariant()}|Where-Object {$_})
     foreach($token in @(([string]$fields['required_tokens']).Split(',')|ForEach-Object {$_.Trim().ToLowerInvariant()}|Where-Object {$_})){if($authorized -notcontains $token){throw "proxy evidence required token '$token' outside authorized scope in $($file.Name)"}}
     $outcome=[string]$fields['outcome'];if($outcome -notin @('SUCCESS','DENIED','BLOCKED','FAILED')){throw "invalid proxy evidence outcome in $($file.Name)"}
+    $hasRequestJson=$fields.ContainsKey('request_json_b64')
+    $emptyDeniedRequest=($outcome -ceq 'DENIED' -and $action -ceq '' -and [string]$fields['request_sha256'] -ceq 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' -and [string]$fields['exit_code'] -ceq '1' -and $fields.ContainsKey('error_class') -and [string]$fields['error_class'] -ceq 'UAT_ACTION_POLICY_DENIED' -and (-not $hasRequestJson -or [string]$fields['request_json_b64'] -ceq ''))
+    if($emptyDeniedRequest){continue}
+    if(-not $hasRequestJson){throw "proxy evidence missing request_json_b64 in $($file.Name)"}
+    try{$raw=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$fields['request_json_b64']))}catch{throw "proxy evidence request_json_b64 invalid in $($file.Name)"}
+    if((Get-TextSha256 $raw) -ne ([string]$fields['request_sha256']).ToLowerInvariant()){throw "proxy evidence request hash mismatch in $($file.Name)"}
+    try{$request=$raw|ConvertFrom-Json}catch{throw "proxy evidence request JSON invalid in $($file.Name)"}
+    if(([string]$request.action).Trim() -ne $action){throw "proxy evidence action/request mismatch in $($file.Name)"}
     if($outcome -ne 'SUCCESS'){continue}
     if([int]$fields['exit_code'] -ne 0){throw "successful proxy evidence has nonzero exit code in $($file.Name)"}
     $successOrdinal++
