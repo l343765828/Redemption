@@ -23,6 +23,9 @@ param(
         "redis-cleanup-caller-key-sizes",
         "runtime-config-policy-redirect-blocked",
         "consumer-controller-payload-safe",
+        "consumer-exception-residue-contract",
+        "post-pending-conflict-seed",
+        "post-pending-caller-identity-denied",
         "pytest-full-exclusions",
         "pytest-full-unsafe-exclusion"
     )]
@@ -852,6 +855,82 @@ print(json.dumps({'kind': 'ConsumerRuntimeControllerResult', 'operation': sys.ar
     }
 }
 
+function Test-ConsumerExceptionResidueContract {
+    Import-ProxyFunctions @("Assert-ConsumerExceptionContract")
+    $policy = '{"scenario_expected_exception_reason":{"post-pending-order-conflict":"PERSISTENT_FAILURE"},"scenario_expected_has_redis_residue":{"post-pending-order-conflict":true}}' | ConvertFrom-Json
+    $records = @([pscustomobject]@{key="ORDER-1";topic="pvam-pv-orders";partition=1;offset=20;payload_sha256=("a" * 64)})
+    $matching = @([pscustomobject]@{identity="ORDER-1";reason="PERSISTENT_FAILURE";has_redis_residue=$true;source_topic="pvam-pv-orders";source_partition=1;source_offset=20;payload_hash=("a" * 64)})
+
+    $result = Assert-ConsumerExceptionContract $matching $records "post-pending-order-conflict" $policy
+
+    Assert-Equal "PERSISTENT_FAILURE" $result.ExpectedReason "exception contract reason mismatch"
+    Assert-Equal $true $result.ExpectedHasRedisResidue "exception contract residue expectation mismatch"
+    Assert-Equal 1 @($result.MatchedExceptions).Count "exception contract must retain the matching exception"
+
+    Assert-ThrowsLike {
+        Assert-ConsumerExceptionContract @([pscustomobject]@{identity="ORDER-1";reason="PERSISTENT_FAILURE";has_redis_residue=$false;source_topic="pvam-pv-orders";source_partition=1;source_offset=20;payload_hash=("a" * 64)}) $records "post-pending-order-conflict" $policy | Out-Null
+    } "UAT_ENV_BLOCKED: expected exception has_redis_residue=True*observed*False*" "false residue evidence must fail closed"
+
+    Assert-ThrowsLike {
+        Assert-ConsumerExceptionContract @([pscustomobject]@{identity="ORDER-1";reason="PERSISTENT_FAILURE";source_topic="pvam-pv-orders";source_partition=1;source_offset=20;payload_hash=("a" * 64)}) $records "post-pending-order-conflict" $policy | Out-Null
+    } "UAT_ENV_BLOCKED: expected exception has_redis_residue=True*observed*missing*" "missing residue evidence must fail closed"
+
+    foreach($invalidResidue in @("true",1,$null)){
+        Assert-ThrowsLike {
+            Assert-ConsumerExceptionContract @([pscustomobject]@{identity="ORDER-1";reason="PERSISTENT_FAILURE";has_redis_residue=$invalidResidue;source_topic="pvam-pv-orders";source_partition=1;source_offset=20;payload_hash=("a" * 64)}) $records "post-pending-order-conflict" $policy | Out-Null
+        } "UAT_ENV_BLOCKED: expected exception has_redis_residue=True*" "non-boolean residue evidence must fail closed"
+    }
+
+    $staleAndCurrent = @(
+        [pscustomobject]@{identity="ORDER-1";reason="PERSISTENT_FAILURE";has_redis_residue=$true;source_topic="pvam-pv-orders";source_partition=1;source_offset=19;payload_hash=("a" * 64)},
+        [pscustomobject]@{identity="ORDER-1";reason="PERSISTENT_FAILURE";has_redis_residue=$false;source_topic="pvam-pv-orders";source_partition=1;source_offset=20;payload_hash=("a" * 64)}
+    )
+    Assert-ThrowsLike {
+        Assert-ConsumerExceptionContract $staleAndCurrent $records "post-pending-order-conflict" $policy | Out-Null
+    } "UAT_ENV_BLOCKED: expected exception has_redis_residue=True*observed*False*" "a stale correct exception must not mask the current offset"
+}
+
+function Test-PostPendingOrderConflictSeed {
+    Import-ProxyFunctions @("Invoke-PostPendingOrderConflictSeed")
+    $script:ExecutionId = "c3-r1-opus-s1-0123456789ab"
+    $script:SeedMismatch = $false
+    function script:Invoke-RuntimePythonCommand {
+        param($Pod,$Container,[string]$Repo,$Policy,[string]$Code,[object[]]$Arguments)
+        $spec = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$Arguments[0])) | ConvertFrom-Json
+        $key = if($script:SeedMismatch){"wrong:key"}else{[string]$spec.key}
+        $semantic = [ordered]@{kind="PostPendingOrderConflictSeed";key=$key;delivery_key=[string]$spec.delivery_key;delivery_absent_before=(-not $script:SeedMismatch);amount_units="0";period=[int]$spec.period;created=$true}
+        return [pscustomobject]@{ExitCode=0;Output=@(($semantic|ConvertTo-Json -Compress))}
+    }
+    $policy = [pscustomobject]@{}
+    $orderId = "uat-$($script:ExecutionId)-post-pending-order-conflict-1000"
+
+    $result = Invoke-PostPendingOrderConflictSeed "scheduler-pod" "scheduler" "/mnt/dask/Redemption/Redemption" $policy $orderId 209906
+
+    Assert-Equal "pvam:uat:work02:$($script:ExecutionId):order_ledger:$orderId" $result.key "seed must target the exact execution-scoped order ledger key"
+    Assert-Equal "0" ([string]$result.amount_units) "seed must use a valid amount that conflicts with the governed scenario payload"
+    Assert-Equal 209906 ([int]$result.period) "seed period mismatch"
+    Assert-Equal "pvam:uat:work02:$($script:ExecutionId):event_delivery:$orderId" $result.delivery_key "seed must check the exact delivery key"
+    Assert-Equal $true ([bool]$result.delivery_absent_before) "seed must prove delivery was absent before produce"
+
+    $script:SeedMismatch = $true
+    Assert-ThrowsLike {
+        Invoke-PostPendingOrderConflictSeed "scheduler-pod" "scheduler" "/mnt/dask/Redemption/Redemption" $policy $orderId 209906 | Out-Null
+    } "UAT_ENV_BLOCKED: post-PENDING conflict seed*" "seed evidence must be bound to the exact keys and precondition"
+}
+
+function Test-PostPendingCallerIdentityDenied {
+    Import-ProxyFunctions @("Invoke-KafkaScenarioProduce")
+    function script:Assert-RequiredTokens { param($Required,$Action) }
+    $policy = [pscustomobject]@{kafka_scenarios=@("post-pending-order-conflict")}
+
+    Assert-ThrowsLike {
+        Invoke-KafkaScenarioProduce ([pscustomobject]@{scenario="post-pending-order-conflict";order_id="uat-controlled-but-caller-selected"}) $policy | Out-Null
+    } "UAT_ACTION_POLICY_DENIED: post-pending-order-conflict identity is controller-owned" "caller order_id must be rejected before runtime resolution"
+    Assert-ThrowsLike {
+        Invoke-KafkaScenarioProduce ([pscustomobject]@{scenario="post-pending-order-conflict";seq=123}) $policy | Out-Null
+    } "UAT_ACTION_POLICY_DENIED: post-pending-order-conflict identity is controller-owned" "caller seq must be rejected before runtime resolution"
+}
+
 function Test-PytestFullExclusions {
     Import-ProxyFunctions @("Assert-RequiredTokens", "Invoke-PytestProfile")
     $script:AllMutableTokens = @("exec")
@@ -945,6 +1024,9 @@ $cases = [ordered]@{
     "redis-cleanup-caller-key-sizes" = { Test-RedisCleanupStagePrefixes "caller" }
     "runtime-config-policy-redirect-blocked" = { Test-RuntimeConfigPolicyRedirectBlocked }
     "consumer-controller-payload-safe" = { Test-ConsumerControllerPayloadSafe }
+    "consumer-exception-residue-contract" = { Test-ConsumerExceptionResidueContract }
+    "post-pending-conflict-seed" = { Test-PostPendingOrderConflictSeed }
+    "post-pending-caller-identity-denied" = { Test-PostPendingCallerIdentityDenied }
     "pytest-full-exclusions" = { Test-PytestFullExclusions }
     "pytest-full-unsafe-exclusion" = { Test-PytestFullUnsafeExclusion }
 }

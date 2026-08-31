@@ -22,6 +22,7 @@ CANDIDATE_SHA = "c" * 40
 ORIGINAL_CHECKSUM = "d" * 64
 ACTIVATED_CHECKSUM = "e" * 64
 EXECUTION_ID = "v21-config-test"
+POST_PENDING_SCENARIO = "post-pending-order-conflict"
 
 
 def policy():
@@ -234,6 +235,146 @@ def run_finalizer(evidence_dir):
         stderr=subprocess.PIPE,
         universal_newlines=True,
     ).communicate()
+
+
+def write_post_pending_observation(
+    evidence_dir,
+    *,
+    has_redis_residue,
+    delivery_status="PENDING",
+    committed_offset=8,
+    delivery_exists=True,
+    order_ledger_exists=True,
+    delivery_absent_before=True,
+    business_after_pv=10,
+    exceptions=None,
+):
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    identity = "uat-{}-{}-1000".format(EXECUTION_ID, POST_PENDING_SCENARIO)
+    payload_hash = "f" * 64
+    delivery_key = "pvam:uat:work02:{}:event_delivery:{}".format(
+        EXECUTION_ID,
+        identity,
+    )
+    order_ledger_key = "pvam:uat:work02:{}:order_ledger:{}".format(
+        EXECUTION_ID,
+        identity,
+    )
+    before = {
+        "user_id": "U-UAT-001",
+        "periods": {
+            "209906": {
+                "exists": True,
+                "pv": 10,
+                "pv_type": "int",
+                "amount_encoding_version": 2,
+            },
+            "209907": {
+                "exists": False,
+                "pv": 0,
+                "pv_type": "int",
+                "amount_encoding_version": None,
+            },
+        },
+    }
+    after = json.loads(json.dumps(before))
+    after["periods"]["209906"]["pv"] = business_after_pv
+    delivery = {
+        "topic": "pvam-pv-orders",
+        "key": identity,
+        "partition": 1,
+        "offset": 7,
+        "period": 209906,
+        "role": POST_PENDING_SCENARIO,
+        "payload": {
+            "type": "order",
+            "order_id": identity,
+            "period": 209906,
+            "user_id": "U-UAT-001",
+            "bv": "1500.99",
+        },
+        "payload_sha256": payload_hash,
+    }
+    write_action_evidence(
+        evidence_dir,
+        1,
+        "KafkaScenarioProduce",
+        {"action": "KafkaScenarioProduce", "scenario": POST_PENDING_SCENARIO},
+        "exec,test-data-write",
+        {
+            "kind": "KafkaScenarioResult",
+            "scenario": POST_PENDING_SCENARIO,
+            "period": 209906,
+            "uat_execution_id": EXECUTION_ID,
+            "delivery_count": 1,
+            "delivered_keys": [identity],
+            "deliveries": [delivery],
+            "fault_setup": {
+                "kind": "PostPendingOrderConflictSeed",
+                "key": order_ledger_key,
+                "delivery_key": delivery_key,
+                "delivery_absent_before": delivery_absent_before,
+                "amount_units": "0",
+                "period": 209906,
+            },
+            "uat_user_id": "U-UAT-001",
+            "business_snapshot_before": before,
+        },
+    )
+    if exceptions is None:
+        exceptions = [
+            {
+                "identity": identity,
+                "reason": "PERSISTENT_FAILURE",
+                "has_redis_residue": has_redis_residue,
+                "source_topic": "pvam-pv-orders",
+                "source_partition": 1,
+                "source_offset": 7,
+                "payload_hash": payload_hash,
+            }
+        ]
+    write_action_evidence(
+        evidence_dir,
+        2,
+        "ConsumerObserve",
+        {"action": "ConsumerObserve", "scenario": POST_PENDING_SCENARIO},
+        "exec",
+        {
+            "kind": "ConsumerObserveResult",
+            "runtime_mode": "scheduler-pod-temporary-process",
+            "scenario": POST_PENDING_SCENARIO,
+            "candidate_sha": CANDIDATE_SHA,
+            "log_line_count": 1,
+            "offset_semantics_ok": True,
+            "business_value_proof_ok": True,
+            "business_snapshot_before": before,
+            "business_snapshot_after": after,
+            "expected_exception_reason": "PERSISTENT_FAILURE",
+            "expected_has_redis_residue": True,
+            "post_pending_conflict_ok": True,
+            "observations": [
+                {
+                    "identity": identity,
+                    "topic": "pvam-pv-orders",
+                    "partition": 1,
+                    "offset": 7,
+                    "payload_sha256": payload_hash,
+                    "committed_offset": committed_offset,
+                    "period": 209906,
+                    "delivery_key": delivery_key,
+                    "delivery_exists": delivery_exists,
+                    "delivery_status": delivery_status,
+                    "order_ledger_key": order_ledger_key,
+                    "order_ledger_exists": order_ledger_exists,
+                    "order_ledger_fields": {
+                        "amount_units": "0",
+                        "period": "209906",
+                    },
+                }
+            ],
+            "exceptions": exceptions,
+        },
+    )
 
 
 def test_real_role_contract_builder_isolates_skills():
@@ -449,6 +590,108 @@ def test_period_verifier_accepts_controller_derived_empty_cleanup(tmpdir):
             "cleanup_source": "controller-evidence",
         },
     )
+
+    stdout, stderr = run_period_verifier(evidence_dir)
+
+    assert "[PROXY-EVIDENCE] PASS" in stdout, stderr
+
+
+def test_post_pending_failure_scenario_is_governed_by_opus():
+    current = policy()
+
+    assert POST_PENDING_SCENARIO in current["kafka_scenarios"]
+    assert POST_PENDING_SCENARIO in current["required_kafka_scenarios_by_stage"]["OPUS"]
+    assert POST_PENDING_SCENARIO in current["consumer_observation_required_scenarios_by_stage"]["OPUS"]
+    assert current["scenario_expected_exception_reason"][POST_PENDING_SCENARIO] == "PERSISTENT_FAILURE"
+    assert current["scenario_expected_has_redis_residue"][POST_PENDING_SCENARIO] is True
+    assert current["scenario_expected_delivery_status"][POST_PENDING_SCENARIO] == "PENDING"
+    assert POST_PENDING_SCENARIO not in current["scenarios_require_no_redis_side_effects"]
+
+
+def test_period_verifier_rejects_false_post_pending_residue(tmpdir):
+    evidence_dir = Path(str(tmpdir)) / "false-post-pending-residue"
+    write_post_pending_observation(evidence_dir, has_redis_residue=False)
+
+    stdout, stderr = run_period_verifier(evidence_dir)
+
+    assert "[PROXY-EVIDENCE] PASS" not in stdout
+    assert "has_redis_residue mismatch" in stderr
+
+
+def test_period_verifier_rejects_non_pending_post_pending_delivery(tmpdir):
+    evidence_dir = Path(str(tmpdir)) / "wrong-post-pending-delivery"
+    write_post_pending_observation(
+        evidence_dir,
+        has_redis_residue=True,
+        delivery_status="DISPATCHED",
+    )
+
+    stdout, stderr = run_period_verifier(evidence_dir)
+
+    assert "[PROXY-EVIDENCE] PASS" not in stdout
+    assert "delivery status mismatch" in stderr
+
+
+def test_period_verifier_rejects_stale_exception_for_same_identity(tmpdir):
+    evidence_dir = Path(str(tmpdir)) / "stale-post-pending-exception"
+    identity = "uat-{}-{}-1000".format(EXECUTION_ID, POST_PENDING_SCENARIO)
+    payload_hash = "f" * 64
+    write_post_pending_observation(
+        evidence_dir,
+        has_redis_residue=False,
+        exceptions=[
+            {
+                "identity": identity,
+                "reason": "PERSISTENT_FAILURE",
+                "has_redis_residue": True,
+                "source_topic": "pvam-pv-orders",
+                "source_partition": 1,
+                "source_offset": 6,
+                "payload_hash": payload_hash,
+            },
+            {
+                "identity": identity,
+                "reason": "PERSISTENT_FAILURE",
+                "has_redis_residue": False,
+                "source_topic": "pvam-pv-orders",
+                "source_partition": 1,
+                "source_offset": 7,
+                "payload_hash": payload_hash,
+            },
+        ],
+    )
+
+    stdout, stderr = run_period_verifier(evidence_dir)
+
+    assert "[PROXY-EVIDENCE] PASS" not in stdout
+    assert "has_redis_residue mismatch" in stderr
+
+
+def test_period_verifier_recomputes_post_pending_raw_evidence(tmpdir):
+    mutations = [
+        ({"committed_offset": 7}, "offset semantics mismatch"),
+        ({"delivery_exists": False}, "boundary proof failed"),
+        ({"order_ledger_exists": False}, "boundary proof failed"),
+        ({"delivery_absent_before": False}, "setup evidence mismatch"),
+        ({"business_after_pv": 11}, "business snapshot mismatch"),
+    ]
+    for ordinal, (kwargs, expected) in enumerate(mutations, 1):
+        evidence_dir = Path(str(tmpdir)) / "raw-evidence-{}".format(ordinal)
+        write_post_pending_observation(
+            evidence_dir,
+            has_redis_residue=True,
+            **kwargs
+        )
+
+        stdout, stderr = run_period_verifier(evidence_dir)
+
+        assert "[PROXY-EVIDENCE] PASS" not in stdout
+        assert expected in stderr
+
+
+def test_period_verifier_accepts_complete_post_pending_failure_evidence(tmpdir):
+    evidence_dir = Path(str(tmpdir)) / "complete-post-pending-evidence"
+    write_post_pending_observation(evidence_dir, has_redis_residue=True)
 
     stdout, stderr = run_period_verifier(evidence_dir)
 

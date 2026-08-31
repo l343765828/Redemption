@@ -77,6 +77,37 @@ function Test-ChangedPathAllowed([string]$Path,$Policy){
     }
     return $false
 }
+function Test-ExceptionMatchesDelivery($Exception,$Delivery){
+    foreach($name in @('identity','source_topic','source_partition','source_offset','payload_hash')){if(-not ($Exception.PSObject.Properties.Name -contains $name) -or $null -eq $Exception.$name){return $false}}
+    if((($Exception.source_partition -isnot [int]) -and ($Exception.source_partition -isnot [long])) -or (($Exception.source_offset -isnot [int]) -and ($Exception.source_offset -isnot [long]))){return $false}
+    return ([string]$Exception.identity -ceq [string]$Delivery.key -and
+        [string]$Exception.source_topic -ceq [string]$Delivery.topic -and
+        [long]$Exception.source_partition -eq [long]$Delivery.partition -and
+        [long]$Exception.source_offset -eq [long]$Delivery.offset -and
+        [string]$Exception.payload_hash -ceq [string]$Delivery.payload_sha256)
+}
+function Test-ObservationMatchesDelivery($Observation,$Delivery){
+    foreach($name in @('identity','topic','partition','offset','payload_sha256')){if(-not ($Observation.PSObject.Properties.Name -contains $name) -or $null -eq $Observation.$name){return $false}}
+    return ([string]$Observation.identity -ceq [string]$Delivery.key -and
+        [string]$Observation.topic -ceq [string]$Delivery.topic -and
+        [long]$Observation.partition -eq [long]$Delivery.partition -and
+        [long]$Observation.offset -eq [long]$Delivery.offset -and
+        [string]$Observation.payload_sha256 -ceq [string]$Delivery.payload_sha256)
+}
+function Test-UserStatsSnapshotPeriodEqual($Left,$Right,[int]$Period){
+    if(-not $Left -or -not $Right -or [string]$Left.user_id -cne [string]$Right.user_id){return $false}
+    $leftPeriods=@($Left.PSObject.Properties|Where-Object{$_.Name -eq 'periods'}|Select-Object -First 1)[0]
+    $rightPeriods=@($Right.PSObject.Properties|Where-Object{$_.Name -eq 'periods'}|Select-Object -First 1)[0]
+    if(-not $leftPeriods -or -not $rightPeriods){return $false}
+    $periodName=[string]$Period
+    $leftPeriod=@($leftPeriods.Value.PSObject.Properties|Where-Object{$_.Name -eq $periodName}|Select-Object -First 1)[0]
+    $rightPeriod=@($rightPeriods.Value.PSObject.Properties|Where-Object{$_.Name -eq $periodName}|Select-Object -First 1)[0]
+    if(-not $leftPeriod -or -not $rightPeriod){return $false}
+    $l=$leftPeriod.Value;$r=$rightPeriod.Value
+    foreach($name in @('exists','pv','pv_type','amount_encoding_version')){if(-not ($l.PSObject.Properties.Name -contains $name) -or -not ($r.PSObject.Properties.Name -contains $name)){return $false}}
+    if($l.exists -isnot [bool] -or $r.exists -isnot [bool]){return $false}
+    return ([bool]$l.exists -eq [bool]$r.exists -and [long]$l.pv -eq [long]$r.pv -and [string]$l.pv_type -ceq [string]$r.pv_type -and [string]$l.amount_encoding_version -ceq [string]$r.amount_encoding_version)
+}
 if ($ExpectedSlot -lt 1 -or $ExpectedPrimary -lt 1 -or $ExpectedSecondary -lt 1 -or $ExpectedPrimary -eq $ExpectedSecondary) { throw 'invalid expected stage period allocation' }
 if ($ExpectedPoolSha256 -notmatch '^[0-9a-f]{64}$' -or $ExpectedAuthorizationScopeSha256 -notmatch '^[0-9a-f]{64}$') { throw 'invalid expected proxy evidence hashes' }
 if (-not $ExpectedExecutionId) { throw 'ExpectedExecutionId is required' }
@@ -100,7 +131,7 @@ if ($files.Count -eq 0) {
     if($VerificationMode -eq 'ValidateExistingOnly'){Write-Output "[PROXY-EVIDENCE] PASS stage=$Stage mode=$VerificationMode files=0";exit 0}
     throw "proxy action evidence missing for required $Stage actions"
 }
-$success=@{};$successfulScenarios=@{};$dbsize=@{};$delivered=New-Object System.Collections.Generic.List[string];$deliveredRecords=New-Object System.Collections.Generic.List[object];$cleanupKeys=New-Object System.Collections.Generic.List[string];$successfulSelectedTargets=New-Object System.Collections.Generic.List[string];$lifecycleOps=@{};$lifecycleRestoreOrdinals=New-Object System.Collections.Generic.List[int];$observedScenarios=@{};$lifecycleOrder=@{};$observeOrder=@{};$dispatchedIdentities=@{};$redisProofs=@{};$uatProofs=@{};$uatProofOrder=@{};$pvamConfigOps=@{};$pvamConfigOrder=@{};$runtimeGitUpdateOk=$false;[long]$totalDeleted=0;[int]$latestCleanupOrdinal=0;[int]$successOrdinal=0
+$success=@{};$successfulScenarios=@{};$kafkaScenarios=@{};$dbsize=@{};$delivered=New-Object System.Collections.Generic.List[string];$deliveredRecords=New-Object System.Collections.Generic.List[object];$cleanupKeys=New-Object System.Collections.Generic.List[string];$successfulSelectedTargets=New-Object System.Collections.Generic.List[string];$lifecycleOps=@{};$lifecycleRestoreOrdinals=New-Object System.Collections.Generic.List[int];$observedScenarios=@{};$lifecycleOrder=@{};$observeOrder=@{};$dispatchedIdentities=@{};$redisProofs=@{};$uatProofs=@{};$uatProofOrder=@{};$pvamConfigOps=@{};$pvamConfigOrder=@{};$runtimeGitUpdateOk=$false;[long]$totalDeleted=0;[int]$latestCleanupOrdinal=0;[int]$successOrdinal=0
 foreach($file in $files) {
     $fields=Read-ProxyEvidenceFields $file.FullName
     foreach($name in @('stage','action','request_sha256','stage_scope_sha256','uat_execution_id','stage_period_slot','stage_period_primary','stage_period_secondary','stage_period_pool_sha256','authorized_actions','required_tokens','outcome','exit_code')){if(-not $fields.ContainsKey($name)){throw "proxy evidence missing $name in $($file.Name)"}}
@@ -210,13 +241,57 @@ foreach($file in $files) {
         if(-not [bool]$semantic.offset_semantics_ok){throw "ConsumerObserve consumer-group offset semantics failed for $scenario"}
         if(-not [bool]$semantic.business_value_proof_ok){throw "ConsumerObserve controller business value proof failed for $scenario"}
         if(-not $semantic.business_snapshot_before -or -not $semantic.business_snapshot_after){throw "ConsumerObserve business snapshots missing for $scenario"}
+        $sourceScenario=if(($semantic.PSObject.Properties.Name -contains 'source_scenario') -and ([string]$semantic.source_scenario).Trim()){([string]$semantic.source_scenario).Trim()}else{$scenario}
+        $kafkaSemantic=if($kafkaScenarios.ContainsKey($sourceScenario)){$kafkaScenarios[$sourceScenario]}else{$null}
+        $deliveries=@();if($kafkaSemantic){$deliveries=@($kafkaSemantic.deliveries)}
+        $offsetProp=@($policy.scenario_expected_offset_semantics.PSObject.Properties|Where-Object{$_.Name -eq $scenario}|Select-Object -First 1)[0]
+        if($offsetProp){
+            $offsetExpectation=[string]$offsetProp.Value;$offsetRows=@($semantic.observations);$rawOffsetOk=$offsetRows.Count -gt 0
+            foreach($row in $offsetRows){
+                if(-not ($row.PSObject.Properties.Name -contains 'offset') -or -not ($row.PSObject.Properties.Name -contains 'committed_offset') -or $null -eq $row.offset -or $null -eq $row.committed_offset){$rawOffsetOk=$false;continue}
+                $source=[long]$row.offset;$committed=[long]$row.committed_offset
+                if($offsetExpectation -eq 'committed' -and $committed -le $source){$rawOffsetOk=$false}
+                if($offsetExpectation -eq 'not-committed' -and $committed -gt $source){$rawOffsetOk=$false}
+            }
+            if(-not $rawOffsetOk){throw "ConsumerObserve offset semantics mismatch for $scenario"}
+        }
+        $correlatedExceptions=New-Object System.Collections.Generic.List[object]
+        foreach($exception in @($semantic.exceptions)){foreach($delivery in $deliveries){if(Test-ExceptionMatchesDelivery $exception $delivery){$correlatedExceptions.Add($exception);break}}}
         $reasonProp=@($policy.scenario_expected_exception_reason.PSObject.Properties|Where-Object{$_.Name -eq $scenario}|Select-Object -First 1)[0]
-        if($reasonProp){$expectedReason=[string]$reasonProp.Value;if([string]$semantic.expected_exception_reason -ne $expectedReason -or @($semantic.exceptions|Where-Object{[string]$_.reason -eq $expectedReason}).Count -lt 1){throw "ConsumerObserve expected exception reason missing for ${scenario}: $expectedReason"}}
+        $reasonRows=@($correlatedExceptions.ToArray())
+        if($reasonProp){$expectedReason=[string]$reasonProp.Value;$reasonRows=@($reasonRows|Where-Object{[string]$_.reason -eq $expectedReason});if(-not $kafkaSemantic -or [string]$semantic.expected_exception_reason -ne $expectedReason -or $reasonRows.Count -lt 1){throw "ConsumerObserve expected exception reason missing for ${scenario}: $expectedReason"}}
+        $residueProp=@($policy.scenario_expected_has_redis_residue.PSObject.Properties|Where-Object{$_.Name -eq $scenario}|Select-Object -First 1)[0]
+        if($residueProp){
+            if($residueProp.Value -isnot [bool]){throw "scenario_expected_has_redis_residue policy invalid for $scenario"}
+            $expectedResidue=[bool]$residueProp.Value
+            if($semantic.expected_has_redis_residue -isnot [bool] -or [bool]$semantic.expected_has_redis_residue -ne $expectedResidue){throw "ConsumerObserve has_redis_residue mismatch for $scenario"}
+            $residueRows=@($reasonRows)
+            if($residueRows.Count -lt 1){throw "ConsumerObserve has_redis_residue evidence missing for $scenario"}
+            foreach($row in $residueRows){$valueProp=@($row.PSObject.Properties|Where-Object{$_.Name -eq 'has_redis_residue'}|Select-Object -First 1)[0];if(-not $valueProp -or $valueProp.Value -isnot [bool] -or [bool]$valueProp.Value -ne $expectedResidue){throw "ConsumerObserve has_redis_residue mismatch for $scenario"}}
+        }
+        $deliveryStatusProp=@($policy.scenario_expected_delivery_status.PSObject.Properties|Where-Object{$_.Name -eq $scenario}|Select-Object -First 1)[0]
+        if($deliveryStatusProp){$expectedDeliveryStatus=[string]$deliveryStatusProp.Value;$statusRows=@($semantic.observations);if($statusRows.Count -lt 1 -or @($statusRows|Where-Object{[string]$_.delivery_status -ne $expectedDeliveryStatus}).Count -gt 0){throw "ConsumerObserve delivery status mismatch for $scenario"}}
         $positive=(@($policy.scenarios_require_dispatched_three_chain|ForEach-Object{[string]$_}) -contains $scenario) -or $scenario -eq 'future-period-replay'
         if($positive){foreach($row in @($semantic.observations)){if([string]$row.delivery_status -ne 'DISPATCHED'){throw "delivery ledger is not DISPATCHED for $($row.identity)"};foreach($ns in @($policy.required_idempotency_namespaces|ForEach-Object{[string]$_})){if(-not [bool]$row.idempotency_namespaces.$ns){throw "required consumer observation missing $ns idempotency evidence for $($row.identity)"}};$dispatchedIdentities[[string]$row.identity]=[int]$row.period}}
         if(@($policy.scenarios_require_no_redis_side_effects|ForEach-Object{[string]$_}) -contains $scenario){if(-not [bool]$semantic.no_redis_side_effects_ok){throw "negative scenario Redis side-effect proof failed: $scenario"}}
         if($scenario -eq 'future-period' -and -not [bool]$semantic.pause_barrier_ok){throw 'future-period same-partition pause barrier proof failed'}
         if($scenario -eq 'future-period-replay' -and -not [bool]$semantic.future_replay_ok){throw 'future-period post-rebind replay proof failed'}
+        if($scenario -eq 'post-pending-order-conflict'){
+            if(-not [bool]$semantic.post_pending_conflict_ok -or -not $kafkaSemantic -or $deliveries.Count -ne 1){throw 'post-PENDING order conflict boundary proof failed'}
+            $rows=@($semantic.observations);if($rows.Count -ne 1 -or -not (Test-ObservationMatchesDelivery $rows[0] $deliveries[0])){throw 'post-PENDING order conflict boundary proof failed'}
+            $row=$rows[0];$identity=[string]$deliveries[0].key
+            $expectedDeliveryKey="pvam:uat:work02:${ExpectedExecutionId}:event_delivery:$identity";$expectedOrderKey="pvam:uat:work02:${ExpectedExecutionId}:order_ledger:$identity"
+            $deliveryExists=@($row.PSObject.Properties|Where-Object{$_.Name -eq 'delivery_exists'}|Select-Object -First 1)[0]
+            $orderExists=@($row.PSObject.Properties|Where-Object{$_.Name -eq 'order_ledger_exists'}|Select-Object -First 1)[0]
+            $orderFields=$row.order_ledger_fields
+            if([string]$row.delivery_key -cne $expectedDeliveryKey -or -not $deliveryExists -or $deliveryExists.Value -isnot [bool] -or -not [bool]$deliveryExists.Value -or [string]$row.delivery_status -cne 'PENDING' -or [string]$row.order_ledger_key -cne $expectedOrderKey -or -not $orderExists -or $orderExists.Value -isnot [bool] -or -not [bool]$orderExists.Value -or -not $orderFields -or @($orderFields.PSObject.Properties).Count -ne 2 -or [string]$orderFields.amount_units -cne '0' -or [int]$orderFields.period -ne [int]$deliveries[0].period){throw 'post-PENDING order conflict boundary proof failed'}
+            $setup=$kafkaSemantic.fault_setup;$setupAbsent=if($setup){@($setup.PSObject.Properties|Where-Object{$_.Name -eq 'delivery_absent_before'}|Select-Object -First 1)[0]}else{$null}
+            if(-not $setup -or [string]$setup.key -cne $expectedOrderKey -or [string]$setup.delivery_key -cne $expectedDeliveryKey -or -not $setupAbsent -or $setupAbsent.Value -isnot [bool] -or -not [bool]$setupAbsent.Value -or [string]$setup.amount_units -cne '0' -or [int]$setup.period -ne [int]$deliveries[0].period){throw 'post-PENDING conflict setup evidence mismatch'}
+            $kafkaBefore=$kafkaSemantic.business_snapshot_before
+            $businessOk=$kafkaBefore -and [string]$kafkaSemantic.uat_user_id -ceq [string]$semantic.business_snapshot_before.user_id
+            foreach($period in @($ExpectedPrimary,$ExpectedSecondary)){$businessOk=$businessOk -and (Test-UserStatsSnapshotPeriodEqual $kafkaBefore $semantic.business_snapshot_before $period) -and (Test-UserStatsSnapshotPeriodEqual $semantic.business_snapshot_before $semantic.business_snapshot_after $period)}
+            if(-not $businessOk){throw 'post-PENDING business snapshot mismatch'}
+        }
         if($scenario -eq 'cross-period-refund'){if(-not [bool]$semantic.cross_period_refund_ok -or -not [bool]$semantic.primary_refund_idempotency_absent -or [long]$semantic.refund_original_amount_units -ne [long]$semantic.primary_order_amount_units -or [long]$semantic.primary_business_delta_units -ne [long]$semantic.primary_order_amount_units -or [long]$semantic.secondary_business_delta_units -ne -[long]$semantic.refund_original_amount_units){throw 'cross-period refund amount/routing/business-delta proof failed'}}
         if($scenario -eq 'duplicate'){$dupRows=@($semantic.observations);if($dupRows.Count -lt 1){throw 'duplicate observation rows missing'};$dupExpected=[long]$dupRows[0].expected_amount_units;if(-not [bool]$semantic.duplicate_no_double_ok -or [int]$semantic.duplicate_delivery_count -ne 2 -or [long]$semantic.duplicate_business_delta_units -ne $dupExpected){throw 'duplicate no-double business-delta proof failed'}}
         if($scenario -eq 'drain-sentinel' -and -not [bool]$semantic.drain_detected){throw 'required consumer observation missing PERIOD DRAIN COMPLETE evidence'}
@@ -227,13 +302,20 @@ foreach($file in $files) {
     }
     elseif($action -eq 'KafkaScenarioProduce'){
         if(-not $semantic -or [string]$semantic.kind -ne 'KafkaScenarioResult'){throw "KafkaScenarioResult semantic evidence missing in $($file.Name)"}
-        $scenario=([string]$semantic.scenario).Trim();if($scenario){$successfulScenarios[$scenario]=$true};if([int]$semantic.delivery_count -lt 1){throw 'KafkaScenario semantic delivery_count invalid'}
+        $scenario=([string]$semantic.scenario).Trim();if($scenario){$successfulScenarios[$scenario]=$true;$kafkaScenarios[$scenario]=$semantic};if([int]$semantic.delivery_count -lt 1){throw 'KafkaScenario semantic delivery_count invalid'}
         foreach($d in @($semantic.deliveries)){
             if([string]$d.topic -notin @($policy.kafka_topics)){throw 'KafkaScenario semantic topic invalid'};if([int]$d.partition -lt 0 -or [long]$d.offset -lt 0){throw 'KafkaScenario semantic partition/offset invalid'}
             $identity=([string]$d.key).Trim();$original='';$userId='';if($d.payload){$original=([string]$d.payload.original_order_id).Trim();$userId=([string]$d.payload.user_id).Trim()}
             $deliveredRecords.Add([pscustomobject]@{identity=$identity;topic=[string]$d.topic;period=[int]$d.period;original_order_id=$original;user_id=$userId})
         }
         foreach($k in @($semantic.delivered_keys)){$v=([string]$k).Trim();if($v -and -not $delivered.Contains($v)){$delivered.Add($v)}}
+        if($scenario -eq 'post-pending-order-conflict'){
+            $setup=$semantic.fault_setup;$rows=@($semantic.deliveries)
+            if(-not $setup -or [string]$setup.kind -ne 'PostPendingOrderConflictSeed' -or $rows.Count -ne 1){throw 'post-PENDING conflict setup evidence missing'}
+            $expectedSetupKey="pvam:uat:work02:${ExpectedExecutionId}:order_ledger:$([string]$rows[0].key)"
+            $expectedDeliveryKey="pvam:uat:work02:${ExpectedExecutionId}:event_delivery:$([string]$rows[0].key)";$absentProp=@($setup.PSObject.Properties|Where-Object{$_.Name -eq 'delivery_absent_before'}|Select-Object -First 1)[0]
+            if([string]$setup.key -cne $expectedSetupKey -or [string]$setup.delivery_key -cne $expectedDeliveryKey -or -not $absentProp -or $absentProp.Value -isnot [bool] -or -not [bool]$absentProp.Value -or [string]$setup.amount_units -cne '0' -or [int]$setup.period -ne [int]$rows[0].period){throw 'post-PENDING conflict setup evidence mismatch'}
+        }
     }
     elseif($action -eq 'RedisDeleteExactKeys'){
         if(-not $semantic -or [string]$semantic.kind -ne 'RedisDeleteResult'){throw "RedisDeleteResult semantic evidence missing in $($file.Name)"}

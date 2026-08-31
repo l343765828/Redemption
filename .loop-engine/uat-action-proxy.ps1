@@ -1201,6 +1201,45 @@ function Get-ScenarioPolicyValue($Map,[string]$Scenario,[string]$Label) {
     return $value
 }
 
+function Assert-ConsumerExceptionContract($Exceptions,$Records,[string]$Scenario,$Policy) {
+    $reasonProp=@($Policy.scenario_expected_exception_reason.PSObject.Properties|Where-Object{$_.Name -eq $Scenario}|Select-Object -First 1)[0]
+    $expectedReason=if($reasonProp){[string]$reasonProp.Value}else{''}
+    $correlated=New-Object System.Collections.Generic.List[object]
+    foreach($exception in @($Exceptions)){
+        $required=@('identity','source_topic','source_partition','source_offset','payload_hash')
+        $complete=$true
+        foreach($name in $required){if(-not ($exception.PSObject.Properties.Name -contains $name) -or $null -eq $exception.$name){$complete=$false;break}}
+        if(-not $complete -or (($exception.source_partition -isnot [int]) -and ($exception.source_partition -isnot [long])) -or (($exception.source_offset -isnot [int]) -and ($exception.source_offset -isnot [long]))){continue}
+        foreach($record in @($Records)){
+            if([string]$exception.identity -ceq [string]$record.key -and
+               [string]$exception.source_topic -ceq [string]$record.topic -and
+               [long]$exception.source_partition -eq [long]$record.partition -and
+               [long]$exception.source_offset -eq [long]$record.offset -and
+               [string]$exception.payload_hash -ceq [string]$record.payload_sha256){
+                $correlated.Add($exception)
+                break
+            }
+        }
+    }
+    $matched=@($correlated.ToArray())
+    if($expectedReason){$matched=@($matched|Where-Object{[string]$_.reason -eq $expectedReason})}
+    if($expectedReason -and $matched.Count -lt 1){throw "UAT_ENV_BLOCKED: expected exception reason $expectedReason was not observed for scenario $Scenario"}
+
+    $residueProp=@($Policy.scenario_expected_has_redis_residue.PSObject.Properties|Where-Object{$_.Name -eq $Scenario}|Select-Object -First 1)[0]
+    $expectedResidue=$null
+    if($residueProp){
+        if($residueProp.Value -isnot [bool]){throw "UAT_ACTION_POLICY_DENIED: invalid scenario_expected_has_redis_residue policy for scenario $Scenario"}
+        $expectedResidue=[bool]$residueProp.Value
+        if($matched.Count -lt 1){throw "UAT_ENV_BLOCKED: expected exception residue evidence was not observed for scenario $Scenario"}
+        foreach($row in $matched){
+            $valueProp=@($row.PSObject.Properties|Where-Object{$_.Name -eq 'has_redis_residue'}|Select-Object -First 1)[0]
+            $observed=if(-not $valueProp){'missing'}elseif($valueProp.Value -isnot [bool]){'invalid'}else{[string][bool]$valueProp.Value}
+            if(-not $valueProp -or $valueProp.Value -isnot [bool] -or [bool]$valueProp.Value -ne $expectedResidue){throw "UAT_ENV_BLOCKED: expected exception has_redis_residue=$expectedResidue for scenario $Scenario observed=$observed"}
+        }
+    }
+    return [pscustomobject]@{ExpectedReason=$expectedReason;ExpectedHasRedisResidue=$expectedResidue;MatchedExceptions=@($matched)}
+}
+
 function Invoke-ConsumerObserve($Request,$Policy) {
     Assert-RequiredTokens @('exec') 'ConsumerObserve'
     $scenario=([string]$Request.scenario).Trim()
@@ -1275,7 +1314,9 @@ try:
                 try:rec=json.loads(msg.value())
                 except Exception:continue
                 if str(rec.get('event_identity') or '') in ids:
-                    exceptions.append({'identity':str(rec.get('event_identity')),'reason':str(rec.get('reason')),'failed_stage':str(rec.get('failed_stage')),'source_topic':str(rec.get('source_topic')),'source_partition':rec.get('source_partition'),'source_offset':rec.get('source_offset'),'payload_hash':rec.get('payload_hash')})
+                    item={'identity':str(rec.get('event_identity')),'reason':str(rec.get('reason')),'failed_stage':str(rec.get('failed_stage')),'source_topic':str(rec.get('source_topic')),'source_partition':rec.get('source_partition'),'source_offset':rec.get('source_offset'),'payload_hash':rec.get('payload_hash')}
+                    if 'has_redis_residue' in rec:item['has_redis_residue']=rec['has_redis_residue']
+                    exceptions.append(item)
 finally:e.close()
 print(json.dumps({'kind':'ConsumerRuntimeObservation','observations':out,'exceptions':exceptions},sort_keys=True))
 '@
@@ -1310,8 +1351,20 @@ print(json.dumps({'kind':'ConsumerRuntimeObservation','observations':out,'except
     $offsetProp=@($Policy.scenario_expected_offset_semantics.PSObject.Properties|Where-Object{$_.Name -eq $scenario}|Select-Object -First 1)[0];$offsetExpectation=if($offsetProp){[string]$offsetProp.Value}else{''};$offsetOk=$true
     foreach($row in @($obs.observations)){$committed=[long]$row.committed_offset;$source=[long]$row.offset;if($offsetExpectation -eq 'committed' -and $committed -le $source){$offsetOk=$false};if($offsetExpectation -eq 'not-committed' -and $committed -gt $source){$offsetOk=$false}}
     if(-not $offsetOk){throw "UAT_ENV_BLOCKED: ConsumerObserve consumer-group offset semantics mismatch for scenario $scenario expectation=$offsetExpectation"}
-    $reasonProp=@($Policy.scenario_expected_exception_reason.PSObject.Properties|Where-Object{$_.Name -eq $scenario}|Select-Object -First 1)[0];$expectedReason=if($reasonProp){[string]$reasonProp.Value}else{''}
-    if($expectedReason){$matched=@($obs.exceptions|Where-Object{[string]$_.reason -eq $expectedReason});if($matched.Count -lt 1){throw "UAT_ENV_BLOCKED: expected exception reason $expectedReason was not observed for scenario $scenario"}}
+    $exceptionContract=Assert-ConsumerExceptionContract @($obs.exceptions) @($records) $scenario $Policy
+    $expectedReason=[string]$exceptionContract.ExpectedReason;$expectedHasRedisResidue=$exceptionContract.ExpectedHasRedisResidue
+    $deliveryStatusProp=@($Policy.scenario_expected_delivery_status.PSObject.Properties|Where-Object{$_.Name -eq $scenario}|Select-Object -First 1)[0]
+    $expectedDeliveryStatus=if($deliveryStatusProp){([string]$deliveryStatusProp.Value).Trim()}else{''};$deliveryStatusOk=$true
+    if($expectedDeliveryStatus){foreach($row in @($obs.observations)){if([string]$row.delivery_status -ne $expectedDeliveryStatus){$deliveryStatusOk=$false}};if(-not $deliveryStatusOk){throw "UAT_ENV_BLOCKED: delivery status mismatch for scenario $scenario expected=$expectedDeliveryStatus"}}
+
+    $postPendingConflictOk=$false
+    if($scenario -eq 'post-pending-order-conflict'){
+        $postPendingConflictOk=@($obs.observations).Count -ge 1
+        foreach($row in @($obs.observations)){
+            if(-not [bool]$row.delivery_exists -or [string]$row.delivery_status -ne 'PENDING' -or -not [bool]$row.order_ledger_exists -or [string]$row.order_ledger_fields.amount_units -ne '0' -or [int]$row.order_ledger_fields.period -ne [int]$row.period){$postPendingConflictOk=$false}
+        }
+        if(-not $postPendingConflictOk){throw 'UAT_ENV_BLOCKED: post-PENDING order conflict boundary proof failed'}
+    }
 
     $noSideEffectRequired=@($Policy.scenarios_require_no_redis_side_effects|ForEach-Object{[string]$_}) -contains $scenario
     $noRedisSideEffectsOk=$true
@@ -1364,7 +1417,7 @@ print(json.dumps({'kind':'ConsumerRuntimeObservation','observations':out,'except
     $businessValueProofOk=$false;$duplicateBusinessDeltaUnits=$null
     $firstExpected=$null
     foreach($row in @($obs.observations)){if($null -ne $row.expected_amount_units){$firstExpected=[long]$row.expected_amount_units;break}}
-    if($scenario -in @('forbidden-field','schema-invalid','expired-period','future-period','drain-sentinel')){
+    if($scenario -in @('post-pending-order-conflict','forbidden-field','schema-invalid','expired-period','future-period','drain-sentinel')){
         $businessValueProofOk=(Test-UserStatsPeriodStateEqual $primaryBefore $primaryAfter) -and (Test-UserStatsPeriodStateEqual $secondaryBefore $secondaryAfter)
     }
     elseif($scenario -eq 'future-period-replay'){
@@ -1390,8 +1443,8 @@ print(json.dumps({'kind':'ConsumerRuntimeObservation','observations':out,'except
 
     if($scenario -eq 'drain-sentinel' -and -not $drainDetected){throw 'UAT_ENV_BLOCKED: PERIOD DRAIN COMPLETE log evidence missing'}
     $totalLogLines=[int]$runtimeLogs.line_count
-    $semantic=[pscustomobject]@{kind='ConsumerObserveResult';runtime_mode='scheduler-pod-temporary-process';scenario=$scenario;source_scenario=$sourceScenario;delivery_status=($(if($positive){'DISPATCHED'}else{'scenario-specific'}));observations=@($obs.observations);exceptions=@($obs.exceptions);expected_exception_reason=$expectedReason;offset_expectation=$offsetExpectation;offset_semantics_ok=$offsetOk;no_redis_side_effects_ok=$noRedisSideEffectsOk;pause_barrier_ok=$pauseBarrierOk;future_replay_ok=$futureReplayOk;cross_period_refund_ok=$crossPeriodRefundOk;primary_order_amount_units=$primaryOrderAmountUnits;refund_original_amount_units=$refundOriginalAmountUnits;primary_refund_idempotency_absent=$primaryRefundIdempotencyAbsent;duplicate_no_double_ok=$duplicateNoDoubleOk;duplicate_delivery_count=$duplicateDeliveryCount;business_value_proof_ok=$businessValueProofOk;business_snapshot_before=$businessSnapshotBefore;business_snapshot_after=$businessSnapshotAfter;primary_business_delta_units=$primaryBusinessDeltaUnits;secondary_business_delta_units=$secondaryBusinessDeltaUnits;duplicate_business_delta_units=$duplicateBusinessDeltaUnits;idempotency_namespaces=@('userstats','placement','elite');log_line_count=$totalLogLines;previous_log_line_count=0;drain_detected=$drainDetected;consumer_log_sha256=(Get-TextSha256 $combinedLogText);candidate_sha=$candidate;pod=$pod;container=$container;pod_repo=$repo}
-    return [pscustomobject]@{ExitCode=0;Output=@("scenario=$scenario","observations=$(@($obs.observations).Count)","exceptions=$(@($obs.exceptions).Count)","offset_expectation=$offsetExpectation","no_redis_side_effects_ok=$noRedisSideEffectsOk","pause_barrier_ok=$pauseBarrierOk","future_replay_ok=$futureReplayOk","cross_period_refund_ok=$crossPeriodRefundOk","duplicate_no_double_ok=$duplicateNoDoubleOk","business_value_proof_ok=$businessValueProofOk","primary_business_delta_units=$primaryBusinessDeltaUnits","secondary_business_delta_units=$secondaryBusinessDeltaUnits","candidate_sha=$candidate");Semantic=$semantic}
+    $semantic=[pscustomobject]@{kind='ConsumerObserveResult';runtime_mode='scheduler-pod-temporary-process';scenario=$scenario;source_scenario=$sourceScenario;delivery_status=($(if($positive){'DISPATCHED'}else{'scenario-specific'}));observations=@($obs.observations);exceptions=@($obs.exceptions);expected_exception_reason=$expectedReason;expected_has_redis_residue=$expectedHasRedisResidue;expected_delivery_status=$expectedDeliveryStatus;delivery_status_ok=$deliveryStatusOk;post_pending_conflict_ok=$postPendingConflictOk;offset_expectation=$offsetExpectation;offset_semantics_ok=$offsetOk;no_redis_side_effects_ok=$noRedisSideEffectsOk;pause_barrier_ok=$pauseBarrierOk;future_replay_ok=$futureReplayOk;cross_period_refund_ok=$crossPeriodRefundOk;primary_order_amount_units=$primaryOrderAmountUnits;refund_original_amount_units=$refundOriginalAmountUnits;primary_refund_idempotency_absent=$primaryRefundIdempotencyAbsent;duplicate_no_double_ok=$duplicateNoDoubleOk;duplicate_delivery_count=$duplicateDeliveryCount;business_value_proof_ok=$businessValueProofOk;business_snapshot_before=$businessSnapshotBefore;business_snapshot_after=$businessSnapshotAfter;primary_business_delta_units=$primaryBusinessDeltaUnits;secondary_business_delta_units=$secondaryBusinessDeltaUnits;duplicate_business_delta_units=$duplicateBusinessDeltaUnits;idempotency_namespaces=@('userstats','placement','elite');log_line_count=$totalLogLines;previous_log_line_count=0;drain_detected=$drainDetected;consumer_log_sha256=(Get-TextSha256 $combinedLogText);candidate_sha=$candidate;pod=$pod;container=$container;pod_repo=$repo}
+    return [pscustomobject]@{ExitCode=0;Output=@("scenario=$scenario","observations=$(@($obs.observations).Count)","exceptions=$(@($obs.exceptions).Count)","offset_expectation=$offsetExpectation","expected_has_redis_residue=$expectedHasRedisResidue","expected_delivery_status=$expectedDeliveryStatus","delivery_status_ok=$deliveryStatusOk","post_pending_conflict_ok=$postPendingConflictOk","no_redis_side_effects_ok=$noRedisSideEffectsOk","pause_barrier_ok=$pauseBarrierOk","future_replay_ok=$futureReplayOk","cross_period_refund_ok=$crossPeriodRefundOk","duplicate_no_double_ok=$duplicateNoDoubleOk","business_value_proof_ok=$businessValueProofOk","primary_business_delta_units=$primaryBusinessDeltaUnits","secondary_business_delta_units=$secondaryBusinessDeltaUnits","candidate_sha=$candidate");Semantic=$semantic}
 }
 function Test-GitChangedPathAllowed([string]$Path, $Policy) {
     $value = ([string]$Path).Replace('\\','/').Trim()
@@ -1612,6 +1665,46 @@ function Test-UserStatsPeriodStateEqual($Before,$After) {
     return ([bool]$Before.exists -eq [bool]$After.exists -and [long]$Before.pv -eq [long]$After.pv -and [string]$Before.amount_encoding_version -eq [string]$After.amount_encoding_version)
 }
 
+function Invoke-PostPendingOrderConflictSeed($Pod,$Container,[string]$Repo,$Policy,[string]$OrderId,[int]$Period) {
+    $key="pvam:uat:work02:${ExecutionId}:order_ledger:$OrderId"
+    $deliveryKey="pvam:uat:work02:${ExecutionId}:event_delivery:$OrderId"
+    $spec=[ordered]@{key=$key;delivery_key=$deliveryKey;amount_units='0';period=$Period}
+    $specB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($spec|ConvertTo-Json -Compress)))
+    $code=@'
+import base64,json,os,redis,sys
+spec=json.loads(base64.b64decode(sys.argv[1])); key=str(spec['key']); delivery_key=str(spec['delivery_key']); expected={'amount_units':str(spec['amount_units']),'period':str(int(spec['period']))}
+r=redis.Redis(host=os.environ['PVAM_REDIS_HOST'],port=int(os.environ['PVAM_REDIS_PORT']),db=int(os.environ['PVAM_REDIS_DB']),password=os.environ.get('PVAM_REDIS_PASSWORD') or None,decode_responses=True)
+script="""
+local order_key=KEYS[1]
+local delivery_key=KEYS[2]
+if redis.call('EXISTS',delivery_key) ~= 0 then return {'DELIVERY_EXISTS','','',''} end
+local kind=redis.call('TYPE',order_key).ok
+local created='0'
+if kind == 'none' then
+  redis.call('HSET',order_key,'amount_units',ARGV[1],'period',ARGV[2])
+  created='1'
+elseif kind ~= 'hash' then
+  return {'WRONG_TYPE','','',''}
+end
+if redis.call('HLEN',order_key) ~= 2 or redis.call('HGET',order_key,'amount_units') ~= ARGV[1] or redis.call('HGET',order_key,'period') ~= ARGV[2] then
+  return {'FIELD_MISMATCH','','',''}
+end
+return {'OK',ARGV[1],ARGV[2],created}
+"""
+result=r.eval(script,2,key,delivery_key,expected['amount_units'],expected['period'])
+if not result or result[0]!='OK':raise RuntimeError('post-PENDING conflict seed precondition failed: '+str(result[0] if result else 'EMPTY'))
+print(json.dumps({'kind':'PostPendingOrderConflictSeed','key':key,'delivery_key':delivery_key,'delivery_absent_before':True,'amount_units':result[1],'period':int(result[2]),'created':result[3]=='1'},sort_keys=True))
+'@
+    $runtime=Invoke-RuntimePythonCommand $Pod $Container $Repo $Policy $code @($specB64)
+    if($runtime.ExitCode -ne 0){throw 'UAT_ENV_BLOCKED: post-PENDING conflict seed failed'}
+    $json=(@($runtime.Output|Where-Object{([string]$_).Trim().StartsWith('{')})|Select-Object -Last 1)
+    if(-not $json){throw 'UAT_ENV_BLOCKED: post-PENDING conflict seed evidence missing'}
+    try{$semantic=([string]$json)|ConvertFrom-Json}catch{throw 'UAT_ENV_BLOCKED: post-PENDING conflict seed evidence invalid'}
+    if([string]$semantic.kind -ne 'PostPendingOrderConflictSeed' -or [string]$semantic.key -ne $key -or [string]$semantic.delivery_key -ne $deliveryKey -or $semantic.delivery_absent_before -isnot [bool] -or -not [bool]$semantic.delivery_absent_before){throw 'UAT_ENV_BLOCKED: post-PENDING conflict seed identity/precondition mismatch'}
+    if([string]$semantic.amount_units -ne '0' -or [int]$semantic.period -ne $Period){throw 'UAT_ENV_BLOCKED: post-PENDING conflict seed value mismatch'}
+    return $semantic
+}
+
 function Invoke-ControllerUatProducer($Pod,$Container,[string]$Repo,$Policy,$Spec) {
     $specJson=$Spec|ConvertTo-Json -Depth 20 -Compress
     $specB64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($specJson))
@@ -1628,7 +1721,7 @@ def refund_payload(order_id,p,original,amount_value):
     return x
 def msg(topic,payload,partition=None): return {'topic':topic,'key':str(payload['order_id']),'payload':payload,'partition':partition}
 order_id=str(spec.get('order_id') or f'{scenario}-{period}-{seq}'); plan=[]
-if scenario in ('order','future-period','expired-period'):
+if scenario in ('order','future-period','expired-period','post-pending-order-conflict'):
     plan=[msg('pvam-pv-orders',order_payload(order_id,period,bv),part)]
 elif scenario=='refund':
     original=str(spec.get('original_order_id') or '')
@@ -1679,6 +1772,7 @@ function Invoke-KafkaScenarioProduce($Request, $Policy) {
     Assert-RequiredTokens @("exec", "test-data-write") "KafkaScenarioProduce"
     $scenario=([string]$Request.scenario).Trim()
     if(@($Policy.kafka_scenarios|ForEach-Object{[string]$_}) -notcontains $scenario){throw 'UAT_ACTION_POLICY_DENIED: unsupported Kafka UAT scenario'}
+    if($scenario -eq 'post-pending-order-conflict' -and (($Request.PSObject.Properties.Name -contains 'order_id') -or ($Request.PSObject.Properties.Name -contains 'seq'))){throw 'UAT_ACTION_POLICY_DENIED: post-pending-order-conflict identity is controller-owned'}
     if($Request.PSObject.Properties.Name -contains 'period_role'){throw 'UAT_ACTION_POLICY_DENIED: KafkaScenarioProduce period_role is controller-owned'}
     $periodRole=Get-ScenarioPolicyValue $Policy.scenario_period_role $scenario 'scenario_period_role';$requiredBoundRole=Get-ScenarioPolicyValue $Policy.scenario_required_bound_role $scenario 'scenario_required_bound_role';$latestLife=Get-LatestConsumerLifecycleSemantic
     if(-not $latestLife -or ([string]$latestLife.operation).ToLowerInvariant() -ne ("bind-{0}" -f $requiredBoundRole)){throw "UAT_ENV_BLOCKED: scenario required Consumer binding mismatch for $scenario expected=bind-$requiredBoundRole"}
@@ -1688,19 +1782,22 @@ function Invoke-KafkaScenarioProduce($Request, $Policy) {
     $ctx=Get-StageUatPeriodContext;$period=if($periodRole -eq 'secondary'){[int]$ctx.Secondary}else{[int]$ctx.Primary};if($scenario -eq 'cross-period-refund' -and [int]$ctx.Secondary -ne [int]$ctx.Primary+1){throw 'UAT_ACTION_POLICY_DENIED: cross-period-refund requires adjacent stage periods'}
     $hash=Get-TextSha256 $ExecutionId;$seq=[int](([Convert]::ToUInt32($hash.Substring(0,8),16)%900000)+1000);if($Request.PSObject.Properties.Name -contains 'seq'){$tmp=0;if(-not [int]::TryParse(([string]$Request.seq),[ref]$tmp)-or $tmp -lt 1 -or $tmp -gt 2000000000){throw 'UAT_ACTION_POLICY_DENIED: invalid Kafka seq'};$seq=$tmp}
     $marker="uat-$ExecutionId-";$orderId=([string]$Request.order_id).Trim();if(-not $orderId){$orderId="$marker$scenario-$seq"};if(-not $orderId.StartsWith($marker,[StringComparison]::Ordinal)){throw 'UAT_ACTION_POLICY_DENIED: order_id must use durable execution marker'}
+    Assert-SafeProducerValue $orderId 'order_id'
     $selectedPartition=$null;if($Request.PSObject.Properties.Name -contains 'partition'){$part=0;if(-not [int]::TryParse(([string]$Request.partition),[ref]$part)-or $part -lt 0 -or $part -gt 2){throw 'UAT_ACTION_POLICY_DENIED: partition must be 0..2'};$selectedPartition=$part}elseif($scenario -eq 'future-period'){$selectedPartition=[int]([Convert]::ToUInt32($hash.Substring(8,8),16)%3)}
     $spec=[ordered]@{scenario=$scenario;period=$period;seq=$seq;order_id=$orderId;user_id=$(if($Request.PSObject.Properties.Name -contains 'user_id'){([string]$Request.user_id).Trim()}else{'U-UAT-001'});bv=$(if($Request.PSObject.Properties.Name -contains 'bv'){([string]$Request.bv).Trim()}else{'1500.99'});amount=$(if($Request.PSObject.Properties.Name -contains 'amount'){([string]$Request.amount).Trim()}else{$null});drift_bv=$(if($Request.PSObject.Properties.Name -contains 'drift_bv'){([string]$Request.drift_bv).Trim()}else{'1501.00'});approved_at=$(if($Request.PSObject.Properties.Name -contains 'approved_at'){([string]$Request.approved_at).Trim()}else{$null});invalid_case=$(if($Request.PSObject.Properties.Name -contains 'invalid_case'){([string]$Request.invalid_case).Trim()}else{'bv-number'});partition=$selectedPartition;original_order_id=$(if($Request.PSObject.Properties.Name -contains 'original_order_id'){([string]$Request.original_order_id).Trim()}else{$null});refund_order_id=$(if($Request.PSObject.Properties.Name -contains 'refund_order_id'){([string]$Request.refund_order_id).Trim()}else{$null});forbidden_fields=@($Request.forbidden_fields|ForEach-Object{([string]$_).Trim()}|Where-Object{$_})}
+    if($scenario -eq 'post-pending-order-conflict'){$spec.bv='1500.99'}
     foreach($name in @('user_id','bv','drift_bv')){Assert-SafeProducerValue ([string]$spec[$name]) $name};foreach($name in @('amount','approved_at','invalid_case')){if($null -ne $spec[$name]){Assert-SafeProducerValue ([string]$spec[$name]) $name}}
     foreach($name in @('original_order_id','refund_order_id')){if($spec[$name]){Assert-SafeProducerValue ([string]$spec[$name]) $name;if(-not ([string]$spec[$name]).StartsWith($marker,[StringComparison]::Ordinal)){throw "UAT_ACTION_POLICY_DENIED: $name must use durable execution marker"}}}
     if($scenario -eq 'cross-period-refund' -and -not $spec.refund_order_id){$spec.refund_order_id="$marker$scenario-refund-$($seq+1)"}
     $businessSnapshotBefore=Invoke-UserStatsSnapshot $pod $container $repo $Policy ([string]$spec.user_id) @([int]$ctx.Primary,[int]$ctx.Secondary)
+    $faultSetup=$null;if($scenario -eq 'post-pending-order-conflict'){$faultSetup=Invoke-PostPendingOrderConflictSeed $pod $container $repo $Policy $orderId $period}
     $r=Invoke-ControllerUatProducer $pod $container $repo $Policy $spec;if($r.ExitCode -ne 0){return $r};$allOutput=New-Object System.Collections.Generic.List[string];foreach($line in @($r.Output)){$allOutput.Add([string]$line)}
     $futureGuardId='';if($scenario -eq 'future-period'){$futureGuardId="$marker"+"future-period-guard-$seq";$guardSpec=[ordered]@{scenario='order';period=[int]$ctx.Primary;seq=$seq+900001;order_id=$futureGuardId;user_id=[string]$spec.user_id;bv='0';partition=$selectedPartition};$guard=Invoke-ControllerUatProducer $pod $container $repo $Policy $guardSpec;if($guard.ExitCode -ne 0){throw 'UAT_ENV_BLOCKED: future-period guard delivery failed'};foreach($line in @($guard.Output)){$allOutput.Add([string]$line)}}
     $records=New-Object System.Collections.Generic.List[object]
     foreach($line in @($allOutput.ToArray())){$t=([string]$line).Trim();if(-not $t.StartsWith('{')){continue};try{$o=$t|ConvertFrom-Json}catch{continue};if(@($Policy.kafka_topics|ForEach-Object{[string]$_}) -notcontains [string]$o.topic){throw 'KAFKA_DELIVERY_EVIDENCE_INVALID: unexpected topic'};if($null -eq $o.partition -or $null -eq $o.offset){throw 'KAFKA_DELIVERY_EVIDENCE_INVALID: partition/offset missing'};$key=([string]$o.key).Trim();if(-not $key.StartsWith($marker,[StringComparison]::Ordinal)-and -not($scenario -eq 'drain-sentinel'-and $key.StartsWith("drain-sentinel-$period-",[StringComparison]::Ordinal))){throw 'KAFKA_DELIVERY_EVIDENCE_INVALID: key is not bound to durable execution identity'};$role=$scenario;if($scenario -eq 'cross-period-refund'){$role=if([string]$o.topic -eq 'pvam-pv-orders'){'original-order'}else{'refund'}}elseif($scenario -eq 'future-period'){$role=if($key -eq $futureGuardId){'guard'}else{'future'}}elseif($scenario -eq 'duplicate'){$role='duplicate'};$records.Add([pscustomobject]@{topic=[string]$o.topic;key=$key;partition=[int]$o.partition;offset=[long]$o.offset;period=[int]$o.payload.period;role=$role;payload=$o.payload;payload_sha256=[string]$o.payload_sha256;sent_at=[string]$o.sent_at})}
     if($records.Count -lt 1){throw 'KAFKA_DELIVERY_EVIDENCE_INVALID: controller UAT producer returned no delivery evidence'}
     if($scenario -eq 'future-period'){$future=@($records.ToArray()|Where-Object{[string]$_.role -eq 'future'});$guard=@($records.ToArray()|Where-Object{[string]$_.role -eq 'guard'});if($future.Count -ne 1 -or $guard.Count -ne 1 -or [int]$future[0].partition -ne [int]$guard[0].partition -or [long]$guard[0].offset -le [long]$future[0].offset){throw 'KAFKA_DELIVERY_EVIDENCE_INVALID: future-period pause guard is not ordered on same partition'}}
-    $deliveries=@($records.ToArray());$deliveredKeys=@($deliveries|ForEach-Object{[string]$_.key}|Select-Object -Unique);$r.Output=@($allOutput.ToArray());$r|Add-Member -NotePropertyName Semantic -NotePropertyValue ([pscustomobject]@{kind='KafkaScenarioResult';scenario=$scenario;period=$period;uat_execution_id=$ExecutionId;delivery_count=$deliveries.Count;delivered_keys=$deliveredKeys;deliveries=$deliveries;future_guard_identity=$futureGuardId;producer_authority='controller-owned-v20';uat_user_id=[string]$spec.user_id;business_snapshot_before=$businessSnapshotBefore}) -Force;return $r
+    $deliveries=@($records.ToArray());$deliveredKeys=@($deliveries|ForEach-Object{[string]$_.key}|Select-Object -Unique);$r.Output=@($allOutput.ToArray());$r|Add-Member -NotePropertyName Semantic -NotePropertyValue ([pscustomobject]@{kind='KafkaScenarioResult';scenario=$scenario;period=$period;uat_execution_id=$ExecutionId;delivery_count=$deliveries.Count;delivered_keys=$deliveredKeys;deliveries=$deliveries;future_guard_identity=$futureGuardId;fault_setup=$faultSetup;producer_authority='controller-owned-v20';uat_user_id=[string]$spec.user_id;business_snapshot_before=$businessSnapshotBefore}) -Force;return $r
 }
 function Get-ExpandedRedisPrefixes($Templates) {
     $ctx=Get-StageUatPeriodContext

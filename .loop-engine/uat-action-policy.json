@@ -189,6 +189,7 @@
     "cross-period-refund",
     "duplicate",
     "payload-drift",
+    "post-pending-order-conflict",
     "forbidden-field",
     "schema-invalid",
     "future-period",
@@ -210,6 +211,7 @@
       "cross-period-refund",
       "duplicate",
       "payload-drift",
+      "post-pending-order-conflict",
       "forbidden-field",
       "schema-invalid",
       "future-period",
@@ -306,6 +308,7 @@
       "cross-period-refund",
       "duplicate",
       "payload-drift",
+      "post-pending-order-conflict",
       "forbidden-field",
       "schema-invalid",
       "future-period",
@@ -325,9 +328,16 @@
   "consumer_exception_observe_timeout_seconds": 15,
   "scenario_expected_exception_reason": {
     "payload-drift": "EVENT_IDENTITY_CONFLICT",
+    "post-pending-order-conflict": "PERSISTENT_FAILURE",
     "forbidden-field": "D9B_FORBIDDEN_FIELD",
     "schema-invalid": "SCHEMA_VIOLATION",
     "expired-period": "EXPIRED_PERIOD"
+  },
+  "scenario_expected_has_redis_residue": {
+    "post-pending-order-conflict": true
+  },
+  "scenario_expected_delivery_status": {
+    "post-pending-order-conflict": "PENDING"
   },
   "scenario_expected_offset_semantics": {
     "order": "committed",
@@ -335,6 +345,7 @@
     "cross-period-refund": "committed",
     "duplicate": "committed",
     "payload-drift": "committed",
+    "post-pending-order-conflict": "committed",
     "forbidden-field": "committed",
     "schema-invalid": "committed",
     "expired-period": "committed",
@@ -348,6 +359,7 @@
     "cross-period-refund": "primary",
     "duplicate": "primary",
     "payload-drift": "primary",
+    "post-pending-order-conflict": "primary",
     "forbidden-field": "primary",
     "schema-invalid": "primary",
     "future-period": "secondary",
@@ -360,6 +372,7 @@
     "cross-period-refund": "primary",
     "duplicate": "primary",
     "payload-drift": "primary",
+    "post-pending-order-conflict": "primary",
     "forbidden-field": "primary",
     "schema-invalid": "primary",
     "future-period": "primary",
@@ -372,6 +385,7 @@
     "cross-period-refund": "secondary",
     "duplicate": "primary",
     "payload-drift": "primary",
+    "post-pending-order-conflict": "primary",
     "forbidden-field": "primary",
     "schema-invalid": "primary",
     "future-period": "primary",
