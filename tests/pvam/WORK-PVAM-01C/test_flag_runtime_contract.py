@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from Redishelper.PVAmountConfigBootstrap import (
     PUBLISH_SNAPSHOT_LUA,
-    build_argument_parser,
+    main as bootstrap_main,
     publish_manual_bootstrap,
 )
 from Redishelper.PVAmountConfigProvider import (
@@ -397,15 +397,29 @@ class FlagRuntimeContractTests(unittest.TestCase):
             enable_v2=True,
         )
         session = PVAmountRunSession.start(PVAmountConfigProvider(redis))
-        cli_args = build_argument_parser().parse_args(
-            ["--config-version", "2", "--expected-active-version", "1", "--enable-v2"]
-        )
 
         self.assertEqual("11", config.state)
         self.assertEqual("11", session.config.state)
         self.assertEqual("true", redis.hashes[f"{SNAPSHOT_KEY_PREFIX}1"][READ_FIELD])
         self.assertEqual("true", redis.hashes[f"{SNAPSHOT_KEY_PREFIX}1"][WRITE_FIELD])
-        self.assertTrue(cli_args.enable_v2)
+
+    def test_tc_flag_12_cli_enable_v2_wiring_publishes_11_and_defaults_to_01(self):
+        for extra_args, expected_state in ((["--enable-v2"], "11"), ([], "01")):
+            with self.subTest(expected_state=expected_state):
+                redis = FakeRedis()
+                with patch(
+                        "Redishelper.PVAmountConfigBootstrap._resolve_redis_client",
+                        return_value=redis,
+                ):
+                    exit_code = bootstrap_main(
+                        ["--config-version", "1", "--initial-create", *extra_args]
+                    )
+
+                self.assertEqual(0, exit_code)
+                self.assertEqual(
+                    expected_state,
+                    PVAmountConfigProvider(redis).load_run_config().state,
+                )
 
     def test_tc_flag_13_consumers_do_not_read_flags_directly(self):
         root = Path(__file__).resolve().parents[3]

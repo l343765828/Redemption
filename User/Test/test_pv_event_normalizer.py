@@ -1,5 +1,7 @@
+import ast
 from dataclasses import FrozenInstanceError
 import importlib
+from pathlib import Path
 
 import pytest
 
@@ -25,10 +27,6 @@ from Order.RefundReversalLedger import (
     RedisRefundReversalLedger,
     RefundReversalConflict,
 )
-
-
-# 仅构造历史未知字段参与哈希的合同用例；拆分字面量保留 AC-2 概念清理守卫的精度。
-LEGACY_SOURCE_FIELD = "source_" "system"
 
 
 @pytest.fixture
@@ -348,7 +346,7 @@ def test_legacy_source_field_participates_in_process_hash_conflict(
     normalizer.normalize_order(payload)
 
     with pytest.raises(EventIdentityConflict):
-        normalizer.normalize_order(dict(payload, **{LEGACY_SOURCE_FIELD: "LEGACY"}))
+        normalizer.normalize_order(dict(payload, **{"source_system": "LEGACY"}))
 
 
 def test_legacy_source_field_hits_delivery_conflict_after_restart(
@@ -380,8 +378,57 @@ def test_legacy_source_field_hits_delivery_conflict_after_restart(
 
     with pytest.raises(DeliveryIdentityConflict):
         restarted.normalize_order(
-            dict(payload, **{LEGACY_SOURCE_FIELD: "LEGACY"})
+            dict(payload, **{"source_system": "LEGACY"})
         )
+
+
+def test_legacy_source_constant_is_scoped_to_two_hash_regressions() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    target = "_".join(("source", "system"))
+    allowed = {
+        (
+            "User/Test/test_pv_event_normalizer.py",
+            "test_legacy_source_field_participates_in_process_hash_conflict",
+        ),
+        (
+            "User/Test/test_pv_event_normalizer.py",
+            "test_legacy_source_field_hits_delivery_conflict_after_restart",
+        ),
+    }
+    violations = []
+
+    for path in project_root.rglob("*.py"):
+        relative = path.relative_to(project_root)
+        relative_text = relative.as_posix()
+        if (
+            "__pycache__" in relative.parts
+            or "Doc4" in relative.parts
+            or "_bak" in path.name
+            or "_final" in path.name
+            or relative_text == "User/GraphService.py"
+        ):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        parents = {
+            child: parent
+            for parent in ast.walk(tree)
+            for child in ast.iter_child_nodes(parent)
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Constant) or node.value != target:
+                continue
+            owner = None
+            parent = parents.get(node)
+            while parent is not None:
+                if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    owner = parent.name
+                    break
+                parent = parents.get(parent)
+            location = (relative_text, owner)
+            if location not in allowed:
+                violations.append(f"{relative_text}:{node.lineno}:{owner}")
+
+    assert violations == []
 
 
 def test_exact_duplicate_event_is_noop(period_repository, order_ledger) -> None:

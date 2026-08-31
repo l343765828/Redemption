@@ -47,6 +47,7 @@ MAX_POLL_INTERVAL_MS = 600_000
 BOUNDED_RETRY_ATTEMPTS = 10
 RETRY_BACKOFF_BASE_S = 1
 CIRCUIT_BREAKER_THRESHOLD = 50
+MAX_BUFFERED_MESSAGES = 100
 
 _REQUIRED_ENV_NAMES = (
     "PVAM_KAFKA_BOOTSTRAP",
@@ -289,11 +290,14 @@ class PvEventConsumer:
         )
         try:
             while self.running:
-                msg = (
-                    self._buffered_messages.popleft()
-                    if self._buffered_messages
-                    else self.consumer.poll(1.0)
-                )
+                if self._buffered_messages:
+                    # drain 期间仍须 poll 维持 group 心跳；poll 到的新消息继续按原顺序暂存。
+                    self._poll_and_buffer(0.0)
+                    if not self.running:
+                        break
+                    msg = self._buffered_messages.popleft()
+                else:
+                    msg = self.consumer.poll(1.0)
                 if msg is not None:
                     self.process_message(msg)
         finally:
@@ -427,33 +431,50 @@ class PvEventConsumer:
         payload: Mapping[str, Any],
         exc: Exception,
     ) -> None:
-        # region 记录业务完成后的 offset 提交故障
+        # region 先重试业务完成后的 offset 提交
+        latest_exc = exc
+        attempt = 1
+        if self._is_retryable_kafka_exception(latest_exc):
+            self._pause_retry(msg)
+            while self.running:
+                self._heartbeat_backoff(attempt)
+                if not self.running:
+                    return
+                try:
+                    self.consumer.commit(message=msg, asynchronous=False)
+                except Exception as retry_exc:
+                    latest_exc = retry_exc
+                    if not self._is_retryable_kafka_exception(latest_exc):
+                        break
+                    attempt += 1
+                    continue
+
+                self._reset_failure_counters()
+                self._resume_retry(self._partition_key(msg))
+                return
+        # endregion
+
+        # region 记录不可重试的 post-dispatch commit 故障
         decision = FailureDecision(
             3,
-            "UNKNOWN",
-            True,
+            "ACK",
+            False,
             "OFFSET_COMMIT_FAILURE",
         )
         record = self._build_exception_record(
             msg,
             payload,
-            exc,
+            latest_exc,
             decision,
             extra={
                 "completed_stages": list(_STAGE_ORDER),
                 "pending_stages": [],
             },
         )
-        # offset 故障不是脏业务消息，不计入永久失败熔断；异常消息仅发送一次，
-        # 后续失败只重试同一 offset commit，避免异常 topic 重复放大。
+        # 可重试抖动已经在上方吸收；这里只为需要重投的不可重试提交留下审计记录。
         if not self._send_exception_with_retry(msg, record):
             return
-        if not self._commit_exception_offset_with_retry(msg):
-            return
-        self._reset_failure_counters()
-        partition_key = self._partition_key(msg)
-        if partition_key in self._retry_pauses:
-            self._resume_retry(partition_key)
+        self.running = False
         # endregion
 
     def _handle_dispatch_failure(
@@ -480,8 +501,8 @@ class PvEventConsumer:
             frame_names,
             boundary_crossed,
         )
-        # 无法证明仍在 PENDING 之前时按有残留处理，避免给人工补偿错误的清理提示。
-        conservative_residue = residue is not False
+        # 同一异常类型可能出现在 PENDING 前后，类别必须按失败点判断，不能只按类型归类。
+        # 异常文本不是稳定协议；永久封期与瞬时锁冲突可能同为 RuntimeError，禁止匹配文案猜测。
         if isinstance(exc, EventIdentityConflict):
             return FailureDecision(1, failed_stage, False, "EVENT_IDENTITY_CONFLICT")
         if isinstance(
@@ -495,19 +516,19 @@ class PvEventConsumer:
         ):
             return FailureDecision(3, failed_stage, True, "PERSISTENT_FAILURE")
         if isinstance(exc, PeriodResolutionError):
-            category = 3 if conservative_residue else 1
+            category = 3 if residue is True else 1
             return FailureDecision(
                 category,
                 failed_stage,
-                conservative_residue,
+                residue,
                 "PERIOD_RESOLUTION_ERROR",
             )
         if isinstance(exc, (TypeError, ValueError, OverflowError)):
-            category = 3 if conservative_residue else 1
+            category = 3 if residue is True else 1
             return FailureDecision(
                 category,
                 failed_stage,
-                conservative_residue,
+                residue,
                 "SCHEMA_VIOLATION" if category == 1 else "PERSISTENT_FAILURE",
             )
         if self._transient_exception_types and isinstance(
@@ -517,41 +538,34 @@ class PvEventConsumer:
             return FailureDecision(
                 2,
                 failed_stage,
-                conservative_residue,
+                residue,
                 "TRANSIENT_FAILURE",
             )
         if self._is_retryable_kafka_exception(exc):
             return FailureDecision(
                 2,
                 failed_stage,
-                conservative_residue,
+                residue,
                 "TRANSIENT_FAILURE",
             )
         if isinstance(exc, (OriginalOrderUnavailable, DeliveryStateUnavailable)):
             return FailureDecision(
                 4,
                 failed_stage,
-                conservative_residue,
+                residue,
                 "RETRY_EXHAUSTED",
             )
         if type(exc) is RuntimeError:
-            if residue is True:
-                return FailureDecision(
-                    3,
-                    failed_stage,
-                    True,
-                    "PERSISTENT_FAILURE",
-                )
             return FailureDecision(
                 4,
                 failed_stage,
-                conservative_residue,
+                residue,
                 "RETRY_EXHAUSTED",
             )
         return FailureDecision(
             4,
             failed_stage,
-            conservative_residue,
+            residue,
             "RETRY_EXHAUSTED",
             unclassified=True,
         )
@@ -666,17 +680,29 @@ class PvEventConsumer:
         )
         deadline = time.monotonic() + delay
         first_poll = True
+        # pause 只阻止业务分区继续取数；退避期仍须 poll 维持心跳，避免被逐出 consumer group。
         while self.running and (first_poll or time.monotonic() < deadline):
             first_poll = False
             remaining = max(0.0, deadline - time.monotonic())
             try:
-                heartbeat_message = self.consumer.poll(min(1.0, remaining))
+                self._poll_and_buffer(min(1.0, remaining))
             except Exception:
                 logger.warning("阻断退避期间 Kafka 心跳 poll 失败")
-                continue
-            if heartbeat_message is not None:
-                # 关闭 auto offset store 后可安全暂存其他分区消息，避免心跳 poll 将它们吞掉。
-                self._buffered_messages.append(heartbeat_message)
+
+    def _poll_and_buffer(self, timeout: float) -> None:
+        heartbeat_message = self.consumer.poll(timeout)
+        if heartbeat_message is None:
+            return
+        if len(self._buffered_messages) >= MAX_BUFFERED_MESSAGES:
+            # 当前消息及队列内容都未提交；停机可让 Kafka 重投，不能用 deque(maxlen) 静默丢单。
+            logger.critical(
+                "Kafka heartbeat buffer reached safe bound=%s; stopping for replay",
+                MAX_BUFFERED_MESSAGES,
+            )
+            self.running = False
+            return
+        # 关闭 auto offset store 后暂存其他分区消息，避免心跳 poll 将它们吞掉。
+        self._buffered_messages.append(heartbeat_message)
 
     def _check_drain_complete(self, detected_period: Optional[int] = None) -> None:
         assignment = {
@@ -805,15 +831,35 @@ class PvEventConsumer:
             if isinstance(identity, str) and identity
             else f"{msg.topic()}:{msg.partition()}:{msg.offset()}"
         )
-        self.producer.produce(
-            TOPIC_EXCEPTIONS,
-            key=key.encode("utf-8"),
-            value=json.dumps(
+        try:
+            serialized = json.dumps(
                 record,
                 ensure_ascii=False,
                 separators=(",", ":"),
                 sort_keys=True,
-            ).encode("utf-8"),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError):
+            # 非规范原始 JSON 仍须生成严格可解析的补偿记录，不能阻断异常投递后提交。
+            safe_record = dict(record)
+            safe_record["original_payload"] = repr(record.get("original_payload"))
+            safe_record["non_canonical_payload"] = True
+            for field_name in ("event_identity", "period", "user_id"):
+                try:
+                    json.dumps(safe_record.get(field_name), allow_nan=False)
+                except (TypeError, ValueError):
+                    safe_record[field_name] = repr(safe_record.get(field_name))
+            serialized = json.dumps(
+                safe_record,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            )
+        self.producer.produce(
+            TOPIC_EXCEPTIONS,
+            key=key.encode("utf-8"),
+            value=serialized.encode("utf-8"),
             callback=delivery_report,
         )
         remaining = self.producer.flush(10)

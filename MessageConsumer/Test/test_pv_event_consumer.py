@@ -108,6 +108,7 @@ class FakeConsumer:
         self.pauses = []
         self.resumes = []
         self.poll_count = 0
+        self.poll_timeouts = []
         self.closed = False
         self.subscriptions = []
         self.poll_results = deque()
@@ -125,6 +126,7 @@ class FakeConsumer:
 
     def poll(self, timeout):
         self.poll_count += 1
+        self.poll_timeouts.append(timeout)
         if self.poll_hook is not None:
             self.poll_hook()
         return self.poll_results.popleft() if self.poll_results else None
@@ -168,6 +170,7 @@ class FakeProducer:
                 "topic": topic,
                 "key": key.decode("utf-8"),
                 "payload": payload,
+                "raw_value": value,
             }
         )
         error = self.errors.popleft() if self.errors else None
@@ -349,13 +352,17 @@ def test_future_period_with_empty_assignment_does_not_false_drain(settings):
     assert subject.running is True
 
 
-def test_all_assigned_partitions_must_report_boundary_before_drain(settings):
+def test_all_assigned_partitions_must_report_boundary_before_drain(
+    settings,
+    caplog,
+):
     assignments = [
         PartitionRef(TOPIC_ORDERS, 0),
         PartitionRef(TOPIC_REFUNDS, 0),
     ]
     consumer = FakeConsumer(assignments=assignments)
     subject = build_subject(settings, consumer=consumer)
+    caplog.set_level(logging.CRITICAL, logger="MessageConsumer.PvEventConsumer")
 
     subject.process_message(FakeMessage(valid_order(period=42), partition=0))
     assert subject.running is True
@@ -375,6 +382,14 @@ def test_all_assigned_partitions_must_report_boundary_before_drain(settings):
 
     assert subject.running is False
     assert consumer.commits == []
+    critical_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.CRITICAL
+    ]
+    assert critical_messages == [
+        "PERIOD DRAIN COMPLETE: bound=41 detected=42, safe to rebind"
+    ]
 
 
 def test_expired_previous_period_is_forwarded_with_laggard_marker(settings):
@@ -438,6 +453,106 @@ def test_transient_failure_pauses_polls_heartbeats_resumes_and_commits(settings)
     assert consumer.poll_count >= 1
     assert consumer.resumes == [PartitionRef(TOPIC_ORDERS, 0)]
     assert consumer.commits == [(message, False)]
+
+
+def test_nonzero_backoff_polls_more_than_once(monkeypatch, settings):
+    clock = [0.0]
+    retry_settings = replace(settings, retry_backoff_base_s=2)
+    consumer = FakeConsumer()
+    consumer.poll_hook = lambda: clock.__setitem__(0, clock[0] + 0.5)
+    subject = build_subject(retry_settings, consumer=consumer)
+    monkeypatch.setattr(
+        "MessageConsumer.PvEventConsumer.time.monotonic",
+        lambda: clock[0],
+    )
+
+    subject._heartbeat_backoff(1)
+
+    assert consumer.poll_count == 4
+
+
+@pytest.mark.parametrize(
+    ("attempt", "expected_seconds"),
+    [(1, 1), (2, 2), (3, 4), (4, 8), (5, 16), (6, 30), (7, 30)],
+)
+def test_backoff_delay_doubles_and_caps_at_thirty_seconds(
+    monkeypatch,
+    settings,
+    attempt,
+    expected_seconds,
+):
+    clock = [0.0]
+    retry_settings = replace(settings, retry_backoff_base_s=1)
+    consumer = FakeConsumer()
+    consumer.poll_hook = lambda: clock.__setitem__(0, clock[0] + 1)
+    subject = build_subject(retry_settings, consumer=consumer)
+    monkeypatch.setattr(
+        "MessageConsumer.PvEventConsumer.time.monotonic",
+        lambda: clock[0],
+    )
+
+    subject._heartbeat_backoff(attempt)
+
+    assert consumer.poll_count == expected_seconds
+
+
+def test_heartbeat_buffer_overflow_stops_without_exceeding_bound(
+    monkeypatch,
+    settings,
+):
+    clock = [0.0]
+    retry_settings = replace(settings, retry_backoff_base_s=1)
+    consumer = FakeConsumer()
+    consumer.poll_results.extend(
+        FakeMessage(valid_order(order_id=f"O-BUFFER-{index}"), partition=1)
+        for index in range(101)
+    )
+    consumer.poll_hook = lambda: (
+        clock.__setitem__(0, 2.0) if consumer.poll_count >= 101 else None
+    )
+    subject = build_subject(retry_settings, consumer=consumer)
+    monkeypatch.setattr(
+        "MessageConsumer.PvEventConsumer.time.monotonic",
+        lambda: clock[0],
+    )
+
+    subject._heartbeat_backoff(1)
+
+    assert len(subject._buffered_messages) <= 100
+    assert subject.running is False
+    assert consumer.commits == []
+
+
+def test_heartbeat_buffered_message_is_polled_during_drain_and_committed_once(
+    settings,
+):
+    coordinator = SequenceCoordinator(
+        [TransientFailure("redis down"), SimpleNamespace(disposition="APPLY")]
+    )
+    consumer = FakeConsumer()
+    buffered = FakeMessage(
+        valid_order(order_id="O-BUFFERED"),
+        partition=1,
+        offset=11,
+    )
+    consumer.poll_results.append(buffered)
+    subject = build_subject(settings, coordinator=coordinator, consumer=consumer)
+    current = FakeMessage(valid_order(order_id="O-CURRENT"), partition=0)
+
+    subject.process_message(current)
+    assert list(subject._buffered_messages) == [buffered]
+    consumer.poll_hook = lambda: (
+        setattr(subject, "running", False) if consumer.poll_count >= 3 else None
+    )
+    subject.run()
+
+    assert consumer.poll_timeouts[1] == 0.0
+    assert coordinator.calls == [
+        ("ORDER", valid_order(order_id="O-CURRENT")),
+        ("ORDER", valid_order(order_id="O-CURRENT")),
+        ("ORDER", valid_order(order_id="O-BUFFERED")),
+    ]
+    assert consumer.commits == [(current, False), (buffered, False)]
 
 
 def test_transient_retry_stops_without_commit_or_resume_on_shutdown(settings):
@@ -602,10 +717,9 @@ def test_period_resolution_error_marks_possible_wiring_failure(settings):
         (TypeError, "PERSISTENT_FAILURE"),
         (OverflowError, "PERSISTENT_FAILURE"),
         (PeriodResolutionError, "PERIOD_RESOLUTION_ERROR"),
-        (RuntimeError, "PERSISTENT_FAILURE"),
     ],
 )
-def test_post_prepare_delivery_failures_are_category_three(
+def test_post_prepare_delivery_validation_failures_are_category_three(
     settings,
     exception_type,
     expected_reason,
@@ -643,6 +757,74 @@ def test_post_prepare_delivery_failures_are_category_three(
     assert normalizer.attempts == 1
     assert failure["reason"] == expected_reason
     assert failure["has_redis_residue"] is True
+
+
+@pytest.mark.parametrize("failed_stage", ["placement", "ack"])
+def test_stage_runtime_error_retries_full_budget_with_residue(
+    settings,
+    failed_stage,
+):
+    class RuntimeErrorNormalizer(PvEventNormalizer):
+        ack_attempts = 0
+
+        def acknowledge_dispatched(self, *args, **kwargs):
+            self.ack_attempts += 1
+            if failed_stage == "ack":
+                raise RuntimeError("ambiguous ACK failure")
+            return super().acknowledge_dispatched(*args, **kwargs)
+
+    class UserStage:
+        def update_elite_performance(self, **_kwargs):
+            return None
+
+    class PlacementStage:
+        attempts = 0
+
+        def update_placement_performance(self, **_kwargs):
+            self.attempts += 1
+            if failed_stage == "placement":
+                raise RuntimeError("ambiguous placement failure")
+
+    class EliteStage:
+        def update_elite_bonus_incremental(self, **_kwargs):
+            return None
+
+    normalizer = RuntimeErrorNormalizer(
+        PeriodResolver(
+            MappingPeriodRepository(
+                [{"PERIOD_NUM": 41, "CALC_YEAR": 2099, "CALC_MONTH": 6}]
+            )
+        ),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=InMemoryConsumedOrderLedger(),
+        delivery_ledger=InMemoryPvEventDeliveryLedger(),
+    )
+    placement = PlacementStage()
+    coordinator = PvEventDispatchCoordinator(
+        normalizer,
+        user_stats_service=UserStage(),
+        placement_service=placement,
+        elite_bonus_service=EliteStage(),
+    )
+    consumer = FakeConsumer()
+    producer = FakeProducer()
+    subject = build_subject(
+        settings,
+        coordinator=coordinator,
+        consumer=consumer,
+        producer=producer,
+    )
+
+    subject.process_message(FakeMessage(valid_order()))
+
+    failure = producer.records[-1]["payload"]
+    attempts = placement.attempts if failed_stage == "placement" else normalizer.ack_attempts
+    assert attempts == settings.bounded_retry_attempts
+    assert failure["reason"] == "RETRY_EXHAUSTED"
+    assert failure["has_redis_residue"] is True
+    assert consumer.pauses == [PartitionRef(TOPIC_ORDERS, 0)]
+    assert consumer.resumes == [PartitionRef(TOPIC_ORDERS, 0)]
 
 
 def test_runtime_error_retries_to_budget_then_forwards_and_resumes(settings):
@@ -788,6 +970,54 @@ def test_exception_message_contains_full_schema_and_fallback_key(settings):
     assert record["key"] == f"{TOPIC_ORDERS}:2:99"
 
 
+def test_non_canonical_number_is_forwarded_as_strict_json(settings):
+    normalizer = PvEventNormalizer(
+        PeriodResolver(
+            MappingPeriodRepository(
+                [{"PERIOD_NUM": 41, "CALC_YEAR": 2099, "CALC_MONTH": 6}]
+            )
+        ),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=InMemoryConsumedOrderLedger(),
+        delivery_ledger=InMemoryPvEventDeliveryLedger(),
+    )
+    coordinator = PvEventDispatchCoordinator(
+        normalizer,
+        user_stats_service=SimpleNamespace(
+            update_elite_performance=lambda **_kwargs: None
+        ),
+        placement_service=SimpleNamespace(
+            update_placement_performance=lambda **_kwargs: None
+        ),
+        elite_bonus_service=SimpleNamespace(
+            update_elite_bonus_incremental=lambda **_kwargs: None
+        ),
+    )
+    consumer = FakeConsumer()
+    producer = FakeProducer()
+    subject = build_subject(
+        settings,
+        coordinator=coordinator,
+        consumer=consumer,
+        producer=producer,
+    )
+    message = FakeMessage(
+        raw=(
+            b'{"order_id":"O-NAN","user_id":"U-1","period":41,'
+            b'"bv":"100.25","note":NaN}'
+        )
+    )
+
+    subject.process_message(message)
+
+    record = producer.records[-1]
+    assert b"NaN" not in record["raw_value"]
+    assert record["payload"]["non_canonical_payload"] is True
+    assert isinstance(record["payload"]["original_payload"], str)
+    assert consumer.commits == [(message, False)]
+
+
 def test_permanent_failure_emits_sanitized_error_log(settings, caplog):
     connection_uri = "redis://operator:test-password@redis.invalid:6379/0"
     producer = FakeProducer()
@@ -863,20 +1093,7 @@ def test_exception_delivery_retry_resumes_partition_after_confirmed_commit(setti
     assert consumer.resumes == [PartitionRef(TOPIC_ORDERS, 0)]
 
 
-@pytest.mark.parametrize(
-    ("commit_error", "recovers", "expected_running"),
-    [
-        (FakeKafkaException(FakeRetriableKafkaError()), True, True),
-        (FakeKafkaException(FakeNonRetriableKafkaError()), False, False),
-    ],
-    ids=("retryable", "non-retryable"),
-)
-def test_dispatch_success_commit_failure_reports_completed_business_stages(
-    settings,
-    commit_error,
-    recovers,
-    expected_running,
-):
+def test_dispatch_success_retries_commit_before_publishing_failure(settings):
     class PostDispatchCommitFailureConsumer(FakeConsumer):
         def __init__(self):
             super().__init__()
@@ -884,8 +1101,8 @@ def test_dispatch_success_commit_failure_reports_completed_business_stages(
 
         def commit(self, *, message, asynchronous):
             self.commit_attempts += 1
-            if self.commit_attempts == 1 or not recovers:
-                raise commit_error
+            if self.commit_attempts == 1:
+                raise FakeKafkaException(FakeRetriableKafkaError())
             super().commit(message=message, asynchronous=asynchronous)
 
     consumer = PostDispatchCommitFailureConsumer()
@@ -903,16 +1120,42 @@ def test_dispatch_success_commit_failure_reports_completed_business_stages(
     subject.process_message(message)
 
     assert len(coordinator.calls) == 1
+    assert producer.records == []
+    assert consumer.commit_attempts == 2
+    assert consumer.commits == [(message, False)]
+    assert subject.running is True
+
+
+def test_dispatch_success_non_retryable_commit_failure_reports_completed_business(
+    settings,
+):
+    class NonRetryableCommitConsumer(FakeConsumer):
+        def commit(self, *, message, asynchronous):
+            raise FakeKafkaException(FakeNonRetriableKafkaError())
+
+    consumer = NonRetryableCommitConsumer()
+    producer = FakeProducer()
+    coordinator = SequenceCoordinator()
+    subject = build_subject(
+        settings,
+        coordinator=coordinator,
+        consumer=consumer,
+        producer=producer,
+        kafka_exception_types=(FakeKafkaException,),
+    )
+
+    subject.process_message(FakeMessage(valid_order()))
+
+    assert len(coordinator.calls) == 1
     assert len(producer.records) == 1
     record = producer.records[0]["payload"]
-    assert record["failed_stage"] == "UNKNOWN"
+    assert record["failed_stage"] == "ACK"
     assert record["completed_stages"] == list(_STAGE_ORDER)
     assert record["pending_stages"] == []
-    assert record["has_redis_residue"] is True
+    assert record["has_redis_residue"] is False
     assert record["reason"] == "OFFSET_COMMIT_FAILURE"
-    assert consumer.commit_attempts == 2
-    assert consumer.commits == ([(message, False)] if recovers else [])
-    assert subject.running is expected_running
+    assert consumer.commits == []
+    assert subject.running is False
 
 
 def test_retry_dispatch_commit_failure_does_not_repeat_completed_dispatch(settings):
@@ -945,7 +1188,7 @@ def test_retry_dispatch_commit_failure_does_not_repeat_completed_dispatch(settin
 
     assert len(coordinator.calls) == 2
     assert consumer.commits == [(message, False)]
-    assert producer.records[0]["payload"]["completed_stages"] == list(_STAGE_ORDER)
+    assert producer.records == []
 
 
 def test_retryable_exception_offset_commit_is_retried_without_losing_message(settings):
@@ -1155,7 +1398,7 @@ def test_real_coordinator_stage_attribution_matches_done_markers(
     } == set(expected_completed)
 
 
-def test_unraised_unknown_failure_defaults_to_residue_present(settings):
+def test_unraised_unknown_failure_keeps_residue_unknown(settings):
     subject = build_subject(settings)
     error = Exception("no traceback")
 
@@ -1168,8 +1411,8 @@ def test_unraised_unknown_failure_defaults_to_residue_present(settings):
     )
 
     assert decision.unclassified is True
-    assert decision.has_redis_residue is True
-    assert record["has_redis_residue"] is True
+    assert decision.has_redis_residue is None
+    assert record["has_redis_residue"] is None
 
 
 def test_circuit_breaker_stops_after_threshold_and_success_resets(settings):
@@ -1218,13 +1461,22 @@ def test_expired_period_uses_an_independent_circuit_counter(settings):
 
 def test_message_errors_do_not_enter_business_or_commit(settings):
     coordinator = SequenceCoordinator()
-    subject = build_subject(settings, coordinator=coordinator)
+    consumer = FakeConsumer()
+    subject = build_subject(
+        settings,
+        coordinator=coordinator,
+        consumer=consumer,
+    )
     subject.process_message(FakeMessage(raw=None, error=FakeKafkaError(fatal=False)))
     assert subject.running is True
+    assert consumer.commits == []
+    assert consumer.pauses == []
     subject.process_message(FakeMessage(raw=None, error=FakeKafkaError(fatal=True)))
 
     assert subject.running is False
     assert coordinator.calls == []
+    assert consumer.commits == []
+    assert consumer.pauses == []
 
 
 def test_topic_guard_stops_before_payload_processing(settings):
