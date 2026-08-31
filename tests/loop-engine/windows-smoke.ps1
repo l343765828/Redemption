@@ -170,7 +170,7 @@ public static class LoopNativeProbe {
         $ErrorActionPreference = $prevEap
     }
     if ($claudeHelpExit -ne 0) { throw "claude CLI rejected --setting-sources=: exit=$claudeHelpExit output=$($claudeHelp -join ' ')" }
-    $supportedClaudeEfforts = @("low", "medium", "high", "xhigh", "max")
+    $supportedClaudeEfforts = @("low", "medium", "high", "xhigh", "max", "ultracode")
     foreach ($effortEnvName in @("OPUS_CLAUDE_EFFORT", "FABLE_CLAUDE_EFFORT")) {
         $configuredEffort = [Environment]::GetEnvironmentVariable($effortEnvName)
         if ($configuredEffort -and $configuredEffort -notin $supportedClaudeEfforts) {
