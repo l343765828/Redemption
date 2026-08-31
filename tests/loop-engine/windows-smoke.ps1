@@ -170,6 +170,13 @@ public static class LoopNativeProbe {
         $ErrorActionPreference = $prevEap
     }
     if ($claudeHelpExit -ne 0) { throw "claude CLI rejected --setting-sources=: exit=$claudeHelpExit output=$($claudeHelp -join ' ')" }
+    $supportedClaudeEfforts = @("low", "medium", "high", "xhigh", "max")
+    foreach ($effortEnvName in @("OPUS_CLAUDE_EFFORT", "FABLE_CLAUDE_EFFORT")) {
+        $configuredEffort = [Environment]::GetEnvironmentVariable($effortEnvName)
+        if ($configuredEffort -and $configuredEffort -notin $supportedClaudeEfforts) {
+            throw "$effortEnvName uses unsupported Claude CLI effort '$configuredEffort'"
+        }
+    }
     Write-Host "[CLAUDE-ARGV-SMOKE] PASS"
 
     # Native stderr regression: with script-wide Stop, a negative native command
@@ -501,18 +508,23 @@ $permOverride = Join-Path $permRoot "override.md"
 $permProtocol = Join-Path $permRoot "protocol.md"
 $permSettings = Join-Path $permRoot "settings.json"
 $permAgents = Join-Path $permRoot "master-AGENTS.md"
+$permRunner = Join-Path $permRoot "claude-verifier-runner.ps1"
+$sourceRunnerScript = Join-Path $env:MAINREPO ".loop-engine\claude-verifier-runner.ps1"
 $permUtf8 = New-Object System.Text.UTF8Encoding($false)
 $permEnvNames = @(
     "OUTDIR", "WORKTREE", "SSH_URL", "BRANCH", "VERIFIER_STAGE", "VERIFIER_RESULT_FILE",
     "CLAUDE_MODEL", "CLAUDE_EFFORT", "VERIFIER_PROMPT", "VERIFIER_OVERRIDE", "VERIFIER_PROTOCOL",
     "VERIFIER_SETTINGS", "VERIFIER_RUNTIME_DIR", "VERIFIER_HISTORY_DIR", "VERIFIER_STATE_DIR",
-    "VERIFIER_PROGRESS", "VERIFIER_RESUME_CONTEXT", "LOOP_FINAL_UAT_PERIOD_SLOT",
+    "VERIFIER_PROGRESS", "VERIFIER_RESUME_CONTEXT", "VERIFIER_EFFECTIVE_SETTINGS", "VERIFIER_CANDIDATE_SHA",
+    "VERIFIER_FINGERPRINT", "VERIFIER_RESUME_MODE", "CLAUDE_REUSE_SESSION", "LOOP_CYCLE", "LOOP_ROUND",
+    "LOOP_FINAL_UAT_PERIOD_SLOT",
     "LOOP_FINAL_UAT_PERIOD_PRIMARY", "LOOP_FINAL_UAT_PERIOD_SECONDARY", "LOOP_FINAL_UAT_PERIOD_POOL_SHA256",
     "LOOP_UAT_AUTHORIZATION_ID", "LOOP_UAT_AUTHORIZED_ACTIONS", "LOOP_UAT_AUTHORIZATION_SCOPE_SHA256",
     "LOOP_UAT_AUTHORIZATION_ACTOR", "LOOP_UAT_AUTHORIZATION_STAGE", "LOOP_UAT_CYCLE_SCOPE_SHA256", "LOOP_UAT_EXECUTION_ID",
     "LOOP_UAT_TARGET_NAMESPACE", "LOOP_UAT_RESOURCE_SCOPE", "LOOP_UAT_TARGET_BRANCH", "LOOP_UAT_IMPACT_SCOPE",
     "LOOP_MASTER_AGENTS_SNAPSHOT", "LOOP_MASTER_AGENTS_SHA256", "UAT_ACTION_PROXY_ALLOW",
-    "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_ENV"
+    "VERIFIER_RUNNER_SCRIPT", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_ENV",
+    "FAKE_CLAUDE_ARGV_CAPTURE", "FAKE_CLAUDE_MODE", "PATH"
 )
 $permSavedEnv = @{}
 foreach ($name in $permEnvNames) { $permSavedEnv[$name] = [Environment]::GetEnvironmentVariable($name) }
@@ -538,6 +550,7 @@ try {
     [IO.File]::WriteAllText($permProtocol, "protocol`n", $permUtf8)
     [IO.File]::WriteAllText($permSettings, "{}`n", $permUtf8)
     [IO.File]::WriteAllText($permAgents, "# agents`n", $permUtf8)
+    Copy-Item -LiteralPath $sourceRunnerScript -Destination $permRunner
     $opusPinDir = Join-Path $permOut "verifier-state\opus"
     New-Item -ItemType Directory -Force $opusPinDir | Out-Null
     [IO.File]::WriteAllText((Join-Path $opusPinDir "UAT_REPORT.pre-fable.md"), "# report`n", $permUtf8)
@@ -551,7 +564,7 @@ try {
     $env:VERIFIER_STAGE = "FABLE"
     $env:VERIFIER_RESULT_FILE = Join-Path $permOut "uat-result.txt"
     $env:CLAUDE_MODEL = "fable"
-    $env:CLAUDE_EFFORT = "ultracode"
+    $env:CLAUDE_EFFORT = "max"
     $env:VERIFIER_PROMPT = $permPrompt
     $env:VERIFIER_OVERRIDE = $permOverride
     $env:VERIFIER_PROTOCOL = $permProtocol
@@ -579,12 +592,26 @@ try {
     $env:LOOP_MASTER_AGENTS_SNAPSHOT = $permAgents
     $env:LOOP_MASTER_AGENTS_SHA256 = $permAgentsSha
     $env:UAT_ACTION_PROXY_ALLOW = $permProxyAllow
+    $env:VERIFIER_RUNNER_SCRIPT = $permRunner
     $env:GITHUB_RUN_ID = "123456"
     $env:GITHUB_RUN_ATTEMPT = "1"
     $env:GITHUB_ENV = $permGithubEnv
 
     & $prepareScript
     if ($LASTEXITCODE -ne 0) { throw "permission integration prepare failed: $LASTEXITCODE" }
+    $firstRunnerProgress = [IO.File]::ReadAllText($env:VERIFIER_PROGRESS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    [IO.File]::AppendAllText($permRunner, "`n# fingerprint smoke change`n", $permUtf8)
+    $env:GITHUB_RUN_ID = "1234561"
+    & $prepareScript
+    if ($LASTEXITCODE -ne 0) { throw "runner fingerprint integration prepare failed: $LASTEXITCODE" }
+    $secondRunnerProgress = [IO.File]::ReadAllText($env:VERIFIER_PROGRESS, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    if ([string]$firstRunnerProgress.input_fingerprint -eq [string]$secondRunnerProgress.input_fingerprint) {
+        throw "Claude runner content change did not invalidate the verifier checkpoint fingerprint"
+    }
+    if ([string]$secondRunnerProgress.claude_runner_sha256 -ne (Get-FileHash -Algorithm SHA256 $permRunner).Hash.ToLowerInvariant()) {
+        throw "verifier checkpoint did not record the active Claude runner SHA-256"
+    }
+    Write-Host "[CLAUDE-RUNNER-FINGERPRINT-SMOKE] PASS"
     $effectiveSettingsPath = Join-Path $permRuntime "verifier-settings.effective.json"
     if (-not (Test-Path $effectiveSettingsPath)) { throw "permission integration effective settings missing" }
     $effectiveSettings = [IO.File]::ReadAllText($effectiveSettingsPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
@@ -601,6 +628,82 @@ try {
         if ($allow -contains $protected -or $deny -notcontains $protected) { throw "permission integration protected evidence mismatch: $protected" }
     }
     Write-Host "[FABLE-PERMISSION-INTEGRATION-SMOKE] PASS"
+
+    # Execute the real runner against a local fake Claude binary. This catches
+    # PowerShell argument-binding regressions without making a network request.
+    $fakeBin = Join-Path $permRoot "fake-bin"
+    New-Item -ItemType Directory -Force $fakeBin | Out-Null
+    $fakeClaudeSource = @"
+using System;
+using System.IO;
+public static class LoopEngineFakeClaude {
+    public static int Main(string[] args) {
+        File.WriteAllLines(Environment.GetEnvironmentVariable("FAKE_CLAUDE_ARGV_CAPTURE"), args);
+        Console.In.ReadToEnd();
+        string mode = Environment.GetEnvironmentVariable("FAKE_CLAUDE_MODE") ?? "valid";
+        if (mode == "plain") {
+            Console.WriteLine("plain text must be rejected");
+            return 0;
+        }
+        string model = mode == "wrong-model" ? "claude-sonnet-smoke" : "claude-fable-smoke";
+        Console.WriteLine("{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"00000000-0000-4000-8000-000000000001\",\"model\":\"" + model + "\"}");
+        Console.WriteLine("{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"00000000-0000-4000-8000-000000000001\",\"result\":\"PASS\",\"total_cost_usd\":0.01,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}");
+        return 0;
+    }
+}
+"@
+    $fakeClaudeExe = Join-Path $fakeBin "claude.exe"
+    Add-Type -TypeDefinition $fakeClaudeSource -Language CSharp -OutputAssembly $fakeClaudeExe -OutputType ConsoleApplication
+    $env:PATH = "$fakeBin;$env:PATH"
+    $env:FAKE_CLAUDE_ARGV_CAPTURE = Join-Path $permRoot "claude-argv.txt"
+    $env:FAKE_CLAUDE_MODE = "valid"
+    $env:VERIFIER_EFFECTIVE_SETTINGS = $effectiveSettingsPath
+    $env:VERIFIER_CANDIDATE_SHA = $permCandidate
+    $env:VERIFIER_FINGERPRINT = ("e" * 64)
+    $env:VERIFIER_RESUME_MODE = "NEW"
+    $env:CLAUDE_REUSE_SESSION = "false"
+    $env:LOOP_CYCLE = "1"
+    $env:LOOP_ROUND = "1"
+    $env:GITHUB_RUN_ID = "123457"
+    $runnerScript = Join-Path $env:MAINREPO ".loop-engine\claude-verifier-runner.ps1"
+    & $runnerScript
+    if ($LASTEXITCODE -ne 0) { throw "fake Claude valid stream was rejected: $LASTEXITCODE" }
+    $claudeArgv = @(Get-Content -LiteralPath $env:FAKE_CLAUDE_ARGV_CAPTURE -Encoding UTF8)
+    $expectedArgv = @(
+        "-p", "--permission-mode", "dontAsk", "--model", "fable", "--effort", "max",
+        "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+        "--forward-subagent-text", "--settings", $effectiveSettingsPath, "--setting-sources="
+    )
+    foreach ($expectedArg in $expectedArgv) {
+        if ($claudeArgv -notcontains $expectedArg) {
+            throw "Claude runner dropped required argv token '$expectedArg': $($claudeArgv -join '|')"
+        }
+    }
+
+    $env:FAKE_CLAUDE_MODE = "plain"
+    $env:GITHUB_RUN_ID = "123458"
+    $plainRejected = $false
+    try {
+        & $runnerScript
+        $plainRejected = ($LASTEXITCODE -ne 0)
+    }
+    catch {
+        $plainRejected = $_.Exception.Message -like '*claude exited 1*'
+    }
+    if (-not $plainRejected) { throw "Claude runner accepted non-JSON stdout as a successful verifier session" }
+
+    $env:FAKE_CLAUDE_MODE = "wrong-model"
+    $env:GITHUB_RUN_ID = "123459"
+    $wrongModelRejected = $false
+    try {
+        & $runnerScript
+        $wrongModelRejected = ($LASTEXITCODE -ne 0)
+    }
+    catch {
+        $wrongModelRejected = $_.Exception.Message -like '*claude exited 1*'
+    }
+    if (-not $wrongModelRejected) { throw "Claude runner accepted a model outside the requested Fable family" }
+    Write-Host "[CLAUDE-RUNNER-ARGV-AND-STREAM-SMOKE] PASS"
 }
 finally {
     foreach ($name in $permEnvNames) {

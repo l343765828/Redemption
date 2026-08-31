@@ -366,6 +366,22 @@ $attemptTag = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
 $exitPath = Join-Path $logDir "claude-exit-$attemptTag.txt"
 $toolNames = @{}
 $thinkingDeltaCount = 0
+$claudeInitSeen = $false
+$claudeResultSeen = $false
+$claudeUsageSeen = $false
+$claudeResultIsError = $false
+$claudeInvalidLineCount = 0
+$claudeReportedModel = ""
+
+function Test-ClaudeModelFamily([string]$RequestedModel, [string]$ReportedModel) {
+    $requested = $RequestedModel.Trim().ToLowerInvariant()
+    $reported = $ReportedModel.Trim().ToLowerInvariant()
+    if (-not $requested -or -not $reported) { return $false }
+    if ($requested -in @("fable", "opus", "sonnet")) {
+        return $reported -eq $requested -or $reported -match ("(^|[-_.]){0}($|[-_.])" -f [Regex]::Escape($requested))
+    }
+    return $reported -eq $requested
+}
 
 function Process-ClaudeLine([string]$Line, [System.IO.StreamWriter]$RawWriter) {
     $RawWriter.WriteLine($Line)
@@ -375,16 +391,21 @@ function Process-ClaudeLine([string]$Line, [System.IO.StreamWriter]$RawWriter) {
         $evt = $Line | ConvertFrom-Json -ErrorAction Stop
     }
     catch {
+        $script:claudeInvalidLineCount++
         Write-Host "[RAW] $(Compact-Text $Line 1200)"
         return
     }
 
     if ($evt.type -eq "system" -and $evt.subtype -eq "init") {
+        $script:claudeInitSeen = $true
         if ($evt.session_id) {
             Write-Utf8NoBom $sessionFile ([string]$evt.session_id + "`n")
             Write-Host "[SESSION] $($evt.session_id)"
         }
-        if ($evt.model) { Write-Host "[MODEL] $($evt.model)" }
+        if ($evt.model) {
+            $script:claudeReportedModel = [string]$evt.model
+            Write-Host "[MODEL] $($evt.model)"
+        }
         return
     }
 
@@ -463,6 +484,9 @@ function Process-ClaudeLine([string]$Line, [System.IO.StreamWriter]$RawWriter) {
     }
 
     if ($evt.type -eq "result") {
+        $script:claudeResultSeen = $true
+        $script:claudeResultIsError = ($evt.is_error -eq $true)
+        $script:claudeUsageSeen = ($evt.PSObject.Properties.Name -contains "usage") -and ($null -ne $evt.usage)
         if ($evt.session_id) {
             Write-Utf8NoBom $sessionFile ([string]$evt.session_id + "`n")
         }
@@ -495,7 +519,7 @@ $baseClaudeArgs += @("--setting-sources=")
 $env:CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"
 Write-Host "[VERIFIER-ISOLATION] filesystem setting sources disabled for $env:VERIFIER_STAGE; unified proxy is authoritative"
 
-function Invoke-ClaudeAttempt([string]$PromptText, [object[]]$Args, [string]$Label) {
+function Invoke-ClaudeAttempt([string]$PromptText, [object[]]$ClaudeArgs, [string]$Label) {
     $rawPath = Join-Path $logDir "claude-stream-$attemptTag-$Label.jsonl"
     $stderrPath = Join-Path $logDir "claude-stderr-$attemptTag-$Label.log"
     $rawWriter = New-Object System.IO.StreamWriter($rawPath, $false, $Utf8NoBom)
@@ -507,12 +531,19 @@ function Invoke-ClaudeAttempt([string]$PromptText, [object[]]$Args, [string]$Lab
     Write-Host "=== CLAUDE ATTEMPT: $Label ==="
     Write-Host "raw_jsonl=$rawPath"
 
+    $script:claudeInitSeen = $false
+    $script:claudeResultSeen = $false
+    $script:claudeUsageSeen = $false
+    $script:claudeResultIsError = $false
+    $script:claudeInvalidLineCount = 0
+    $script:claudeReportedModel = ""
+
     try {
         # Windows PowerShell 5.1 can promote native stderr to NativeCommandError.
         # Claude --verbose may legitimately write stderr, so only the native
         # invocation is downgraded to Continue. Script logic remains Stop.
         $ErrorActionPreference = "Continue"
-        $PromptText | & claude @Args 2> $stderrPath | ForEach-Object {
+        $PromptText | & claude @ClaudeArgs 2> $stderrPath | ForEach-Object {
             Process-ClaudeLine ([string]$_) $rawWriter
         }
         $claudeExit = $LASTEXITCODE
@@ -527,6 +558,25 @@ function Invoke-ClaudeAttempt([string]$PromptText, [object[]]$Args, [string]$Lab
     }
 
     if ($null -eq $claudeExit) { $claudeExit = 1 }
+    if ($claudeExit -eq 0) {
+        $streamErrors = New-Object System.Collections.Generic.List[string]
+        if ($script:claudeInvalidLineCount -ne 0) { $streamErrors.Add("stdout contains $($script:claudeInvalidLineCount) non-JSON line(s)") }
+        if (-not $script:claudeInitSeen) { $streamErrors.Add("system/init event missing") }
+        if (-not (Test-ClaudeModelFamily $env:CLAUDE_MODEL $script:claudeReportedModel)) {
+            $streamErrors.Add("reported model '$($script:claudeReportedModel)' does not match requested family '$env:CLAUDE_MODEL'")
+        }
+        if (-not $script:claudeResultSeen) { $streamErrors.Add("result event missing") }
+        if ($script:claudeResultIsError) { $streamErrors.Add("result event is_error=true") }
+        if (-not $script:claudeUsageSeen) { $streamErrors.Add("result usage missing") }
+        if ($streamErrors.Count -ne 0) {
+            Write-Host "[CLAUDE-STREAM-INVALID] $($streamErrors -join '; ')"
+            Remove-Item -Force -ErrorAction SilentlyContinue $sessionFile
+            $claudeExit = 1
+        }
+        else {
+            Write-Host "[CLAUDE-STREAM-VALID] requested_model=$env:CLAUDE_MODEL reported_model=$($script:claudeReportedModel) usage=present"
+        }
+    }
     $stderr = Read-TailText $stderrPath 65536
     if ($stderr.Trim()) {
         Write-Host ""

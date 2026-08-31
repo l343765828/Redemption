@@ -81,6 +81,8 @@ if ($env:VERIFIER_STAGE -notin @("OPUS", "FABLE")) { throw "VERIFIER_STAGE must 
 if (-not $env:VERIFIER_RESULT_FILE) { throw "VERIFIER_RESULT_FILE is required" }
 if (-not $env:CLAUDE_MODEL) { throw "CLAUDE_MODEL is required" }
 if (-not $env:CLAUDE_EFFORT) { throw "CLAUDE_EFFORT is required" }
+if (-not $env:VERIFIER_RUNNER_SCRIPT) { throw "VERIFIER_RUNNER_SCRIPT is required" }
+if (-not (Test-Path $env:VERIFIER_RUNNER_SCRIPT)) { throw "Claude verifier runner missing: $env:VERIFIER_RUNNER_SCRIPT" }
 
 # v6/v7 stored one verifier checkpoint directly under verifier-state. v8 has
 # stage-specific subdirectories. Archive the old checkpoint before starting
@@ -298,8 +300,9 @@ $overrideHash = Get-FileSha256 $env:VERIFIER_OVERRIDE
 $protocolHash = Get-FileSha256 $env:VERIFIER_PROTOCOL
 $settingsHash = Get-FileSha256 $effectiveSettings
 $policyHash = Get-FileSha256 $env:UAT_ACTION_POLICY_FILE
+$runnerHash = Get-FileSha256 $env:VERIFIER_RUNNER_SCRIPT
 $fingerprintMaterial = @(
-    "schema=8",
+    "schema=9",
     "verifier_stage=$env:VERIFIER_STAGE",
     "candidate=$candidate",
     "uat_period_slot=$uatPeriodSlot",
@@ -322,6 +325,7 @@ $fingerprintMaterial = @(
     "protocol=$protocolHash",
     "settings=$settingsHash",
     "uat_action_policy=$policyHash",
+    "claude_runner=$runnerHash",
     "model=$env:CLAUDE_MODEL",
     "effort=$env:CLAUDE_EFFORT"
 ) -join "`n"
@@ -473,6 +477,7 @@ if (-not (Test-Path $env:VERIFIER_PROGRESS)) {
         protocol_sha256 = $protocolHash
         settings_sha256 = $settingsHash
         uat_action_policy_sha256 = $policyHash
+        claude_runner_sha256 = $runnerHash
         claude_model = $env:CLAUDE_MODEL
         claude_effort = $env:CLAUDE_EFFORT
         status = "NEW"

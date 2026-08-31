@@ -31,6 +31,7 @@ param(
         "r8-reconcile-fable-pass-stays-final-pass",
         "r8-reconcile-fable-reject-stays-final-reject",
         "r8-reconcile-fable-blocked-stays-blocked",
+        "r9-reopen-invalid-claude-reviewers",
         "f04-period-pool-append-only"
     )]
     [string]$Scenario = "all"
@@ -1139,6 +1140,77 @@ function Invoke-F04PeriodPoolAppendOnly {
     finally { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $c.root }
 }
 
+function Invoke-R9ReopenInvalidClaudeReviewers {
+    $c = New-TestContext "r9-reopen-invalid-claude-reviewers"
+    try {
+        Use-TestContext $c
+        $roundReport = New-Report $c 1 1 "Invalid reviewer FINAL_PASS"
+        $r1 = New-RoundObject $c 1 "COMPLETE" "construct" "PASS" "NO_BUG" "FINAL_PASS" $roundReport "" "" ""
+        Add-LegacyPeriodFields $r1 1 2 "PASS"
+        $r1 | Add-Member -NotePropertyName protected_evidence_sha256 -NotePropertyValue ("c" * 64) -Force
+        $r1 | Add-Member -NotePropertyName protected_round_contract_sha256 -NotePropertyValue ("d" * 64) -Force
+        $r1 | Add-Member -NotePropertyName protected_evidence_bound_at -NotePropertyValue "2026-08-24T00:00:30Z" -Force
+        $r1 | Add-Member -NotePropertyName opus_report_sha256 -NotePropertyValue ("e" * 64) -Force
+        $r1 | Add-Member -NotePropertyName opus_report_length -NotePropertyValue 123 -Force
+        $r1 | Add-Member -NotePropertyName uat_write_authorization_opus_sha256 -NotePropertyValue ("a" * 64) -Force
+        $r1 | Add-Member -NotePropertyName uat_write_authorization_fable_sha256 -NotePropertyValue ("b" * 64) -Force
+
+        $state = New-StateObject $c 4 "COMPLETED" "COMPLETED" 1 @($r1)
+        $state.opus_result = "NO_BUG"
+        $state.fable_result = "FINAL_PASS"
+        $state.cycles[0].completed_at = "2026-08-24T00:01:00Z"
+        Write-Json $c.state $state
+
+        Write-Text (Join-Path $c.out "UAT_REPORT.md") "# Invalid live report`n"
+        Write-Text (Join-Path $c.out "opus-result.txt") "PRECHECK_PASS`n"
+        Write-Text (Join-Path $c.out "uat-result.txt") "PASS`n"
+        Write-Text (Join-Path $c.out "verifier-state\opus\verifier-progress.json") '{"status":"COMPLETE"}'
+        Write-Text (Join-Path $c.out "verifier-state\fable\verifier-progress.json") '{"status":"COMPLETE"}'
+
+        $before = [IO.File]::ReadAllText($c.state, [System.Text.Encoding]::UTF8)
+        $wrongCandidateBlocked = $false
+        try {
+            & $StateScript -Operation ReopenInvalidVerifierResult -Cycle 1 -Round 1 -CandidateSha ("f" * 40) -InvalidationReason CLAUDE_ARGUMENTS_DROPPED
+        }
+        catch { $wrongCandidateBlocked = $_.Exception.Message -like '*candidate SHA mismatch*' }
+        Assert-True $wrongCandidateBlocked "R9 reopen must reject a mismatched candidate SHA"
+        Assert-Equal ([IO.File]::ReadAllText($c.state, [System.Text.Encoding]::UTF8)) $before "R9 rejected reopen mutated durable state"
+
+        & $StateScript -Operation ReopenInvalidVerifierResult -Cycle 1 -Round 1 -CandidateSha $c.sha -InvalidationReason CLAUDE_ARGUMENTS_DROPPED
+        if ($LASTEXITCODE -ne 0) { throw "R9 reopen failed: exit=$LASTEXITCODE" }
+
+        $reopened = Read-State $c
+        $reopenedRound = @($reopened.cycles[0].rounds)[0]
+        Assert-Equal $reopened.status "RUNNING" "R9 reopened state status"
+        Assert-Equal $reopened.stage "OPUS_REVIEW" "R9 reopened state stage"
+        Assert-Equal $reopened.cycles[0].status "RUNNING" "R9 reopened cycle status"
+        Assert-Equal $reopenedRound.phase "VERIFYING" "R9 reopened round phase"
+        Assert-True (-not [string]$reopenedRound.opus_result) "R9 stale Opus result retained"
+        Assert-True (-not [string]$reopenedRound.fable_result) "R9 stale Fable result retained"
+        Assert-True (-not [string]$reopenedRound.verdict) "R9 stale canonical verdict retained"
+        Assert-True (-not [string]$reopenedRound.protected_evidence_sha256) "R9 stale protected evidence retained"
+        Assert-True (-not [string]$reopenedRound.opus_report_sha256) "R9 stale Opus report baseline retained"
+        Assert-Equal ([int]$reopenedRound.uat_period_slot) 1 "R9 changed durable Opus period slot"
+        Assert-Equal ([int]$reopenedRound.final_audit_uat_period_slot) 2 "R9 changed durable Fable period slot"
+        Assert-Equal ([string]$reopenedRound.uat_write_authorization_opus_sha256) ("a" * 64) "R9 changed Opus authorization"
+        Assert-Equal ([string]$reopenedRound.uat_write_authorization_fable_sha256) ("b" * 64) "R9 changed Fable authorization"
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $c.out "verifier-state"))) "R9 left stale live verifier checkpoints"
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $c.out "opus-result.txt"))) "R9 left stale Opus result"
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $c.out "uat-result.txt"))) "R9 left stale Fable result"
+        $archives = @(Get-ChildItem -LiteralPath (Join-Path $c.out "invalidated-verifier-results\cycle-1\round-1") -Directory)
+        Assert-Equal $archives.Count 1 "R9 invalid result archive count"
+        Assert-True (Test-Path -LiteralPath (Join-Path $archives[0].FullName "loop-state.before-reopen.json")) "R9 invalid result archive lacks pre-reopen ledger"
+        Assert-True (Test-Path -LiteralPath (Join-Path $archives[0].FullName "verifier-state\fable\verifier-progress.json")) "R9 invalid result archive lacks Fable checkpoint"
+        Assert-True (@($reopenedRound.invalidated_verifier_results).Count -eq 1) "R9 round invalidation audit marker missing"
+        Assert-Equal ([string]@($reopenedRound.invalidated_verifier_results)[0].reason) "CLAUDE_ARGUMENTS_DROPPED" "R9 invalidation reason"
+
+        Invoke-Prepare $c "auto"
+        Assert-Equal (Get-StepOutput $c "start_action") "resume-verifier" "R9 Prepare action after reopen"
+        Assert-Equal (Get-StepOutput $c "start_round") "1" "R9 Prepare round after reopen"
+    }
+    finally { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $c.root }
+}
+
 $allScenarios = @(
     "test-01-opus-r1-bug",
     "test-02-opus-r2-bug",
@@ -1170,6 +1242,7 @@ $allScenarios = @(
     "r8-reconcile-fable-pass-stays-final-pass",
     "r8-reconcile-fable-reject-stays-final-reject",
     "r8-reconcile-fable-blocked-stays-blocked",
+    "r9-reopen-invalid-claude-reviewers",
     "f04-period-pool-append-only"
 )
 
@@ -1210,6 +1283,7 @@ try {
                 "r8-reconcile-fable-pass-stays-final-pass" { Invoke-R8ReconcileFablePassStaysFinalPass }
                 "r8-reconcile-fable-reject-stays-final-reject" { Invoke-R8ReconcileFableRejectStaysFinalReject }
                 "r8-reconcile-fable-blocked-stays-blocked" { Invoke-R8ReconcileFableBlockedStaysBlocked }
+                "r9-reopen-invalid-claude-reviewers" { Invoke-R9ReopenInvalidClaudeReviewers }
                 "f04-period-pool-append-only" { Invoke-F04PeriodPoolAppendOnly }
                 default { throw "unknown scenario: $name" }
             }

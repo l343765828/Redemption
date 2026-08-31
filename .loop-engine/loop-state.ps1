@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("Prepare", "BeginRound", "SetCandidate", "RotateLegacyVerifierPeriod", "AllocateFinalAuditPeriod", "BindCycleUatAuthorization", "BindUatWriteAuthorization", "BindOpusReportBaseline", "BindProtectedEvidenceBaseline", "MarkFinalAuditEvidenceVerified", "CompleteRound", "Summarize")]
+    [ValidateSet("Prepare", "BeginRound", "SetCandidate", "RotateLegacyVerifierPeriod", "AllocateFinalAuditPeriod", "BindCycleUatAuthorization", "BindUatWriteAuthorization", "BindOpusReportBaseline", "BindProtectedEvidenceBaseline", "MarkFinalAuditEvidenceVerified", "CompleteRound", "ReopenInvalidVerifierResult", "Summarize")]
     [string]$Operation,
 
     [ValidateSet("auto", "next-cycle", "new-cycle")]
@@ -23,6 +23,9 @@ param(
     [long]$OpusReportLength = 0,
 
     [string]$ProtectedEvidenceSha256 = "",
+
+    [ValidateSet("CLAUDE_ARGUMENTS_DROPPED")]
+    [string]$InvalidationReason = "",
 
     [ValidateSet("OPUS", "FABLE")]
     [string]$VerifierStage = "OPUS",
@@ -2365,6 +2368,100 @@ function Complete-Round([int]$CycleNumber, [int]$RoundNumber, [string]$RoundVerd
     Write-Host "[ROUND-COMPLETE] cycle=$CycleNumber round=$RoundNumber canonical_verdict=$canonicalVerdict opus=$($roundObject.opus_result) fable=$($roundObject.fable_result) status=$($state.status) pause_reason=$($state.pause_reason) report=$reportPath"
 }
 
+function Reopen-InvalidVerifierResult([int]$CycleNumber, [int]$RoundNumber, [string]$ExpectedCandidateSha, [string]$Reason) {
+    if ($Reason -ne "CLAUDE_ARGUMENTS_DROPPED") { throw "a supported invalidation reason is required" }
+    if ($ExpectedCandidateSha -notmatch '^[0-9a-fA-F]{40}$') { throw "a valid expected candidate SHA is required" }
+    $ExpectedCandidateSha = $ExpectedCandidateSha.ToLowerInvariant()
+
+    $state = Load-State
+    if (-not $state) { throw "loop state is missing" }
+    if ([int]$state.current_cycle -ne $CycleNumber -or [int]$state.current_round -ne $RoundNumber) {
+        throw "only the current loop round can be reopened"
+    }
+    $cycleObject = Get-Cycle $state $CycleNumber
+    $roundObject = Get-Round $cycleObject $RoundNumber
+    if (-not $roundObject) { throw "round $CycleNumber/$RoundNumber is missing" }
+    $durableCandidate = ([string]$roundObject.candidate_sha).Trim().ToLowerInvariant()
+    if ($durableCandidate -ne $ExpectedCandidateSha) {
+        throw "candidate SHA mismatch while reopening invalid verifier result: expected=$ExpectedCandidateSha durable=$durableCandidate"
+    }
+    if ([string]$state.status -ne "COMPLETED" -or [string]$state.stage -ne "COMPLETED" -or
+        [string]$cycleObject.status -ne "COMPLETED" -or [string]$roundObject.phase -ne "COMPLETE" -or
+        [string]$roundObject.verdict -ne "PASS" -or [string]$roundObject.opus_result -ne "NO_BUG" -or
+        [string]$roundObject.fable_result -ne "FINAL_PASS") {
+        throw "reopen is allowed only for the current completed NO_BUG + FINAL_PASS round"
+    }
+
+    # Preserve the invalid decision and all live verifier artifacts before making
+    # them ineligible for reconciliation. Period allocations and authorization
+    # grants remain attached to the same candidate and are reused by the rerun.
+    $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssfffZ")
+    $archiveRoot = Join-Path $env:OUTDIR ("invalidated-verifier-results\cycle-{0}\round-{1}\{2}-{3}" -f $CycleNumber, $RoundNumber, $stamp, $Reason.ToLowerInvariant())
+    if (Test-Path -LiteralPath $archiveRoot) { throw "invalidation archive already exists: $archiveRoot" }
+    New-Item -ItemType Directory -Force $archiveRoot | Out-Null
+    Copy-Item -LiteralPath $StateFile -Destination (Join-Path $archiveRoot "loop-state.before-reopen.json") -Force
+
+    $completedRoundArchive = Join-Path $CyclesDir ("cycle-{0}\round-{1}" -f $CycleNumber, $RoundNumber)
+    if (Test-Path -LiteralPath $completedRoundArchive) {
+        Copy-Item -LiteralPath $completedRoundArchive -Destination (Join-Path $archiveRoot "completed-round-archive") -Recurse -Force
+    }
+    foreach ($name in @("verifier-state", "verifier-runtime", "UAT_REPORT.md", "opus-result.txt", "uat-result.txt", "opus-core-result.txt", "fable-core-result.txt")) {
+        $source = Join-Path $env:OUTDIR $name
+        if (Test-Path -LiteralPath $source) {
+            Move-Item -LiteralPath $source -Destination (Join-Path $archiveRoot $name)
+        }
+    }
+
+    $invalidation = [pscustomobject][ordered]@{
+        schema_version = 1
+        cycle = $CycleNumber
+        round = $RoundNumber
+        candidate_sha = $durableCandidate
+        reason = $Reason
+        invalidated_at = Utc-Now
+        previous_verdict = "PASS"
+        previous_opus_result = "NO_BUG"
+        previous_fable_result = "FINAL_PASS"
+    }
+    Write-Utf8NoBom (Join-Path $archiveRoot "invalidation.json") (($invalidation | ConvertTo-Json -Depth 10) + "`n")
+
+    $history = @($roundObject.invalidated_verifier_results | Where-Object { $null -ne $_ })
+    $history += [pscustomobject][ordered]@{
+        reason = $Reason
+        invalidated_at = [string]$invalidation.invalidated_at
+        archive_path = $archiveRoot
+        previous_verdict = "PASS"
+        previous_opus_result = "NO_BUG"
+        previous_fable_result = "FINAL_PASS"
+    }
+    Ensure-Property $roundObject "invalidated_verifier_results" $history
+
+    foreach ($name in @(
+        "verdict", "report_path", "completed_at", "opus_result", "fable_result",
+        "produced_findings_source", "produced_findings_ref", "opus_report_sha256", "opus_report_length",
+        "protected_evidence_sha256", "protected_round_contract_sha256", "protected_evidence_bound_at",
+        "final_audit_evidence_verified", "final_audit_evidence_verified_verdict",
+        "final_audit_evidence_verified_protected_sha256", "final_audit_evidence_verified_at"
+    )) { Ensure-Property $roundObject $name $null }
+    Ensure-Property $roundObject "phase" "VERIFYING"
+    Ensure-Property $roundObject "last_run_id" $env:GITHUB_RUN_ID
+    Ensure-Property $roundObject "last_run_attempt" $env:GITHUB_RUN_ATTEMPT
+
+    Ensure-Property $cycleObject "status" "RUNNING"
+    Ensure-Property $cycleObject "completed_at" $null
+    Ensure-Property $cycleObject "findings_source" $null
+    Ensure-Property $cycleObject "findings_ref" $null
+    Ensure-Property $state "status" "RUNNING"
+    Ensure-Property $state "stage" "OPUS_REVIEW"
+    Ensure-Property $state "pause_reason" $null
+    Ensure-Property $state "opus_result" $null
+    Ensure-Property $state "fable_result" $null
+    Ensure-Property $state "findings_source" $null
+    Ensure-Property $state "findings_ref" $null
+    Save-State $state
+    Write-Host "[VERIFIER-RESULT-REOPENED] cycle=$CycleNumber round=$RoundNumber candidate=$durableCandidate reason=$Reason archive=$archiveRoot"
+}
+
 function Summarize-Loop() {
     $state = Load-State
     if (-not $state) { throw "loop state is missing" }
@@ -2422,5 +2519,6 @@ switch ($Operation) {
     "BindProtectedEvidenceBaseline" { Bind-ProtectedEvidenceBaseline $Cycle $Round $ProtectedEvidenceSha256; exit 0 }
     "MarkFinalAuditEvidenceVerified" { Mark-FinalAuditEvidenceVerified $Cycle $Round $Verdict $ProtectedEvidenceSha256; exit 0 }
     "CompleteRound" { Complete-Round $Cycle $Round $Verdict $OpusResult $FableResult; exit 0 }
+    "ReopenInvalidVerifierResult" { Reopen-InvalidVerifierResult $Cycle $Round $CandidateSha $InvalidationReason; exit 0 }
     "Summarize" { Summarize-Loop }
 }
