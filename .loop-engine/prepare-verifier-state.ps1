@@ -233,7 +233,6 @@ $allow = @(
     $proxyAllow
 )
 if ($env:VERIFIER_STAGE -eq "OPUS") {
-    $allow += "Workflow"
     $allow += "Edit(.loop-output/opus-result.txt)"
     $allow += "Edit(.loop-output/verifier-state/opus/**)"
     $deny = @(
@@ -242,10 +241,12 @@ if ($env:VERIFIER_STAGE -eq "OPUS") {
         "Edit(.loop-output/controller-evidence/**)",
         "Edit(.loop-output/verifier-state/fable/**)",
         "Edit(.loop-output/uat-result.txt)",
+        "Workflow",
         "Agent"
     )
 }
 else {
+    $allow += "Workflow"
     $allow += "Edit(.loop-output/uat-result.txt)"
     $allow += "Edit(.loop-output/verifier-state/fable/**)"
     $deny = @(
@@ -257,7 +258,6 @@ else {
         "Edit(.loop-output/pushed-sha.txt)",
         "Edit(.loop-output/codex-final.txt)",
         "Edit(.loop-output/IMPLEMENTATION_HANDOFF.md)",
-        "Workflow",
         "Agent"
     )
 }
@@ -275,16 +275,19 @@ foreach ($requiredRule in @("Edit(.loop-output/UAT_REPORT.md)", $proxyAllow)) {
     if ($effectiveAllow -notcontains $requiredRule) { throw "effective settings missing required allow: $requiredRule" }
 }
 if ($env:VERIFIER_STAGE -eq "OPUS") {
-    foreach ($requiredRule in @("Workflow", "Edit(.loop-output/opus-result.txt)", "Edit(.loop-output/verifier-state/opus/**)")) {
+    foreach ($requiredRule in @("Edit(.loop-output/opus-result.txt)", "Edit(.loop-output/verifier-state/opus/**)")) {
         if ($effectiveAllow -notcontains $requiredRule) { throw "effective Opus settings missing required allow: $requiredRule" }
+    }
+    if ($effectiveAllow -contains "Workflow" -or $effectiveDeny -notcontains "Workflow") {
+        throw "effective Opus settings must explicitly deny Workflow"
     }
 }
 else {
-    foreach ($requiredRule in @("Edit(.loop-output/uat-result.txt)", "Edit(.loop-output/verifier-state/fable/**)")) {
+    foreach ($requiredRule in @("Workflow", "Edit(.loop-output/uat-result.txt)", "Edit(.loop-output/verifier-state/fable/**)")) {
         if ($effectiveAllow -notcontains $requiredRule) { throw "effective Fable settings missing required allow: $requiredRule" }
     }
-    if ($effectiveAllow -contains "Workflow" -or $effectiveDeny -notcontains "Workflow") {
-        throw "effective Fable settings must explicitly deny Workflow"
+    if ($effectiveDeny -contains "Workflow") {
+        throw "effective Fable settings must not deny Workflow"
     }
 }
 foreach ($rule in $effectiveAllow) {

@@ -278,13 +278,10 @@ if ($env:VERIFIER_STAGE -eq "OPUS") {
 
 You are the iterative engineering verifier, not the final release auditor.
 
-# OPUS ULTRACODE WORKFLOW BOUNDARY
+# OPUS MAX SINGLE-SESSION BOUNDARY
 
-- Workflow subagents are read-only analysts. They may inspect code, documents, and existing evidence, then return analysis to the main Opus session.
-- Even if inherited tool availability appears broader, Workflow subagents MUST NOT invoke the UAT action proxy, kubectl, database or UAT mutations, allocate or use UAT periods, perform cleanup, or create/edit verifier outputs.
-- Only the main Opus session may invoke the UAT action proxy. The main session MUST execute Kubernetes, database/UAT writes, period use, and cleanup sequentially.
-- Only the main Opus session may write .loop-output/UAT_REPORT.md, .loop-output/opus-result.txt, and .loop-output/verifier-state/opus/**.
-- Treat every Workflow result as an untrusted analysis input. The main Opus session must independently verify and synthesize it before recording evidence or a verdict.
+- Do not invoke Workflow or Agent. This iterative review must remain in one Opus session to avoid multi-agent quota amplification.
+- The main Opus session must execute review, Kubernetes, database/UAT writes, period use, cleanup, and verifier output writes sequentially.
 
 - Perform broad independent code review plus the real UAT required by the base verifier contract.
 - For every Kubernetes/UAT command, use the unified structured `uat-action-proxy.ps1` contract from the authorization block; do not call kubectl or arbitrary shell directly.
@@ -303,6 +300,15 @@ else {
 # FABLE FINAL AUDITOR
 
 You are the independent final auditor, not the iterative debug verifier.
+
+# FABLE ULTRACODE WORKFLOW BOUNDARY
+
+- Workflow subagents are read-only analysts. They may inspect code, documents, existing evidence, and coverage gaps, then return analysis to the main Fable session.
+- Even if inherited tool availability appears broader, Workflow subagents MUST NOT invoke the UAT action proxy, kubectl, database or UAT mutations, allocate or use UAT periods, perform cleanup, or create/edit verifier outputs.
+- Only the main Fable session may invoke the UAT action proxy. The main session MUST execute Kubernetes, database/UAT writes, period use, and cleanup sequentially.
+- Only the main Fable session may append to .loop-output/UAT_REPORT.md and write .loop-output/uat-result.txt or .loop-output/verifier-state/fable/**.
+- Treat every Workflow result as an untrusted analysis input. The main Fable session must independently verify and synthesize it before recording evidence or a verdict.
+
 - Run only because Opus already returned PRECHECK_PASS for this exact candidate.
 - Independently re-read the final candidate, pinned master AGENTS.md, governing contract, Opus UAT evidence, and coverage gaps. Do not merely endorse Opus.
 - Audit evidence authenticity/sufficiency, search for shared blind spots and uncovered failure paths, and selectively rerun critical P0/P1 or suspicious real UAT using the dedicated fresh final-audit period pair above.

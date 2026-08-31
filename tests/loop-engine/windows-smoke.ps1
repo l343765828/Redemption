@@ -177,6 +177,8 @@ public static class LoopNativeProbe {
             throw "$effortEnvName uses unsupported Claude CLI effort '$configuredEffort'"
         }
     }
+    if ($env:OPUS_CLAUDE_EFFORT -ne "max") { throw "Opus iterative review must use max effort" }
+    if ($env:FABLE_CLAUDE_EFFORT -ne "ultracode") { throw "Fable final audit must use ultracode" }
     Write-Host "[CLAUDE-ARGV-SMOKE] PASS"
 
     # Native stderr regression: with script-wide Stop, a negative native command
@@ -628,13 +630,13 @@ try {
     foreach ($protected in @("Edit(.loop-output/verifier-state/opus/**)", "Edit(.loop-output/loop-state.json)", "Edit(.loop-output/controller-evidence/**)")) {
         if ($allow -contains $protected -or $deny -notcontains $protected) { throw "permission integration protected evidence mismatch: $protected" }
     }
-    if ($allow -contains "Workflow" -or $deny -notcontains "Workflow") {
-        throw "permission integration Fable Workflow isolation mismatch"
+    if ($allow -notcontains "Workflow" -or $deny -contains "Workflow" -or $deny -notcontains "Agent") {
+        throw "permission integration Fable Workflow/Agent isolation mismatch"
     }
     Write-Host "[FABLE-PERMISSION-INTEGRATION-SMOKE] PASS"
 
-    # Opus alone may use Workflow. Its durable mutations and report/result writes
-    # remain scoped to the main verifier session by the stage prompt contract.
+    # Opus uses deep single-session review. Workflow remains reserved for the
+    # Fable final audit so iterative rounds do not fan out extra agents.
     $opusPermState = $opusPinDir
     $opusPermRuntime = Join-Path $permOut "verifier-runtime\opus"
     $opusPermHistory = Join-Path $permOut "verifier-history\opus"
@@ -642,7 +644,7 @@ try {
     $env:VERIFIER_STAGE = "OPUS"
     $env:VERIFIER_RESULT_FILE = Join-Path $permOut "opus-result.txt"
     $env:CLAUDE_MODEL = "opus"
-    $env:CLAUDE_EFFORT = "ultracode"
+    $env:CLAUDE_EFFORT = "max"
     $env:VERIFIER_RUNTIME_DIR = $opusPermRuntime
     $env:VERIFIER_HISTORY_DIR = $opusPermHistory
     $env:VERIFIER_STATE_DIR = $opusPermState
@@ -662,19 +664,19 @@ try {
     $opusEffectiveSettings = [IO.File]::ReadAllText($opusEffectiveSettingsPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     $opusAllow = @($opusEffectiveSettings.permissions.allow)
     $opusDeny = @($opusEffectiveSettings.permissions.deny)
-    foreach ($required in @("Workflow", "Edit(.loop-output/UAT_REPORT.md)", "Edit(.loop-output/opus-result.txt)", "Edit(.loop-output/verifier-state/opus/**)", $permProxyAllow)) {
+    foreach ($required in @("Edit(.loop-output/UAT_REPORT.md)", "Edit(.loop-output/opus-result.txt)", "Edit(.loop-output/verifier-state/opus/**)", $permProxyAllow)) {
         if ($opusAllow -notcontains $required) { throw "permission integration missing Opus allow: $required" }
     }
-    if ($opusDeny -contains "Workflow" -or $opusDeny -notcontains "Agent") {
+    if ($opusAllow -contains "Workflow" -or $opusDeny -notcontains "Workflow" -or $opusDeny -notcontains "Agent") {
         throw "permission integration Opus Workflow/Agent isolation mismatch"
     }
-    Write-Host "[OPUS-WORKFLOW-PERMISSION-INTEGRATION-SMOKE] PASS"
+    Write-Host "[OPUS-PERMISSION-INTEGRATION-SMOKE] PASS"
 
     # Restore the Fable stage for the runner integration below.
     $env:VERIFIER_STAGE = "FABLE"
     $env:VERIFIER_RESULT_FILE = Join-Path $permOut "uat-result.txt"
     $env:CLAUDE_MODEL = "fable"
-    $env:CLAUDE_EFFORT = "max"
+    $env:CLAUDE_EFFORT = "ultracode"
     $env:VERIFIER_RUNTIME_DIR = $permRuntime
     $env:VERIFIER_HISTORY_DIR = $permHistory
     $env:VERIFIER_STATE_DIR = $permState
@@ -729,7 +731,7 @@ public static class LoopEngineFakeClaude {
     if ($LASTEXITCODE -ne 0) { throw "fake Claude valid stream was rejected: $LASTEXITCODE" }
     $claudeArgv = @(Get-Content -LiteralPath $env:FAKE_CLAUDE_ARGV_CAPTURE -Encoding UTF8)
     $expectedArgv = @(
-        "-p", "--permission-mode", "dontAsk", "--model", "fable", "--effort", "max",
+        "-p", "--permission-mode", "dontAsk", "--model", "fable", "--effort", "ultracode",
         "--output-format", "stream-json", "--verbose", "--include-partial-messages",
         "--forward-subagent-text", "--settings", $effectiveSettingsPath, "--setting-sources="
     )
@@ -739,8 +741,15 @@ public static class LoopEngineFakeClaude {
         }
     }
     $fablePromptText = [IO.File]::ReadAllText($env:FAKE_CLAUDE_STDIN_CAPTURE, [System.Text.Encoding]::UTF8)
-    if ($fablePromptText.Contains("# OPUS ULTRACODE WORKFLOW BOUNDARY")) {
-        throw "Fable prompt inherited the Opus-only Workflow boundary"
+    foreach ($requiredBoundary in @(
+        "# FABLE ULTRACODE WORKFLOW BOUNDARY",
+        "Workflow subagents are read-only analysts",
+        "Only the main Fable session may invoke the UAT action proxy",
+        "Only the main Fable session may append to .loop-output/UAT_REPORT.md and write .loop-output/uat-result.txt"
+    )) {
+        if (-not $fablePromptText.Contains($requiredBoundary)) {
+            throw "Fable prompt missing Workflow boundary: $requiredBoundary"
+        }
     }
 
     $env:FAKE_CLAUDE_MODE = "plain"
@@ -770,7 +779,7 @@ public static class LoopEngineFakeClaude {
     $env:VERIFIER_STAGE = "OPUS"
     $env:VERIFIER_RESULT_FILE = Join-Path $permOut "opus-result.txt"
     $env:CLAUDE_MODEL = "opus"
-    $env:CLAUDE_EFFORT = "ultracode"
+    $env:CLAUDE_EFFORT = "max"
     $env:VERIFIER_RUNTIME_DIR = $opusPermRuntime
     $env:VERIFIER_HISTORY_DIR = $opusPermHistory
     $env:VERIFIER_STATE_DIR = $opusPermState
@@ -787,23 +796,25 @@ public static class LoopEngineFakeClaude {
     & $runnerScript
     if ($LASTEXITCODE -ne 0) { throw "fake Claude Opus stream was rejected: $LASTEXITCODE" }
     $opusArgv = @(Get-Content -LiteralPath $env:FAKE_CLAUDE_ARGV_CAPTURE -Encoding UTF8)
-    foreach ($expectedArg in @("--model", "opus", "--effort", "ultracode", "--settings", $opusEffectiveSettingsPath)) {
+    foreach ($expectedArg in @("--model", "opus", "--effort", "max", "--settings", $opusEffectiveSettingsPath)) {
         if ($opusArgv -notcontains $expectedArg) {
             throw "Claude runner dropped required Opus argv token '$expectedArg': $($opusArgv -join '|')"
         }
     }
     $opusPromptText = [IO.File]::ReadAllText($env:FAKE_CLAUDE_STDIN_CAPTURE, [System.Text.Encoding]::UTF8)
     foreach ($requiredBoundary in @(
-        "# OPUS ULTRACODE WORKFLOW BOUNDARY",
-        "Workflow subagents are read-only analysts",
-        "Only the main Opus session may invoke the UAT action proxy",
-        "Only the main Opus session may write .loop-output/UAT_REPORT.md, .loop-output/opus-result.txt"
+        "# OPUS MAX SINGLE-SESSION BOUNDARY",
+        "Do not invoke Workflow or Agent",
+        "The main Opus session must execute review, Kubernetes, database/UAT writes, period use, cleanup, and verifier output writes sequentially"
     )) {
         if (-not $opusPromptText.Contains($requiredBoundary)) {
-            throw "Opus prompt missing Workflow boundary: $requiredBoundary"
+            throw "Opus prompt missing single-session boundary: $requiredBoundary"
         }
     }
-    Write-Host "[OPUS-WORKFLOW-PROMPT-INTEGRATION-SMOKE] PASS"
+    if ($opusPromptText.Contains("# FABLE ULTRACODE WORKFLOW BOUNDARY")) {
+        throw "Opus prompt inherited the Fable-only Workflow boundary"
+    }
+    Write-Host "[FABLE-WORKFLOW-PROMPT-INTEGRATION-SMOKE] PASS"
     Write-Host "[CLAUDE-RUNNER-ARGV-AND-STREAM-SMOKE] PASS"
 }
 finally {
