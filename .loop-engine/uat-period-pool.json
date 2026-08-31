@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "policy": "One immutable primary/secondary UAT period pair per logical Loop Engine round. Never reuse a pair for a new round.",
-  "source_note": "Reviewed reserved sequence for ten logical rounds. If governance changes this sequence, update it only before creating durable loop-state.json or perform a controlled state migration.",
+  "source_note": "Reviewed reserved sequence for twenty governed UAT allocations. Existing entries are immutable; extend only by appending new unique slots and period values.",
   "pairs": [
     {"slot": 1, "primary_period": 990001, "secondary_period": 990002},
     {"slot": 2, "primary_period": 990003, "secondary_period": 990004},
@@ -12,6 +12,16 @@
     {"slot": 7, "primary_period": 990013, "secondary_period": 990014},
     {"slot": 8, "primary_period": 990015, "secondary_period": 990016},
     {"slot": 9, "primary_period": 990017, "secondary_period": 990018},
-    {"slot": 10, "primary_period": 990019, "secondary_period": 990020}
+    {"slot": 10, "primary_period": 990019, "secondary_period": 990020},
+    {"slot": 11, "primary_period": 990021, "secondary_period": 990022},
+    {"slot": 12, "primary_period": 990023, "secondary_period": 990024},
+    {"slot": 13, "primary_period": 990025, "secondary_period": 990026},
+    {"slot": 14, "primary_period": 990027, "secondary_period": 990028},
+    {"slot": 15, "primary_period": 990029, "secondary_period": 990030},
+    {"slot": 16, "primary_period": 990031, "secondary_period": 990032},
+    {"slot": 17, "primary_period": 990033, "secondary_period": 990034},
+    {"slot": 18, "primary_period": 990035, "secondary_period": 990036},
+    {"slot": 19, "primary_period": 990037, "secondary_period": 990038},
+    {"slot": 20, "primary_period": 990039, "secondary_period": 990040}
   ]
 }

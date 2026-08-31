@@ -32,7 +32,8 @@ param(
         "r8-reconcile-fable-reject-stays-final-reject",
         "r8-reconcile-fable-blocked-stays-blocked",
         "r9-reopen-invalid-claude-reviewers",
-        "f04-period-pool-append-only"
+        "f04-period-pool-append-only",
+        "f05-period-pool-capacity-after-ten-used"
     )]
     [string]$Scenario = "all"
 )
@@ -1140,6 +1141,55 @@ function Invoke-F04PeriodPoolAppendOnly {
     finally { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $c.root }
 }
 
+function Invoke-F05PeriodPoolCapacityAfterTenUsed {
+    $c = New-TestContext "f05-period-pool-capacity-after-ten-used"
+    try {
+        Use-TestContext $c
+        $cycles = @()
+        $slot = 1
+        for ($cycleNumber = 1; $cycleNumber -le 4; $cycleNumber++) {
+            $roundCount = if ($cycleNumber -lt 4) { 3 } else { 1 }
+            $rounds = @()
+            for ($roundNumber = 1; $roundNumber -le $roundCount; $roundNumber++) {
+                $report = New-Report $c $cycleNumber $roundNumber "Opus BUG_FOUND"
+                $round = New-RoundObject $c $roundNumber "COMPLETE" $(if ($roundNumber -eq 1) { "construct" } else { "rework" }) "REJECTED" "BUG_FOUND" "" $report "" "OPUS" $report
+                Add-LegacyPeriodFields $round $slot
+                $rounds += $round
+                $slot++
+            }
+            $cycles += [pscustomobject][ordered]@{
+                cycle = $cycleNumber
+                status = $(if ($cycleNumber -lt 4) { "PAUSED_AWAITING_USER" } else { "RUNNING" })
+                candidate_branch = $c.branch
+                cycle_start_sha = $c.sha
+                current_candidate_sha = $c.sha
+                findings_source = "OPUS"
+                findings_ref = [string]$rounds[-1].report_path
+                previous_cycle_report = ""
+                started_at = "2026-08-24T00:00:00Z"
+                completed_at = $null
+                rounds = @($rounds)
+            }
+        }
+
+        $priorReport = [string]$cycles[-1].rounds[-1].report_path
+        $state = New-StateObject $c 4 "RUNNING" "CODEX_REWORK" 2 @() "" "OPUS" $priorReport
+        $state.current_cycle = 4
+        $state.cycles = @($cycles)
+        Write-Json $c.state $state
+
+        & $StateScript -Operation BeginRound -Cycle 4 -Round 2 -RoundAction rework -PreviousReport $priorReport
+        if ($LASTEXITCODE -ne 0) { throw "F-05 BeginRound failed: exit=$LASTEXITCODE" }
+
+        $after = Read-State $c
+        $newRound = @($after.cycles[-1].rounds | Where-Object { [int]$_.round -eq 2 } | Select-Object -First 1)[0]
+        Assert-Equal ([int]$newRound.uat_period_slot) 11 "F-05 next allocation slot"
+        Assert-Equal ([int]$newRound.uat_period_primary) 990021 "F-05 next primary period"
+        Assert-Equal ([int]$newRound.uat_period_secondary) 990022 "F-05 next secondary period"
+    }
+    finally { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $c.root }
+}
+
 function Invoke-R9ReopenInvalidClaudeReviewers {
     $c = New-TestContext "r9-reopen-invalid-claude-reviewers"
     try {
@@ -1243,7 +1293,8 @@ $allScenarios = @(
     "r8-reconcile-fable-reject-stays-final-reject",
     "r8-reconcile-fable-blocked-stays-blocked",
     "r9-reopen-invalid-claude-reviewers",
-    "f04-period-pool-append-only"
+    "f04-period-pool-append-only",
+    "f05-period-pool-capacity-after-ten-used"
 )
 
 $selected = if ($Scenario -eq "all") { $allScenarios } else { @($Scenario) }
@@ -1285,6 +1336,7 @@ try {
                 "r8-reconcile-fable-blocked-stays-blocked" { Invoke-R8ReconcileFableBlockedStaysBlocked }
                 "r9-reopen-invalid-claude-reviewers" { Invoke-R9ReopenInvalidClaudeReviewers }
                 "f04-period-pool-append-only" { Invoke-F04PeriodPoolAppendOnly }
+                "f05-period-pool-capacity-after-ten-used" { Invoke-F05PeriodPoolCapacityAfterTenUsed }
                 default { throw "unknown scenario: $name" }
             }
             $passed++
