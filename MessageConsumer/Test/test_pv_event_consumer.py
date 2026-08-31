@@ -392,7 +392,23 @@ def test_expired_previous_period_is_forwarded_with_laggard_marker(settings):
 
 
 def test_boolean_period_reaches_schema_instead_of_boundary_logic(settings):
-    coordinator = SequenceCoordinator([ValueError("period must be int")])
+    normalizer = PvEventNormalizer(
+        PeriodResolver(
+            MappingPeriodRepository(
+                [{"PERIOD_NUM": 41, "CALC_YEAR": 2099, "CALC_MONTH": 6}]
+            )
+        ),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=InMemoryConsumedOrderLedger(),
+        delivery_ledger=InMemoryPvEventDeliveryLedger(),
+    )
+    coordinator = PvEventDispatchCoordinator(
+        normalizer,
+        user_stats_service=SimpleNamespace(),
+        placement_service=SimpleNamespace(),
+        elite_bonus_service=SimpleNamespace(),
+    )
     consumer = FakeConsumer()
     producer = FakeProducer()
     subject = build_subject(
@@ -404,7 +420,6 @@ def test_boolean_period_reaches_schema_instead_of_boundary_logic(settings):
 
     subject.process_message(FakeMessage(valid_order(period=True)))
 
-    assert len(coordinator.calls) == 1
     assert consumer.pauses == []
     assert producer.records[-1]["payload"]["reason"] == "SCHEMA_VIOLATION"
 
@@ -578,6 +593,56 @@ def test_period_resolution_error_marks_possible_wiring_failure(settings):
     failure = producer.records[-1]["payload"]
     assert failure["reason"] == "PERIOD_RESOLUTION_ERROR"
     assert failure["possible_wiring_error"] is True
+
+
+@pytest.mark.parametrize(
+    ("exception_type", "expected_reason"),
+    [
+        (ValueError, "PERSISTENT_FAILURE"),
+        (TypeError, "PERSISTENT_FAILURE"),
+        (OverflowError, "PERSISTENT_FAILURE"),
+        (PeriodResolutionError, "PERIOD_RESOLUTION_ERROR"),
+        (RuntimeError, "PERSISTENT_FAILURE"),
+    ],
+)
+def test_post_prepare_delivery_failures_are_category_three(
+    settings,
+    exception_type,
+    expected_reason,
+):
+    class PostPrepareFailureNormalizer(PvEventNormalizer):
+        attempts = 0
+
+        def _build_event(self, **_kwargs):
+            self.attempts += 1
+            raise exception_type("failure after prepare_delivery")
+
+    normalizer = PostPrepareFailureNormalizer(
+        PeriodResolver(
+            MappingPeriodRepository(
+                [{"PERIOD_NUM": 41, "CALC_YEAR": 2099, "CALC_MONTH": 6}]
+            )
+        ),
+        InMemoryEventRegistry(),
+        InMemoryRefundReversalLedger(),
+        order_repository=InMemoryConsumedOrderLedger(),
+        delivery_ledger=InMemoryPvEventDeliveryLedger(),
+    )
+    coordinator = PvEventDispatchCoordinator(
+        normalizer,
+        user_stats_service=SimpleNamespace(),
+        placement_service=SimpleNamespace(),
+        elite_bonus_service=SimpleNamespace(),
+    )
+    producer = FakeProducer()
+    subject = build_subject(settings, coordinator=coordinator, producer=producer)
+
+    subject.process_message(FakeMessage(valid_order()))
+
+    failure = producer.records[-1]["payload"]
+    assert normalizer.attempts == 1
+    assert failure["reason"] == expected_reason
+    assert failure["has_redis_residue"] is True
 
 
 def test_runtime_error_retries_to_budget_then_forwards_and_resumes(settings):
@@ -1090,7 +1155,7 @@ def test_real_coordinator_stage_attribution_matches_done_markers(
     } == set(expected_completed)
 
 
-def test_unraised_unknown_failure_keeps_residue_unknown(settings):
+def test_unraised_unknown_failure_defaults_to_residue_present(settings):
     subject = build_subject(settings)
     error = Exception("no traceback")
 
@@ -1103,8 +1168,8 @@ def test_unraised_unknown_failure_keeps_residue_unknown(settings):
     )
 
     assert decision.unclassified is True
-    assert decision.has_redis_residue is None
-    assert record["has_redis_residue"] is None
+    assert decision.has_redis_residue is True
+    assert record["has_redis_residue"] is True
 
 
 def test_circuit_breaker_stops_after_threshold_and_success_resets(settings):

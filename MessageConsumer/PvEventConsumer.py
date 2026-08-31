@@ -474,7 +474,14 @@ class PvEventConsumer:
         )
 
     def _classify_exception(self, exc: Exception) -> FailureDecision:
-        failed_stage, frame_names = self._traceback_context(exc)
+        failed_stage, frame_names, boundary_crossed = self._traceback_context(exc)
+        residue = self._infer_residue(
+            failed_stage,
+            frame_names,
+            boundary_crossed,
+        )
+        # 无法证明仍在 PENDING 之前时按有残留处理，避免给人工补偿错误的清理提示。
+        conservative_residue = residue is not False
         if isinstance(exc, EventIdentityConflict):
             return FailureDecision(1, failed_stage, False, "EVENT_IDENTITY_CONFLICT")
         if isinstance(
@@ -488,36 +495,63 @@ class PvEventConsumer:
         ):
             return FailureDecision(3, failed_stage, True, "PERSISTENT_FAILURE")
         if isinstance(exc, PeriodResolutionError):
-            category = 1 if failed_stage == "NORMALIZE" else 3
+            category = 3 if conservative_residue else 1
             return FailureDecision(
                 category,
                 failed_stage,
-                category == 3,
+                conservative_residue,
                 "PERIOD_RESOLUTION_ERROR",
             )
         if isinstance(exc, (TypeError, ValueError, OverflowError)):
-            category = 1 if failed_stage == "NORMALIZE" else 3
+            category = 3 if conservative_residue else 1
             return FailureDecision(
                 category,
                 failed_stage,
-                category == 3,
+                conservative_residue,
                 "SCHEMA_VIOLATION" if category == 1 else "PERSISTENT_FAILURE",
             )
         if self._transient_exception_types and isinstance(
             exc,
             self._transient_exception_types,
         ):
-            return FailureDecision(2, failed_stage, self._infer_residue(failed_stage, frame_names), "TRANSIENT_FAILURE")
+            return FailureDecision(
+                2,
+                failed_stage,
+                conservative_residue,
+                "TRANSIENT_FAILURE",
+            )
         if self._is_retryable_kafka_exception(exc):
-            return FailureDecision(2, failed_stage, self._infer_residue(failed_stage, frame_names), "TRANSIENT_FAILURE")
+            return FailureDecision(
+                2,
+                failed_stage,
+                conservative_residue,
+                "TRANSIENT_FAILURE",
+            )
         if isinstance(exc, (OriginalOrderUnavailable, DeliveryStateUnavailable)):
-            return FailureDecision(4, failed_stage, self._infer_residue(failed_stage, frame_names), "RETRY_EXHAUSTED")
+            return FailureDecision(
+                4,
+                failed_stage,
+                conservative_residue,
+                "RETRY_EXHAUSTED",
+            )
         if type(exc) is RuntimeError:
-            return FailureDecision(4, failed_stage, self._infer_residue(failed_stage, frame_names), "RETRY_EXHAUSTED")
+            if residue is True:
+                return FailureDecision(
+                    3,
+                    failed_stage,
+                    True,
+                    "PERSISTENT_FAILURE",
+                )
+            return FailureDecision(
+                4,
+                failed_stage,
+                conservative_residue,
+                "RETRY_EXHAUSTED",
+            )
         return FailureDecision(
             4,
             failed_stage,
-            self._infer_residue(failed_stage, frame_names),
+            conservative_residue,
             "RETRY_EXHAUSTED",
             unclassified=True,
         )
@@ -675,7 +709,7 @@ class PvEventConsumer:
             decision,
             extra=extra,
         )
-        # 本地日志与异常 topic 共用脱敏消息，且不记录原始 payload 或金额。
+        # 异常文本会脱敏连接信息；异常记录按 D11-a 保留原始 payload 供人工补偿核对。
         sanitized_exc_info = None
         if decision.unclassified and exc.__traceback__ is not None:
             try:
@@ -886,23 +920,40 @@ class PvEventConsumer:
 
     # region traceback 归因与消息辅助
     @staticmethod
-    def _traceback_context(exc: Exception) -> tuple[str, set[str]]:
-        frame_names = {frame.name for frame in traceback.extract_tb(exc.__traceback__)}
+    def _traceback_context(
+        exc: Exception,
+    ) -> tuple[str, set[str], Optional[bool]]:
+        frame_names: set[str] = set()
+        boundary_crossed: Optional[bool] = None
+        current = exc.__traceback__
+        while current is not None:
+            frame = current.tb_frame
+            frame_name = frame.f_code.co_name
+            frame_names.add(frame_name)
+            if frame_name in {"normalize_order", "normalize_refund"}:
+                # delivery_status 只会在 _prepare_delivery 成功返回后赋值，是 PENDING
+                # 边界已经跨过的直接证据，不依赖已返回调用是否仍出现在 traceback。
+                boundary_crossed = "delivery_status" in frame.f_locals
+            current = current.tb_next
         # 此处仅匹配 traceback 帧；拆分字面量保留 AC-4 禁调用守卫的精度。
         if "acknowledge_" "dispatched" in frame_names:
-            return "ACK", frame_names
+            return "ACK", frame_names, boundary_crossed
         for method_name, stage_name in _STAGE_METHODS.items():
             if method_name in frame_names:
-                return stage_name, frame_names
-        return "NORMALIZE", frame_names
+                return stage_name, frame_names, boundary_crossed
+        return "NORMALIZE", frame_names, boundary_crossed
 
     @staticmethod
-    def _infer_residue(failed_stage: str, frame_names: set[str]) -> Optional[bool]:
+    def _infer_residue(
+        failed_stage: str,
+        frame_names: set[str],
+        boundary_crossed: Optional[bool],
+    ) -> Optional[bool]:
         if failed_stage != "NORMALIZE":
             return True
         if frame_names & _NORMALIZE_RESIDUE_METHODS:
             return True
-        return False if frame_names else None
+        return boundary_crossed
 
     @staticmethod
     def _completed_and_pending(failed_stage: str) -> tuple[list[str], list[str]]:
