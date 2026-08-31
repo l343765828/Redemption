@@ -517,6 +517,7 @@ $permEnvNames = @(
     "VERIFIER_SETTINGS", "VERIFIER_RUNTIME_DIR", "VERIFIER_HISTORY_DIR", "VERIFIER_STATE_DIR",
     "VERIFIER_PROGRESS", "VERIFIER_RESUME_CONTEXT", "VERIFIER_EFFECTIVE_SETTINGS", "VERIFIER_CANDIDATE_SHA",
     "VERIFIER_FINGERPRINT", "VERIFIER_RESUME_MODE", "CLAUDE_REUSE_SESSION", "LOOP_CYCLE", "LOOP_ROUND",
+    "LOOP_UAT_PERIOD_SLOT", "LOOP_UAT_PERIOD_PRIMARY", "LOOP_UAT_PERIOD_SECONDARY", "LOOP_UAT_PERIOD_POOL_SHA256",
     "LOOP_FINAL_UAT_PERIOD_SLOT",
     "LOOP_FINAL_UAT_PERIOD_PRIMARY", "LOOP_FINAL_UAT_PERIOD_SECONDARY", "LOOP_FINAL_UAT_PERIOD_POOL_SHA256",
     "LOOP_UAT_AUTHORIZATION_ID", "LOOP_UAT_AUTHORIZED_ACTIONS", "LOOP_UAT_AUTHORIZATION_SCOPE_SHA256",
@@ -524,7 +525,7 @@ $permEnvNames = @(
     "LOOP_UAT_TARGET_NAMESPACE", "LOOP_UAT_RESOURCE_SCOPE", "LOOP_UAT_TARGET_BRANCH", "LOOP_UAT_IMPACT_SCOPE",
     "LOOP_MASTER_AGENTS_SNAPSHOT", "LOOP_MASTER_AGENTS_SHA256", "UAT_ACTION_PROXY_ALLOW",
     "VERIFIER_RUNNER_SCRIPT", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_ENV",
-    "FAKE_CLAUDE_ARGV_CAPTURE", "FAKE_CLAUDE_MODE", "PATH"
+    "FAKE_CLAUDE_ARGV_CAPTURE", "FAKE_CLAUDE_STDIN_CAPTURE", "FAKE_CLAUDE_MODE", "PATH"
 )
 $permSavedEnv = @{}
 foreach ($name in $permEnvNames) { $permSavedEnv[$name] = [Environment]::GetEnvironmentVariable($name) }
@@ -627,7 +628,61 @@ try {
     foreach ($protected in @("Edit(.loop-output/verifier-state/opus/**)", "Edit(.loop-output/loop-state.json)", "Edit(.loop-output/controller-evidence/**)")) {
         if ($allow -contains $protected -or $deny -notcontains $protected) { throw "permission integration protected evidence mismatch: $protected" }
     }
+    if ($allow -contains "Workflow" -or $deny -notcontains "Workflow") {
+        throw "permission integration Fable Workflow isolation mismatch"
+    }
     Write-Host "[FABLE-PERMISSION-INTEGRATION-SMOKE] PASS"
+
+    # Opus alone may use Workflow. Its durable mutations and report/result writes
+    # remain scoped to the main verifier session by the stage prompt contract.
+    $opusPermState = $opusPinDir
+    $opusPermRuntime = Join-Path $permOut "verifier-runtime\opus"
+    $opusPermHistory = Join-Path $permOut "verifier-history\opus"
+    New-Item -ItemType Directory -Force -Path @($opusPermRuntime, $opusPermHistory) | Out-Null
+    $env:VERIFIER_STAGE = "OPUS"
+    $env:VERIFIER_RESULT_FILE = Join-Path $permOut "opus-result.txt"
+    $env:CLAUDE_MODEL = "opus"
+    $env:CLAUDE_EFFORT = "ultracode"
+    $env:VERIFIER_RUNTIME_DIR = $opusPermRuntime
+    $env:VERIFIER_HISTORY_DIR = $opusPermHistory
+    $env:VERIFIER_STATE_DIR = $opusPermState
+    $env:VERIFIER_PROGRESS = Join-Path $opusPermState "verifier-progress.json"
+    $env:VERIFIER_RESUME_CONTEXT = Join-Path $opusPermState "resume-context.md"
+    $env:LOOP_UAT_PERIOD_SLOT = "9"
+    $env:LOOP_UAT_PERIOD_PRIMARY = "990017"
+    $env:LOOP_UAT_PERIOD_SECONDARY = "990018"
+    $env:LOOP_UAT_PERIOD_POOL_SHA256 = ("a" * 64)
+    $env:LOOP_UAT_AUTHORIZATION_ID = "SMOKE-AUTH-OPUS"
+    $env:LOOP_UAT_AUTHORIZATION_STAGE = "OPUS"
+    $env:LOOP_UAT_EXECUTION_ID = "c1-r1-opus-s9-$($permCandidate.Substring(0,12))"
+    $env:GITHUB_RUN_ID = "1234562"
+    & $prepareScript
+    if ($LASTEXITCODE -ne 0) { throw "Opus permission integration prepare failed: $LASTEXITCODE" }
+    $opusEffectiveSettingsPath = Join-Path $opusPermRuntime "verifier-settings.effective.json"
+    $opusEffectiveSettings = [IO.File]::ReadAllText($opusEffectiveSettingsPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    $opusAllow = @($opusEffectiveSettings.permissions.allow)
+    $opusDeny = @($opusEffectiveSettings.permissions.deny)
+    foreach ($required in @("Workflow", "Edit(.loop-output/UAT_REPORT.md)", "Edit(.loop-output/opus-result.txt)", "Edit(.loop-output/verifier-state/opus/**)", $permProxyAllow)) {
+        if ($opusAllow -notcontains $required) { throw "permission integration missing Opus allow: $required" }
+    }
+    if ($opusDeny -contains "Workflow" -or $opusDeny -notcontains "Agent") {
+        throw "permission integration Opus Workflow/Agent isolation mismatch"
+    }
+    Write-Host "[OPUS-WORKFLOW-PERMISSION-INTEGRATION-SMOKE] PASS"
+
+    # Restore the Fable stage for the runner integration below.
+    $env:VERIFIER_STAGE = "FABLE"
+    $env:VERIFIER_RESULT_FILE = Join-Path $permOut "uat-result.txt"
+    $env:CLAUDE_MODEL = "fable"
+    $env:CLAUDE_EFFORT = "max"
+    $env:VERIFIER_RUNTIME_DIR = $permRuntime
+    $env:VERIFIER_HISTORY_DIR = $permHistory
+    $env:VERIFIER_STATE_DIR = $permState
+    $env:VERIFIER_PROGRESS = Join-Path $permState "verifier-progress.json"
+    $env:VERIFIER_RESUME_CONTEXT = Join-Path $permState "resume-context.md"
+    $env:LOOP_UAT_AUTHORIZATION_ID = "SMOKE-AUTH-FABLE"
+    $env:LOOP_UAT_AUTHORIZATION_STAGE = "FABLE"
+    $env:LOOP_UAT_EXECUTION_ID = "c1-r1-fable-s10-$($permCandidate.Substring(0,12))"
 
     # Execute the real runner against a local fake Claude binary. This catches
     # PowerShell argument-binding regressions without making a network request.
@@ -639,13 +694,16 @@ using System.IO;
 public static class LoopEngineFakeClaude {
     public static int Main(string[] args) {
         File.WriteAllLines(Environment.GetEnvironmentVariable("FAKE_CLAUDE_ARGV_CAPTURE"), args);
-        Console.In.ReadToEnd();
+        string prompt = Console.In.ReadToEnd();
+        string promptCapture = Environment.GetEnvironmentVariable("FAKE_CLAUDE_STDIN_CAPTURE");
+        if (!String.IsNullOrEmpty(promptCapture)) File.WriteAllText(promptCapture, prompt);
         string mode = Environment.GetEnvironmentVariable("FAKE_CLAUDE_MODE") ?? "valid";
         if (mode == "plain") {
             Console.WriteLine("plain text must be rejected");
             return 0;
         }
-        string model = mode == "wrong-model" ? "claude-sonnet-smoke" : "claude-fable-smoke";
+        string requestedModel = Environment.GetEnvironmentVariable("CLAUDE_MODEL") ?? "unknown";
+        string model = mode == "wrong-model" ? "claude-sonnet-smoke" : "claude-" + requestedModel + "-smoke";
         Console.WriteLine("{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"00000000-0000-4000-8000-000000000001\",\"model\":\"" + model + "\"}");
         Console.WriteLine("{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"00000000-0000-4000-8000-000000000001\",\"result\":\"PASS\",\"total_cost_usd\":0.01,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}");
         return 0;
@@ -656,6 +714,7 @@ public static class LoopEngineFakeClaude {
     Add-Type -TypeDefinition $fakeClaudeSource -Language CSharp -OutputAssembly $fakeClaudeExe -OutputType ConsoleApplication
     $env:PATH = "$fakeBin;$env:PATH"
     $env:FAKE_CLAUDE_ARGV_CAPTURE = Join-Path $permRoot "claude-argv.txt"
+    $env:FAKE_CLAUDE_STDIN_CAPTURE = Join-Path $permRoot "fable-prompt.txt"
     $env:FAKE_CLAUDE_MODE = "valid"
     $env:VERIFIER_EFFECTIVE_SETTINGS = $effectiveSettingsPath
     $env:VERIFIER_CANDIDATE_SHA = $permCandidate
@@ -678,6 +737,10 @@ public static class LoopEngineFakeClaude {
         if ($claudeArgv -notcontains $expectedArg) {
             throw "Claude runner dropped required argv token '$expectedArg': $($claudeArgv -join '|')"
         }
+    }
+    $fablePromptText = [IO.File]::ReadAllText($env:FAKE_CLAUDE_STDIN_CAPTURE, [System.Text.Encoding]::UTF8)
+    if ($fablePromptText.Contains("# OPUS ULTRACODE WORKFLOW BOUNDARY")) {
+        throw "Fable prompt inherited the Opus-only Workflow boundary"
     }
 
     $env:FAKE_CLAUDE_MODE = "plain"
@@ -703,6 +766,44 @@ public static class LoopEngineFakeClaude {
         $wrongModelRejected = $_.Exception.Message -like '*claude exited 1*'
     }
     if (-not $wrongModelRejected) { throw "Claude runner accepted a model outside the requested Fable family" }
+
+    $env:VERIFIER_STAGE = "OPUS"
+    $env:VERIFIER_RESULT_FILE = Join-Path $permOut "opus-result.txt"
+    $env:CLAUDE_MODEL = "opus"
+    $env:CLAUDE_EFFORT = "ultracode"
+    $env:VERIFIER_RUNTIME_DIR = $opusPermRuntime
+    $env:VERIFIER_HISTORY_DIR = $opusPermHistory
+    $env:VERIFIER_STATE_DIR = $opusPermState
+    $env:VERIFIER_PROGRESS = Join-Path $opusPermState "verifier-progress.json"
+    $env:VERIFIER_RESUME_CONTEXT = Join-Path $opusPermState "resume-context.md"
+    $env:VERIFIER_EFFECTIVE_SETTINGS = $opusEffectiveSettingsPath
+    $env:VERIFIER_FINGERPRINT = ("f" * 64)
+    $env:LOOP_UAT_AUTHORIZATION_ID = "SMOKE-AUTH-OPUS"
+    $env:LOOP_UAT_AUTHORIZATION_STAGE = "OPUS"
+    $env:LOOP_UAT_EXECUTION_ID = "c1-r1-opus-s9-$($permCandidate.Substring(0,12))"
+    $env:FAKE_CLAUDE_STDIN_CAPTURE = Join-Path $permRoot "opus-prompt.txt"
+    $env:FAKE_CLAUDE_MODE = "valid"
+    $env:GITHUB_RUN_ID = "123460"
+    & $runnerScript
+    if ($LASTEXITCODE -ne 0) { throw "fake Claude Opus stream was rejected: $LASTEXITCODE" }
+    $opusArgv = @(Get-Content -LiteralPath $env:FAKE_CLAUDE_ARGV_CAPTURE -Encoding UTF8)
+    foreach ($expectedArg in @("--model", "opus", "--effort", "ultracode", "--settings", $opusEffectiveSettingsPath)) {
+        if ($opusArgv -notcontains $expectedArg) {
+            throw "Claude runner dropped required Opus argv token '$expectedArg': $($opusArgv -join '|')"
+        }
+    }
+    $opusPromptText = [IO.File]::ReadAllText($env:FAKE_CLAUDE_STDIN_CAPTURE, [System.Text.Encoding]::UTF8)
+    foreach ($requiredBoundary in @(
+        "# OPUS ULTRACODE WORKFLOW BOUNDARY",
+        "Workflow subagents are read-only analysts",
+        "Only the main Opus session may invoke the UAT action proxy",
+        "Only the main Opus session may write .loop-output/UAT_REPORT.md, .loop-output/opus-result.txt"
+    )) {
+        if (-not $opusPromptText.Contains($requiredBoundary)) {
+            throw "Opus prompt missing Workflow boundary: $requiredBoundary"
+        }
+    }
+    Write-Host "[OPUS-WORKFLOW-PROMPT-INTEGRATION-SMOKE] PASS"
     Write-Host "[CLAUDE-RUNNER-ARGV-AND-STREAM-SMOKE] PASS"
 }
 finally {

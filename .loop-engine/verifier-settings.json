@@ -1,0 +1,36 @@
+{
+  "//": "Verifier 专用权限白名单。仅经 claude -p --settings 本文件 生效，不影响交互式会话（那走 .claude/settings.local.json）。dontAsk 模式下未列入 allow 的一律自动拒绝。",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Write(.loop-output/**)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git show:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git ls-remote:*)",
+      "Bash(git merge-base:*)",
+      "Bash(git bundle:*)",
+      "Bash(kubectl:*)",
+      "PowerShell(*kubectl*)",
+      "PowerShell(*Test-NetConnection*)",
+      "PowerShell(*uat-preflight*)"
+    ],
+    "deny": [
+      "Edit",
+      "NotebookEdit",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git reset:*)",
+      "Bash(git checkout:*)",
+      "Bash(git restore:*)",
+      "Bash(git merge:*)",
+      "Bash(git rebase:*)"
+    ]
+  }
+}

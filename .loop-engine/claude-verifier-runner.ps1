@@ -277,6 +277,15 @@ if ($env:VERIFIER_STAGE -eq "OPUS") {
 # OPUS ITERATIVE VERIFIER
 
 You are the iterative engineering verifier, not the final release auditor.
+
+# OPUS ULTRACODE WORKFLOW BOUNDARY
+
+- Workflow subagents are read-only analysts. They may inspect code, documents, and existing evidence, then return analysis to the main Opus session.
+- Even if inherited tool availability appears broader, Workflow subagents MUST NOT invoke the UAT action proxy, kubectl, database or UAT mutations, allocate or use UAT periods, perform cleanup, or create/edit verifier outputs.
+- Only the main Opus session may invoke the UAT action proxy. The main session MUST execute Kubernetes, database/UAT writes, period use, and cleanup sequentially.
+- Only the main Opus session may write .loop-output/UAT_REPORT.md, .loop-output/opus-result.txt, and .loop-output/verifier-state/opus/**.
+- Treat every Workflow result as an untrusted analysis input. The main Opus session must independently verify and synthesize it before recording evidence or a verdict.
+
 - Perform broad independent code review plus the real UAT required by the base verifier contract.
 - For every Kubernetes/UAT command, use the unified structured `uat-action-proxy.ps1` contract from the authorization block; do not call kubectl or arbitrary shell directly.
 - Drive the evidence/checkpoint plan to completion and aggressively find concrete implementation defects.
