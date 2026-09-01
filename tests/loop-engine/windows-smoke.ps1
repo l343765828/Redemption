@@ -178,7 +178,7 @@ public static class LoopNativeProbe {
         }
     }
     if ($env:OPUS_CLAUDE_EFFORT -ne "max") { throw "Opus iterative review must use max effort" }
-    if ($env:FABLE_CLAUDE_EFFORT -ne "ultracode") { throw "Fable final audit must use ultracode" }
+    if ($env:FABLE_CLAUDE_EFFORT -ne "max") { throw "Fable final audit must use max effort" }
     Write-Host "[CLAUDE-ARGV-SMOKE] PASS"
 
     # Native stderr regression: with script-wide Stop, a negative native command
@@ -676,7 +676,7 @@ try {
     $env:VERIFIER_STAGE = "FABLE"
     $env:VERIFIER_RESULT_FILE = Join-Path $permOut "uat-result.txt"
     $env:CLAUDE_MODEL = "fable"
-    $env:CLAUDE_EFFORT = "ultracode"
+    $env:CLAUDE_EFFORT = "max"
     $env:VERIFIER_RUNTIME_DIR = $permRuntime
     $env:VERIFIER_HISTORY_DIR = $permHistory
     $env:VERIFIER_STATE_DIR = $permState
@@ -731,7 +731,7 @@ public static class LoopEngineFakeClaude {
     if ($LASTEXITCODE -ne 0) { throw "fake Claude valid stream was rejected: $LASTEXITCODE" }
     $claudeArgv = @(Get-Content -LiteralPath $env:FAKE_CLAUDE_ARGV_CAPTURE -Encoding UTF8)
     $expectedArgv = @(
-        "-p", "--permission-mode", "dontAsk", "--model", "fable", "--effort", "ultracode",
+        "-p", "--permission-mode", "dontAsk", "--model", "fable", "--effort", "max",
         "--output-format", "stream-json", "--verbose", "--include-partial-messages",
         "--forward-subagent-text", "--settings", $effectiveSettingsPath, "--setting-sources="
     )
