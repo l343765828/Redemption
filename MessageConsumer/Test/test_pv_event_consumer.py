@@ -13,8 +13,15 @@ from MessageConsumer.PvEventNormalizer import EventIdentityConflict
 from MessageConsumer.PvEventNormalizer import InMemoryEventRegistry, PvEventNormalizer
 from Order.ConsumedOrderLedger import ConsumedOrderConflict
 from Order.ConsumedOrderLedger import InMemoryConsumedOrderLedger
-from Order.PvEventDeliveryLedger import InMemoryPvEventDeliveryLedger
-from Order.RefundReversalLedger import InMemoryRefundReversalLedger
+from Order.PvEventDeliveryLedger import (
+    DeliveryIdentityConflict,
+    InMemoryPvEventDeliveryLedger,
+)
+from Order.RefundReversalLedger import (
+    InMemoryRefundReversalLedger,
+    OriginalOrderNotRefundable,
+    RefundReversalConflict,
+)
 from MessageConsumer.PvEventConsumer import (
     BOUNDED_RETRY_ATTEMPTS,
     CIRCUIT_BREAKER_THRESHOLD,
@@ -249,6 +256,51 @@ def valid_order(**overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def valid_refund(**overrides):
+    payload = {
+        "order_id": "R-1",
+        "user_id": "U-1",
+        "period": 41,
+        "original_order_id": "O-1",
+        "amount": "100.25",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def build_real_refund_subject(
+    settings,
+    *,
+    order_ledger,
+    refund_ledger=None,
+    consumer=None,
+    producer=None,
+):
+    normalizer = PvEventNormalizer(
+        PeriodResolver(
+            MappingPeriodRepository(
+                [{"PERIOD_NUM": 41, "CALC_YEAR": 2099, "CALC_MONTH": 6}]
+            )
+        ),
+        InMemoryEventRegistry(),
+        refund_ledger or InMemoryRefundReversalLedger(),
+        order_repository=order_ledger,
+        delivery_ledger=InMemoryPvEventDeliveryLedger(),
+    )
+    coordinator = PvEventDispatchCoordinator(
+        normalizer,
+        user_stats_service=SimpleNamespace(),
+        placement_service=SimpleNamespace(),
+        elite_bonus_service=SimpleNamespace(),
+    )
+    return build_subject(
+        settings,
+        coordinator=coordinator,
+        consumer=consumer,
+        producer=producer,
+    )
 
 
 def test_success_and_duplicate_noop_both_commit_the_exact_message(settings):
@@ -555,6 +607,58 @@ def test_heartbeat_buffered_message_is_polled_during_drain_and_committed_once(
     assert consumer.commits == [(current, False), (buffered, False)]
 
 
+def test_revoke_during_buffered_drain_does_not_dequeue_an_empty_buffer(settings):
+    consumer = FakeConsumer()
+    coordinator = SequenceCoordinator()
+    subject = build_subject(settings, consumer=consumer, coordinator=coordinator)
+    subject._buffered_messages.append(FakeMessage(valid_order(), partition=1))
+    running_during_revoke = []
+
+    def poll_hook():
+        if consumer.poll_count == 1:
+            on_revoke = consumer.subscriptions[0][1]["on_revoke"]
+            before = subject.running
+            on_revoke(consumer, [PartitionRef(TOPIC_ORDERS, 1)])
+            running_during_revoke.append((before, subject.running))
+        elif consumer.poll_count == 2:
+            subject.running = False
+
+    consumer.poll_hook = poll_hook
+
+    subject.run()
+
+    assert running_during_revoke == [(True, True)]
+    assert coordinator.calls == []
+    assert consumer.commits == []
+    assert consumer.closed is True
+
+
+def test_revoke_discards_message_returned_by_the_same_heartbeat_poll(settings):
+    consumer = FakeConsumer()
+    coordinator = SequenceCoordinator()
+    subject = build_subject(settings, consumer=consumer, coordinator=coordinator)
+    subject._buffered_messages.append(FakeMessage(valid_order(), partition=1))
+    consumer.poll_results.append(
+        FakeMessage(valid_order(order_id="O-REVOKED"), partition=1, offset=12)
+    )
+
+    def poll_hook():
+        if consumer.poll_count == 1:
+            consumer.subscriptions[0][1]["on_revoke"](
+                consumer,
+                [PartitionRef(TOPIC_ORDERS, 1)],
+            )
+        elif consumer.poll_count == 2:
+            subject.running = False
+
+    consumer.poll_hook = poll_hook
+
+    subject.run()
+
+    assert coordinator.calls == []
+    assert consumer.commits == []
+
+
 def test_transient_retry_stops_without_commit_or_resume_on_shutdown(settings):
     coordinator = SequenceCoordinator([TransientFailure("redis down")])
     consumer = FakeConsumer()
@@ -651,12 +755,22 @@ def test_permanent_pre_delivery_conflict_forwards_with_no_redis_residue(settings
     assert consumer.commits == [(message, False)]
 
 
-def test_permanent_post_delivery_conflict_forwards_with_redis_residue(settings):
+@pytest.mark.parametrize(
+    "conflict",
+    [
+        ConsumedOrderConflict("consumed order conflict"),
+        DeliveryIdentityConflict("delivery identity conflict"),
+    ],
+)
+def test_permanent_post_delivery_conflict_forwards_with_redis_residue(
+    settings,
+    conflict,
+):
     consumer = FakeConsumer()
     producer = FakeProducer()
     subject = build_subject(
         settings,
-        coordinator=SequenceCoordinator([ConsumedOrderConflict("conflict")]),
+        coordinator=SequenceCoordinator([conflict]),
         consumer=consumer,
         producer=producer,
     )
@@ -665,6 +779,91 @@ def test_permanent_post_delivery_conflict_forwards_with_redis_residue(settings):
 
     assert producer.records[-1]["payload"]["has_redis_residue"] is True
     assert len(consumer.commits) == 1
+
+
+@pytest.mark.parametrize(
+    ("order_period", "order_amount", "refund_amount"),
+    [
+        (39, 100_250_000, "100.25"),
+        (40, 100_250_000, "99.00"),
+    ],
+)
+def test_refund_validation_conflicts_before_delivery_report_no_residue(
+    settings,
+    order_period,
+    order_amount,
+    refund_amount,
+):
+    order_ledger = InMemoryConsumedOrderLedger()
+    order_ledger.record_order("O-1", order_amount, order_period)
+    consumer = FakeConsumer()
+    producer = FakeProducer()
+    subject = build_real_refund_subject(
+        settings,
+        order_ledger=order_ledger,
+        consumer=consumer,
+        producer=producer,
+    )
+    message = FakeMessage(
+        valid_refund(amount=refund_amount),
+        topic=TOPIC_REFUNDS,
+    )
+
+    subject.process_message(message)
+
+    failure = producer.records[-1]["payload"]
+    assert failure["reason"] == "PERSISTENT_FAILURE"
+    assert failure["has_redis_residue"] is False
+    assert consumer.commits == [(message, False)]
+
+
+def test_original_order_not_refundable_before_delivery_reports_no_residue(settings):
+    class NotRefundableOrderLedger:
+        def get_refundable_order(self, _original_order_id):
+            raise OriginalOrderNotRefundable("original order is not refundable")
+
+    consumer = FakeConsumer()
+    producer = FakeProducer()
+    subject = build_real_refund_subject(
+        settings,
+        order_ledger=NotRefundableOrderLedger(),
+        consumer=consumer,
+        producer=producer,
+    )
+    message = FakeMessage(valid_refund(), topic=TOPIC_REFUNDS)
+
+    subject.process_message(message)
+
+    failure = producer.records[-1]["payload"]
+    assert failure["reason"] == "PERSISTENT_FAILURE"
+    assert failure["has_redis_residue"] is False
+    assert consumer.commits == [(message, False)]
+
+
+def test_refund_claim_conflict_after_delivery_reports_redis_residue(settings):
+    class ConflictingRefundLedger:
+        def claim_whole_order(self, **_kwargs):
+            raise RefundReversalConflict("reversal claim conflict")
+
+    order_ledger = InMemoryConsumedOrderLedger()
+    order_ledger.record_order("O-1", 100_250_000, 40)
+    consumer = FakeConsumer()
+    producer = FakeProducer()
+    subject = build_real_refund_subject(
+        settings,
+        order_ledger=order_ledger,
+        refund_ledger=ConflictingRefundLedger(),
+        consumer=consumer,
+        producer=producer,
+    )
+    message = FakeMessage(valid_refund(), topic=TOPIC_REFUNDS)
+
+    subject.process_message(message)
+
+    failure = producer.records[-1]["payload"]
+    assert failure["reason"] == "PERSISTENT_FAILURE"
+    assert failure["has_redis_residue"] is True
+    assert consumer.commits == [(message, False)]
 
 
 def _raise_from_elite_bonus_stage():
@@ -1043,6 +1242,55 @@ def test_permanent_failure_emits_sanitized_error_log(settings, caplog):
     assert producer.records[-1]["payload"]["exception_message"] == "[REDACTED_CONNECTION]"
 
 
+def test_blocked_retry_logs_classification_context_on_entry(settings, caplog):
+    coordinator = SequenceCoordinator(
+        [TransientFailure("redis unavailable"), SimpleNamespace(disposition="APPLY")]
+    )
+    subject = build_subject(settings, coordinator=coordinator)
+    caplog.set_level(logging.WARNING, logger="MessageConsumer.PvEventConsumer")
+
+    subject.process_message(FakeMessage(valid_order()))
+
+    retry_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if "分区阻断重试" in record.getMessage()
+    ]
+    assert len(retry_logs) == 1
+    assert "event_identity=O-1" in retry_logs[0]
+    assert "failed_stage=NORMALIZE" in retry_logs[0]
+    assert "reason=TRANSIENT_FAILURE" in retry_logs[0]
+    assert "exception_class=TransientFailure" in retry_logs[0]
+    assert "exception_message=redis unavailable" in retry_logs[0]
+
+
+def test_blocked_retry_periodic_log_is_bounded_and_redacted(settings, caplog):
+    connection_uri = "redis://operator:test-password@redis.invalid:6379/0"
+    coordinator = SequenceCoordinator(
+        [TransientFailure(connection_uri)] * 9
+        + [SimpleNamespace(disposition="APPLY")]
+    )
+    subject = build_subject(settings, coordinator=coordinator)
+    caplog.set_level(logging.WARNING, logger="MessageConsumer.PvEventConsumer")
+
+    subject.process_message(FakeMessage(valid_order()))
+
+    retry_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if "分区阻断重试" in record.getMessage()
+    ]
+    assert len(retry_logs) == 2
+    assert "attempts=10" in retry_logs[-1]
+    assert all("event_identity=O-1" in message for message in retry_logs)
+    assert all("failed_stage=NORMALIZE" in message for message in retry_logs)
+    assert all("reason=TRANSIENT_FAILURE" in message for message in retry_logs)
+    assert all("exception_class=TransientFailure" in message for message in retry_logs)
+    assert all("exception_message=[REDACTED_CONNECTION]" in message for message in retry_logs)
+    assert "test-password" not in caplog.text
+    assert connection_uri not in caplog.text
+
+
 def test_unclassified_permanent_failure_error_log_contains_traceback(settings, caplog):
     class UnclassifiedCoordinator(SequenceCoordinator):
         def update_placement_performance(self):
@@ -1413,6 +1661,17 @@ def test_unraised_unknown_failure_keeps_residue_unknown(settings):
     assert decision.unclassified is True
     assert decision.has_redis_residue is None
     assert record["has_redis_residue"] is None
+
+
+def test_unraised_refund_conflict_keeps_residue_unknown(settings):
+    subject = build_subject(settings)
+
+    decision = subject._classify_exception(RefundReversalConflict("conflict"))
+
+    assert decision.category == 3
+    assert decision.reason == "PERSISTENT_FAILURE"
+    assert decision.has_redis_residue is None
+    assert decision.unclassified is True
 
 
 def test_circuit_breaker_stops_after_threshold_and_success_resets(settings):

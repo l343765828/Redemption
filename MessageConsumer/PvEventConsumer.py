@@ -295,6 +295,9 @@ class PvEventConsumer:
                     self._poll_and_buffer(0.0)
                     if not self.running:
                         break
+                    # poll 会同步触发 on_revoke 并清空旧 assignment 缓冲，须重新判空。
+                    if not self._buffered_messages:
+                        continue
                     msg = self._buffered_messages.popleft()
                 else:
                     msg = self.consumer.poll(1.0)
@@ -505,16 +508,16 @@ class PvEventConsumer:
         # 异常文本不是稳定协议；永久封期与瞬时锁冲突可能同为 RuntimeError，禁止匹配文案猜测。
         if isinstance(exc, EventIdentityConflict):
             return FailureDecision(1, failed_stage, False, "EVENT_IDENTITY_CONFLICT")
-        if isinstance(
-            exc,
-            (
-                ConsumedOrderConflict,
-                RefundReversalConflict,
-                OriginalOrderNotRefundable,
-                DeliveryIdentityConflict,
-            ),
-        ):
+        if isinstance(exc, (ConsumedOrderConflict, DeliveryIdentityConflict)):
             return FailureDecision(3, failed_stage, True, "PERSISTENT_FAILURE")
+        if isinstance(exc, (RefundReversalConflict, OriginalOrderNotRefundable)):
+            return FailureDecision(
+                3,
+                failed_stage,
+                residue,
+                "PERSISTENT_FAILURE",
+                unclassified=residue is None,
+            )
         if isinstance(exc, PeriodResolutionError):
             category = 3 if residue is True else 1
             return FailureDecision(
@@ -584,6 +587,19 @@ class PvEventConsumer:
         attempt = 1
         latest_exc = initial_exc
         latest_decision = self._classify_exception(initial_exc)
+        logger.warning(
+            "分区阻断重试开始: topic=%s partition=%s attempts=%s "
+            "event_identity=%s failed_stage=%s reason=%s "
+            "exception_class=%s exception_message=%s",
+            msg.topic(),
+            msg.partition(),
+            attempt,
+            payload.get("order_id"),
+            latest_decision.failed_stage,
+            latest_decision.reason,
+            type(latest_exc).__name__,
+            self._sanitize_exception_message(str(latest_exc)),
+        )
 
         while self.running and retry_epoch == self._assignment_epoch:
             if bounded and attempt >= self.settings.bounded_retry_attempts:
@@ -603,10 +619,17 @@ class PvEventConsumer:
             attempt += 1
             if attempt % 10 == 0:
                 logger.warning(
-                    "分区阻断重试仍未自愈: topic=%s partition=%s attempts=%s",
+                    "分区阻断重试仍未自愈: topic=%s partition=%s attempts=%s "
+                    "event_identity=%s failed_stage=%s reason=%s "
+                    "exception_class=%s exception_message=%s",
                     msg.topic(),
                     msg.partition(),
                     attempt,
+                    payload.get("order_id"),
+                    latest_decision.failed_stage,
+                    latest_decision.reason,
+                    type(latest_exc).__name__,
+                    self._sanitize_exception_message(str(latest_exc)),
                 )
             dispatch_completed = False
             try:
@@ -690,8 +713,12 @@ class PvEventConsumer:
                 logger.warning("阻断退避期间 Kafka 心跳 poll 失败")
 
     def _poll_and_buffer(self, timeout: float) -> None:
+        poll_epoch = self._assignment_epoch
         heartbeat_message = self.consumer.poll(timeout)
         if heartbeat_message is None:
+            return
+        # poll 中的 rebalance 回调已使旧 assignment 消息失效，不能重新塞回本地队列。
+        if poll_epoch != self._assignment_epoch:
             return
         if len(self._buffered_messages) >= MAX_BUFFERED_MESSAGES:
             # 当前消息及队列内容都未提交；停机可让 Kafka 重投，不能用 deque(maxlen) 静默丢单。
