@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "record_type": "WORK_CLOSURE_ARCHIVE",
+  "archive_id": "WORK-PVAM-02-closure-2026-09-03",
+  "work_id": "WORK-PVAM-02",
+  "created_at": "2026-09-03T23:03:11.2675121+08:00",
+  "created_by": {
+    "git_user_name": "admin",
+    "git_user_email": "343765828@qq.com",
+    "recorded_by": "Codex under explicit user authorization"
+  },
+  "closure_status": "COMPLETED",
+  "publication_target": {
+    "repository": "l343765828/Redemption",
+    "branch": "master",
+    "path": "docs/archives/WORK-PVAM-02/closure-2026-09-03",
+    "delivery": "pull-request-then-merge"
+  },
+  "immutable_baseline": {
+    "role": "first_immutable_w2_baseline",
+    "source_ref": "refs/heads/codex/work2",
+    "commit": "ae488243e5533778575b94e53935914a36dcae46",
+    "tree": "b7a0d19a9b89c469ff0fa921b144a2c1426d3de9"
+  },
+  "branch_protection": {
+    "ruleset_name": "Protect codex/work2 via PR",
+    "ruleset_id": 22201355,
+    "state": "ACTIVE",
+    "target": "refs/heads/codex/work2",
+    "bypass_actors": [],
+    "pull_request_required": true,
+    "required_approving_review_count": 0,
+    "deletion_restricted": true,
+    "force_push_blocked": true,
+    "verification_method": "GitHub repository ruleset settings inspected; destructive override was not tested"
+  },
+  "execution_summary": {
+    "state_schema_version": 4,
+    "state_status": "COMPLETED",
+    "state_stage": "COMPLETED",
+    "cycle": 3,
+    "round": 3,
+    "candidate_commit": "ae488243e5533778575b94e53935914a36dcae46",
+    "uat_result": "PASS",
+    "opus_precheck_result": "PRECHECK_PASS",
+    "opus_core_result": "NO_BUG",
+    "fable_core_result": "FINAL_PASS"
+  },
+  "new_engine_policy": {
+    "migrate_schema_4_state": false,
+    "restore_schema_4_state": false,
+    "read_legacy_governance_registry_at_runtime": false,
+    "future_w2_review": "Start a new schema 5 execution against an explicitly selected historical W2 commit and emit new evidence"
+  },
+  "legacy_governance": {
+    "classification": "HISTORICAL_ONLY",
+    "authoritative": false,
+    "consumed_by_new_engine": false,
+    "archived_copy": "historical-governance/WORK_APPROVED_COMMIT_REGISTRY.json",
+    "sidecar": "historical-governance/HISTORICAL_ONLY.json",
+    "sha256": "4740ce983211e7747d43bc1a75fb03e4e6ee9be6a3342e72b85098f54796db3d",
+    "size_bytes": 8272,
+    "legacy_registry_status": "ACTIVE",
+    "legacy_authorization_status": "APPROVED_FOR_CONSTRUCTION",
+    "legacy_w2_commit": "ce1c9a860816c697e465b717a803bccd43a7b7a7",
+    "legacy_w2_tree": "1a5dd1d0fae8f3d613f3616b9cb033e44c6d79aa",
+    "original_bytes_modified": false
+  },
+  "artifacts": [
+    {
+      "path": "evidence/UAT_REPORT.md",
+      "size_bytes": 40962,
+      "sha256": "f3d0ce26c4f9ac32f243051c6d75d3e3d18d3523094a2743cd005c9756a4b810",
+      "purpose": "Final UAT report"
+    },
+    {
+      "path": "evidence/loop-state.schema4.json",
+      "size_bytes": 85792,
+      "sha256": "7b611341c273b26893654009a1e0224862f81818d80f734f72445368b09eab34",
+      "purpose": "Completed legacy execution state preserved as evidence only"
+    },
+    {
+      "path": "evidence/uat-result.txt",
+      "size_bytes": 5,
+      "sha256": "c26de83abdc9496cd1301470918ec39ecca1cf389ef0ae1c6504da1800d1c431",
+      "purpose": "Machine-readable UAT result"
+    },
+    {
+      "path": "evidence/opus-result.txt",
+      "size_bytes": 14,
+      "sha256": "2dd548ee69c34341976606a87c851a8b184470eb1fb1c68669a8d17a7aa290df",
+      "purpose": "Opus precheck result"
+    },
+    {
+      "path": "evidence/opus-core-result.txt",
+      "size_bytes": 14,
+      "sha256": "8350217023165ca3a5f549ca347ff5fbb253a462e7929503132daf0ecfc3c51c",
+      "purpose": "Opus core verdict"
+    },
+    {
+      "path": "evidence/fable-core-result.txt",
+      "size_bytes": 18,
+      "sha256": "767e36e0a036edcc635377beac374866833a61c24b40882b24d9f419657a8f69",
+      "purpose": "Fable final verdict"
+    },
+    {
+      "path": "evidence/pushed-sha.txt",
+      "size_bytes": 41,
+      "sha256": "417f472ef7f92dec7891e6bac30c28c16293d9a6e5b00c6e9058fc6093ca0659",
+      "purpose": "Candidate commit binding"
+    },
+    {
+      "path": "evidence/IMPLEMENTATION_HANDOFF.md",
+      "size_bytes": 15159,
+      "sha256": "a7467ce657a2b0a8534bfddb19bcbe8af94f0c55dab039df6c1e076c014cb9a4",
+      "purpose": "Implementation handoff record"
+    },
+    {
+      "path": "historical-governance/WORK_APPROVED_COMMIT_REGISTRY.json",
+      "size_bytes": 8272,
+      "sha256": "4740ce983211e7747d43bc1a75fb03e4e6ee9be6a3342e72b85098f54796db3d",
+      "purpose": "Exact byte copy of the superseded governance registry for historical traceability"
+    }
+  ],
+  "integrity": {
+    "algorithm": "SHA-256",
+    "checksum_file": "SHA256SUMS.txt",
+    "change_policy": "Do not overwrite this archive in place; publish a new dated archive revision with a new execution and evidence"
+  },
+  "scope_limitations": [
+    "This archive contains selected closure artifacts, not every raw controller or action log.",
+    "Branch protection was verified by configuration inspection; no force-push or deletion attempt was performed.",
+    "The selected files were scanned for common credential patterns; this is not a proof that arbitrary secrets are absent."
+  ]
+}
