@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "record_type": "GOVERNANCE_SUPERSESSION_NOTICE",
+  "work_id": "WORK-PVAM-02",
+  "recorded_at": "2026-09-03T23:03:11.2675121+08:00",
+  "classification": "HISTORICAL_ONLY",
+  "authoritative": false,
+  "consumed_by_new_engine": false,
+  "runtime_effect": "NONE",
+  "does_not_modify_original_bytes": true,
+  "historical_artifact": {
+    "name": "WORK_APPROVED_COMMIT_REGISTRY.json",
+    "archived_copy": "historical-governance/WORK_APPROVED_COMMIT_REGISTRY.json",
+    "size_bytes": 8272,
+    "sha256": "4740ce983211e7747d43bc1a75fb03e4e6ee9be6a3342e72b85098f54796db3d",
+    "legacy_registry_status": "ACTIVE",
+    "legacy_authorization_status": "APPROVED_FOR_CONSTRUCTION",
+    "legacy_w2_commit": "ce1c9a860816c697e465b717a803bccd43a7b7a7",
+    "legacy_w2_tree": "1a5dd1d0fae8f3d613f3616b9cb033e44c6d79aa"
+  },
+  "superseded_by": {
+    "source_ref": "refs/heads/codex/work2",
+    "baseline_role": "first_immutable_w2_baseline",
+    "commit": "ae488243e5533778575b94e53935914a36dcae46",
+    "tree": "b7a0d19a9b89c469ff0fa921b144a2c1426d3de9",
+    "closure_manifest": "WORK_CLOSURE_ARCHIVE.json"
+  },
+  "policy": {
+    "legacy_registry_must_not_be_updated": true,
+    "legacy_registry_must_not_be_migrated": true,
+    "legacy_schema_4_state_must_not_be_restored": true,
+    "future_review_requires_new_schema_5_execution": true
+  },
+  "statement": "This sidecar changes evidence classification only. It neither edits the historical registry nor grants runtime authority to it."
+}
