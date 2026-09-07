@@ -1,0 +1,9 @@
+interface:
+  display_name: Architecture to Plan
+  short_description: Create faithful plans from approved local architecture.
+policy:
+  products:
+  - chatgpt
+  - codex
+  - atlas
+  allow_implicit_invocation: true

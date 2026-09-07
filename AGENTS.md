@@ -8,6 +8,11 @@
 * 不得显示、复制或记录 `admin.conf` 的证书、私钥和连接信息。文件缺失或执行失败时直接报告，不得自动下载替代文件。
 * `K8S/admin.conf` 和 `K8S/kubectl.exe` 仅供本地执行，必须由 Git 忽略，不得提交到仓库。
 
+### 0.1 Python 解释器
+
+* Redemption 的 Python 默认固定为 `<repository_root>\.venv\Scripts\python.exe`，不得使用裸命令 `python`、`python3` 或 `py`。
+* 须确认其存在且 Python 不低于 3.10；失败即停止报告，不得自动回退。用户明确指定其他解释器时除外。
+
 ---
 
 ## 1. 适用范围
@@ -91,7 +96,7 @@
 
 ## 4. 项目 Skill 清单
 
-本项目目前包含以下三个主要 Skill。
+本项目目前包含以下四个主要 Skill。
 
 项目 Skill 根据主要 Agent 的自动发现机制分别存放：
 
@@ -208,11 +213,27 @@
 
 如果任务在审查后继续要求直接修复 Python 代码，则从进入实际代码修改阶段开始，必须加载并使用该 Skill。
 
+### 4.4 `architecture-to-plan`
+
+路径：
+
+* Codex：`.agents/skills/architecture-to-plan/SKILL.md`
+* Claude Code：`.claude/skills/architecture-to-plan/SKILL.md`
+
+两个目录保存同一技能的物理副本；任何更新都必须同步，并通过逐文件 SHA-256 校验确认内容一致。
+
+用途与要求：
+
+* 按用户已批准的本地架构和本地 Git 工作树生成实施计划；Codex 负责生成，Claude Code 按用户要求做只读独立审核。
+* 必须提供 `architecture_path` 和 `repository_root`；远程访问须用户明确授权。
+* 规划前须用仓库 `.venv` 的 Python 3.10+ 完成 fail-closed 基线捕获；Phase 1 获用户批准后才能进入 Phase 2。
+* Skill 不得覆盖本文件的指令和业务事实优先级，审核不得静默改写文件。
+
 ---
 
 ## 5. Skill 组合规则
 
-三个 Skill 可以根据任务需要组合使用。
+四个 Skill 可以根据任务需要组合使用。
 
 不得无条件加载所有 Skill。
 
@@ -337,6 +358,7 @@
    * 不得因此自行改变业务逻辑。
 10. 如果 Skill 引用了附加 reference、script 或其他依赖文件，只有在当前任务需要对应规则时才读取，不得为了形式无条件加载全部依赖。
 11. 如果实际仓库中的 Skill 名称、路径或 frontmatter 与本文件不一致，以实际文件为事实依据，并明确指出 `AGENTS.md` 需要同步更新。
+12. 使用 `architecture-to-plan` 时，Codex 和 Claude Code 对应目录中的 Skill 副本必须通过逐文件 SHA-256 一致性校验；不一致时停止规划或审核并先完成同步。
 
 ---
 
